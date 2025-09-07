@@ -85,9 +85,6 @@ async def handle_websocket_message(message: dict):
         # Test with dummy data
         await test_with_dummy_data()
     
-    elif msg_type == "refresh_cookies":
-        await state_manager.refresh_cookie_detection()
-    
     else:
         print(f"Unknown message type: {msg_type}")
 

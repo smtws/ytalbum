@@ -39,18 +39,12 @@ class AppStatus(str, Enum):
 
 
 class CookieInfo(BaseModel):
-    """Cookie detection and status information"""
+    """Cookie detection and status information (detected once on startup)"""
     browsers_detected: List[str] = Field(default_factory=list)
     recommended_browser: Optional[str] = None
     cookie_files_count: int = 0
     cookie_support_available: bool = False
-    last_detection: Optional[datetime] = None
     yt_dlp_compatible: bool = False
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class Config(BaseModel):

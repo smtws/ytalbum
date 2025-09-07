@@ -240,10 +240,3 @@ class StateManager:
             "results_found": self.state.total_found
         }
     
-    async def refresh_cookie_detection(self):
-        """Refresh cookie detection and update AppState"""
-        print("StateManager: Refreshing cookie detection...")
-        self.state.config.cookie_info = CookieService.detect_and_create_cookie_info()
-        self.state.update_timestamp()
-        await self.send_state()
-        print(f"StateManager: Cookie detection refreshed - {len(self.state.config.cookie_info.browsers_detected)} browsers detected")

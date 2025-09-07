@@ -255,7 +255,6 @@ class CookieService:
             recommended_browser=recommended_browser,
             cookie_files_count=sum(len(files) for files in found_cookies.values()),
             cookie_support_available=bool(recommended),
-            last_detection=datetime.utcnow(),
             yt_dlp_compatible=yt_dlp_compatible
         )
         

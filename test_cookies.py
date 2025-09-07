@@ -24,18 +24,10 @@ async def test_cookie_integration():
     print(f"Cookie files count: {cookie_info.cookie_files_count}")
     print(f"Cookie support available: {cookie_info.cookie_support_available}")
     print(f"yt-dlp compatible: {cookie_info.yt_dlp_compatible}")
-    print(f"Last detection: {cookie_info.last_detection}")
-    
-    print("\n=== Testing Cookie Refresh ===")
-    await state_manager.refresh_cookie_detection()
-    
-    # Check that timestamps updated
-    new_cookie_info = state_manager.state.config.cookie_info
-    print(f"New last detection: {new_cookie_info.last_detection}")
     
     print("\n=== Cookie Integration Test Complete ===")
     print("✅ Cookie detection successfully integrated into AppState!")
-    print("✅ Cookie refresh functionality working!")
+    print("✅ Cookie info detected once on startup (no refresh needed)!")
     print("✅ Cookie info available via WebSocket and health endpoint!")
 
 if __name__ == "__main__":
