@@ -11,6 +11,8 @@ from typing import Optional, List, Dict, Any, Callable
 from fastapi import WebSocket
 
 from .models import AppState, AppStatus, Result, SearchStatus
+from backend.services.youtube_deduplicator import YouTubeDeduplicator
+from backend.services.search.channel_search import ChannelSearchService
 
 
 class StateManager:
@@ -23,6 +25,11 @@ class StateManager:
         self.state = AppState()
         self.websockets: List[WebSocket] = []
         self.search_tasks: List[asyncio.Task] = []
+        
+        # Initialize search services
+        self.search_services = {
+            "channel_search": ChannelSearchService()
+        }
         
     async def add_websocket(self, websocket: WebSocket):
         """Add WebSocket connection"""
@@ -87,18 +94,56 @@ class StateManager:
         
         await self.send_state()
         
-        # TODO: Start all search services in parallel
-        print(f"StateManager: Would start {len(strategies)} search services")
+        # Start all search services in parallel
+        await self._start_search_services(strategies)
     
+    async def _start_search_services(self, strategies: List[str]):
+        """Start all requested search services in parallel"""
+        search_tasks = []
+        
+        for strategy in strategies:
+            if strategy in self.search_services:
+                task = asyncio.create_task(
+                    self._run_search_service(strategy, self.state.search_query)
+                )
+                search_tasks.append(task)
+                print(f"StateManager: Started search service: {strategy}")
+            else:
+                print(f"StateManager: Unknown search strategy: {strategy}")
+        
+        self.search_tasks = search_tasks
+    
+    async def _run_search_service(self, strategy_name: str, query: str):
+        """Run a single search service and process its results"""
+        try:
+            service = self.search_services[strategy_name]
+            results = await service.search(query)
+            
+            print(f"StateManager: {strategy_name} returned {len(results)} results")
+            
+            # Process each result through deduplication
+            added_count = 0
+            for result in results:
+                if YouTubeDeduplicator.should_add_result(result, self.state.results):
+                    success = self.state.add_result(result)
+                    if success:
+                        added_count += 1
+                        await self.send_state()  # Send update for each new result
+            
+            print(f"StateManager: {strategy_name} added {added_count}/{len(results)} unique results")
+            await self.search_strategy_completed(strategy_name, added_count)
+            
+        except Exception as e:
+            print(f"StateManager: Search service {strategy_name} failed: {e}")
+            await self.search_strategy_completed(strategy_name, 0)
+
     async def add_result(self, result: Result) -> bool:
         """
         Add new result ONLY after YouTube ID deduplication
         Returns True if added, False if duplicate
         """
-        # Check for YouTube ID duplicate
-        existing = self.state.get_result_by_youtube_id(result.youtube_id)
-        if existing:
-            print(f"StateManager: Rejected duplicate YouTube ID {result.youtube_id}")
+        # Check for YouTube ID duplicate using deduplicator
+        if not YouTubeDeduplicator.should_add_result(result, self.state.results):
             self.state.duplicates_removed += 1
             return False
         
