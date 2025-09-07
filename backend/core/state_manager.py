@@ -13,6 +13,12 @@ from fastapi import WebSocket
 from .models import AppState, AppStatus, Result, SearchStatus
 from backend.services.youtube_deduplicator import YouTubeDeduplicator
 from backend.services.search.channel_search import ChannelSearchService
+from backend.services.search.youtube_music_search import YouTubeMusicSearchService
+from backend.services.search.playlist_search import PlaylistSearchService
+from backend.services.search.google_search import GoogleSearchService
+from backend.services.search.direct_album_search import DirectAlbumSearchService
+from backend.services.search.genre_context_search import GenreContextSearchService
+from backend.services.search.alternative_title_search import AlternativeTitleSearchService
 from backend.services.cookie_service import CookieService
 
 
@@ -32,7 +38,13 @@ class StateManager:
         
         # Initialize search services
         self.search_services = {
-            "channel_search": ChannelSearchService()
+            "channel_search": ChannelSearchService(),
+            "youtube_music_search": YouTubeMusicSearchService(),
+            "playlist_search": PlaylistSearchService(),
+            "google_search": GoogleSearchService(),
+            "direct_album_search": DirectAlbumSearchService(),
+            "genre_context_search": GenreContextSearchService(),
+            "alternative_title_search": AlternativeTitleSearchService()
         }
         
     async def add_websocket(self, websocket: WebSocket):
@@ -121,7 +133,13 @@ class StateManager:
         """Run a single search service and process its results"""
         try:
             service = self.search_services[strategy_name]
-            results = await service.search(query)
+            
+            # Get cookie options from AppState (single source of truth)
+            cookie_options = {}
+            if self.state.config.cookie_info.yt_dlp_compatible and self.state.config.cookie_info.recommended_browser:
+                cookie_options["cookiesfrombrowser"] = (self.state.config.cookie_info.recommended_browser, None, None, None)
+            
+            results = await service.search(query, cookie_options=cookie_options)
             
             print(f"StateManager: {strategy_name} returned {len(results)} results")
             

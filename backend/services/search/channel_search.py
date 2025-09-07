@@ -13,7 +13,6 @@ from datetime import datetime
 
 from backend.core.models import Result
 from backend.services.youtube_deduplicator import YouTubeDeduplicator
-from backend.services.cookie_service import CookieService
 
 
 class ChannelSearchService:
@@ -24,15 +23,15 @@ class ChannelSearchService:
     
     def __init__(self):
         self.service_name = "channel_search"
-        self.cookie_options = CookieService.get_yt_dlp_cookie_options()
     
-    async def search(self, artist: str, album: Optional[str] = None) -> List[Result]:
+    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
         """
         Search for artist channels and extract album content
         
         Args:
             artist: Artist name to search for
             album: Optional specific album name
+            cookie_options: Cookie options from StateManager (single source of truth)
             
         Returns:
             List of Result objects (stateless - doesn't modify state)
@@ -42,14 +41,18 @@ class ChannelSearchService:
         
         results = []
         
+        # Use empty dict if no cookie options provided
+        if cookie_options is None:
+            cookie_options = {}
+        
         try:
             # Step 1: Find artist channels
-            channels = await self._find_artist_channels(artist)
+            channels = await self._find_artist_channels(artist, cookie_options)
             print(f"ChannelSearchService: Found {len(channels)} channels")
             
             # Step 2: Extract content from each channel
             for channel in channels:
-                channel_results = await self._extract_channel_content(channel, artist, album)
+                channel_results = await self._extract_channel_content(channel, artist, album, cookie_options)
                 results.extend(channel_results)
             
             print(f"ChannelSearchService: Found {len(results)} total results")
@@ -59,7 +62,7 @@ class ChannelSearchService:
         
         return results
     
-    async def _find_artist_channels(self, artist: str) -> List[Dict[str, str]]:
+    async def _find_artist_channels(self, artist: str, cookie_options: Dict[str, Any]) -> List[Dict[str, str]]:
         """
         Find YouTube channels for the artist
         
@@ -80,8 +83,8 @@ class ChannelSearchService:
             ]
             
             # Add cookie options
-            if "cookiesfrombrowser" in self.cookie_options:
-                browser_info = self.cookie_options["cookiesfrombrowser"]
+            if "cookiesfrombrowser" in cookie_options:
+                browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
             # Run command
@@ -122,7 +125,8 @@ class ChannelSearchService:
         return channels
     
     async def _extract_channel_content(self, channel: Dict[str, str], 
-                                     artist: str, album: Optional[str] = None) -> List[Result]:
+                                     artist: str, album: Optional[str] = None, 
+                                     cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
         """
         Extract album/playlist content from a channel
         
@@ -146,8 +150,8 @@ class ChannelSearchService:
             ]
             
             # Add cookie options
-            if "cookiesfrombrowser" in self.cookie_options:
-                browser_info = self.cookie_options["cookiesfrombrowser"]
+            if "cookiesfrombrowser" in cookie_options:
+                browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
             process = await asyncio.create_subprocess_exec(
@@ -168,7 +172,7 @@ class ChannelSearchService:
                         if self._is_album_playlist(playlist_data, album):
                             # Extract tracks from this playlist
                             playlist_results = await self._extract_playlist_tracks(
-                                playlist_data, artist, channel['title']
+                                playlist_data, artist, channel['title'], cookie_options
                             )
                             results.extend(playlist_results)
                             
@@ -181,7 +185,7 @@ class ChannelSearchService:
         return results
     
     async def _extract_playlist_tracks(self, playlist_data: Dict[str, Any], 
-                                     artist: str, channel: str) -> List[Result]:
+                                     artist: str, channel: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
         """
         Extract individual track results from a playlist
         """
@@ -200,8 +204,8 @@ class ChannelSearchService:
             ]
             
             # Add cookie options
-            if "cookiesfrombrowser" in self.cookie_options:
-                browser_info = self.cookie_options["cookiesfrombrowser"]
+            if "cookiesfrombrowser" in cookie_options:
+                browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
             process = await asyncio.create_subprocess_exec(
@@ -287,6 +291,6 @@ class ChannelSearchService:
         return {
             "name": self.service_name,
             "description": "Searches artist channels for albums and playlists",
-            "cookie_support": bool(self.cookie_options),
+            "cookie_support": bool(cookie_options),
             "status": "ready"
         }
