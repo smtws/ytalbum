@@ -164,6 +164,7 @@ class YouTubeMusicSearchService:
                 "--flat-playlist",
                 "--dump-json",
                 "--default-search", "ytsearch15:",  # Regular YouTube search, limit 15
+                "--match-filter", "duration > 600",  # Only videos longer than 10 minutes
                 query
             ]
             

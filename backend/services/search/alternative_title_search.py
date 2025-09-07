@@ -210,6 +210,7 @@ class AlternativeTitleSearchService:
                 "--flat-playlist",
                 "--dump-json",
                 "--default-search", f"ytsearch{limit}:",
+                "--match-filter", "duration > 600",  # Only videos longer than 10 minutes
                 query
             ]
             

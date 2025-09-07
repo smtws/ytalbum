@@ -39,7 +39,7 @@ class GenreContextSearchService:
     
     async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
         """
-        Search with genre context for better disambiguation
+        Optimized search with genre context and internal deduplication
         
         Args:
             artist: Artist name to search for
@@ -56,23 +56,30 @@ class GenreContextSearchService:
         if cookie_options is None:
             cookie_options = {}
         
-        
         results = []
         
         try:
-            # Strategy 1: Auto-detect genre and search with context
-            auto_genre_results = await self._search_with_auto_genre(artist, album, cookie_options)
-            results.extend(auto_genre_results)
+            # Strategy 1: Auto-detect genre and search ONLY detected genres (reduced scope)
+            detected_genres = await self._detect_artist_genre(artist, cookie_options)
             
-            # Strategy 2: Try multiple genre contexts (broad approach)
-            multi_genre_results = await self._search_multiple_genres(artist, album, cookie_options)
-            results.extend(multi_genre_results)
+            # Only use top 2 detected genres (reduced from all detected + 5 priority genres)
+            for genre in detected_genres[:2]:
+                genre_results = await self._search_with_specific_genre(
+                    artist, album, genre, cookie_options, limit=4  # Reduced from 8
+                )
+                results.extend(genre_results)
             
-            # Strategy 3: Search with music-specific terms
-            music_term_results = await self._search_with_music_terms(artist, album, cookie_options)
-            results.extend(music_term_results)
+            # Strategy 2: ONE focused search with best music term (not multiple strategies)
+            if len(results) < 20:  # Only if we need more results
+                music_term = "full album" if not album else "album"
+                query = f"{artist} {album if album else ''} {music_term}"
+                
+                term_results = await self._execute_search(
+                    query, artist, cookie_options, limit=5
+                )
+                results.extend(term_results)
             
-            print(f"GenreContextSearchService: Found {len(results)} total results")
+            print(f"GenreContextSearchService: Found {len(results)} results (optimized strategy)")
             
         except Exception as e:
             print(f"GenreContextSearchService: Search failed: {e}")
@@ -153,15 +160,13 @@ class GenreContextSearchService:
             
             if album:
                 queries = [
-                    f"{artist} {album} {primary_genre}",
-                    f"{artist} {album} {primary_genre} album",
-                    f"{primary_genre} {artist} {album}"
+                    f'"{artist}" "{album}" {primary_genre} -mix -compilation',
+                    f"{artist} {album} {primary_genre} full album"
                 ]
             else:
                 queries = [
-                    f"{artist} {primary_genre} album",
-                    f"{primary_genre} {artist} discography",
-                    f"{artist} {primary_genre} music"
+                    f'"{artist}" {primary_genre} album -mix -playlist',
+                    f"{artist} {primary_genre} discography -compilation"
                 ]
             
             for query in queries:

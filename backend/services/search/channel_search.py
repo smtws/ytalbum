@@ -46,16 +46,16 @@ class ChannelSearchService:
             cookie_options = {}
         
         try:
-            # Step 1: Find artist channels
+            # Step 1: Find artist channels (limit to top channels only)
             channels = await self._find_artist_channels(artist, cookie_options)
             print(f"ChannelSearchService: Found {len(channels)} channels")
             
-            # Step 2: Extract content from each channel
-            for channel in channels:
+            # Step 2: Extract content from channels (limit extraction scope)
+            for channel in channels[:3]:  # Limit to top 3 most relevant channels
                 channel_results = await self._extract_channel_content(channel, artist, album, cookie_options)
                 results.extend(channel_results)
             
-            print(f"ChannelSearchService: Found {len(results)} total results")
+            print(f"ChannelSearchService: Found {len(results)} total results (optimized strategy)")
             
         except Exception as e:
             print(f"ChannelSearchService: Search failed: {e}")
@@ -170,11 +170,21 @@ class ChannelSearchService:
                         playlist_data = json.loads(line)
                         
                         if self._is_album_playlist(playlist_data, album):
-                            # Extract tracks from this playlist
-                            playlist_results = await self._extract_playlist_tracks(
-                                playlist_data, artist, channel['title'], cookie_options
+                            # Return the playlist itself as a result (not individual tracks)
+                            result = YouTubeDeduplicator.prepare_result(
+                                url=playlist_data.get('webpage_url', ''),
+                                title=playlist_data.get('title', ''),
+                                artist=artist,
+                                channel=channel['title'],
+                                discovered_by=self.service_name,
+                                view_count=playlist_data.get('view_count'),
+                                duration=playlist_data.get('duration')
                             )
-                            results.extend(playlist_results)
+                            
+                            if result:
+                                # Higher quality score for channel-discovered playlists
+                                result.quality_score = 0.9
+                                results.append(result)
                             
                     except json.JSONDecodeError:
                         continue

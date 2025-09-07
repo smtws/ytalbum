@@ -20,6 +20,7 @@ from backend.services.search.direct_album_search import DirectAlbumSearchService
 from backend.services.search.genre_context_search import GenreContextSearchService
 from backend.services.search.alternative_title_search import AlternativeTitleSearchService
 from backend.services.cookie_service import CookieService
+from backend.services.availability_verification_service import AvailabilityVerificationService, VerificationCache
 
 
 class StateManager:
@@ -46,6 +47,10 @@ class StateManager:
             "genre_context_search": GenreContextSearchService(),
             "alternative_title_search": AlternativeTitleSearchService()
         }
+        
+        # Initialize availability verification service with cache
+        self.availability_service = AvailabilityVerificationService()
+        self.verification_cache = VerificationCache(cache_duration_minutes=30)
         
     async def add_websocket(self, websocket: WebSocket):
         """Add WebSocket connection"""
@@ -143,14 +148,20 @@ class StateManager:
             
             print(f"StateManager: {strategy_name} returned {len(results)} results")
             
-            # Process each result through deduplication
+            # Process each result through deduplication AND verification
             added_count = 0
             for result in results:
                 if YouTubeDeduplicator.should_add_result(result, self.state.results):
-                    success = self.state.add_result(result)
-                    if success:
-                        added_count += 1
-                        await self.send_state()  # Send update for each new result
+                    # Check availability BEFORE adding to state
+                    is_available = await self._check_availability_before_adding(result, cookie_options)
+                    
+                    if is_available:
+                        success = self.state.add_result(result)
+                        if success:
+                            added_count += 1
+                            await self.send_state()  # Send update for each new result
+                    else:
+                        print(f"StateManager: Skipping unavailable result: {result.title}")
             
             print(f"StateManager: {strategy_name} added {added_count}/{len(results)} unique results")
             await self.search_strategy_completed(strategy_name, added_count)
@@ -217,12 +228,151 @@ class StateManager:
         
         await self.send_state()
     
+    async def _check_availability_before_adding(self, result: Result, cookie_options: Dict) -> bool:
+        """
+        Check if result is available before adding to AppState
+        Uses cache for efficiency
+        Does NOT modify result.verified (that's for metadata verification)
+        """
+        # Check cache first
+        cached = self.verification_cache.get(result.youtube_url)
+        
+        if cached is not None:
+            is_available, error_msg = cached
+            return is_available
+        
+        # Not in cache, verify now
+        is_available, error_msg = await self.availability_service.verify_availability(
+            result.youtube_url,
+            cookie_options
+        )
+        
+        # Cache the result
+        self.verification_cache.set(result.youtube_url, is_available, error_msg)
+        
+        return is_available
+    
     async def search_completed(self):
         """All search strategies completed"""
-        self.state.status = AppStatus.VERIFYING
+        self.state.status = AppStatus.IDLE  # No need for separate verification phase
         print(f"StateManager: Search completed. Found {self.state.total_found} results")
         
-        # TODO: Start verification process
+        # All results are already verified during addition
+        stats = self.state.get_statistics()
+        print(f"StateManager: All results pre-verified - "
+              f"{stats['verified']} available, {stats['unverified']} skipped")
+        
+        await self.send_state()
+    
+    async def verify_all_results(self):
+        """Verify availability of all results using cache and batch verification"""
+        print(f"StateManager: Starting verification of {len(self.state.results)} results")
+        
+        # Get cookie options for verification
+        cookie_options = {}
+        if self.state.config.cookie_info.yt_dlp_compatible and self.state.config.cookie_info.recommended_browser:
+            cookie_options["cookiesfrombrowser"] = (self.state.config.cookie_info.recommended_browser, None, None, None)
+        
+        # Separate results that need verification
+        to_verify = []
+        verified_from_cache = 0
+        
+        for result in self.state.results:
+            # Check cache first
+            cached = self.verification_cache.get(result.youtube_url)
+            
+            if cached is not None:
+                is_available, error_msg = cached
+                if is_available:
+                    result.status = SearchStatus.VERIFIED
+                else:
+                    result.status = SearchStatus.UNVERIFIED
+                    result.error_message = error_msg
+                verified_from_cache += 1
+            else:
+                # Needs verification
+                to_verify.append(result)
+        
+        print(f"StateManager: {verified_from_cache} results verified from cache, "
+              f"{len(to_verify)} need verification")
+        
+        if to_verify:
+            # Batch verify remaining results
+            verification_results = await self.availability_service.verify_batch(
+                to_verify, 
+                cookie_options,
+                max_concurrent=10  # Verify up to 10 URLs concurrently
+            )
+            
+            # Update results and cache
+            for result in to_verify:
+                if result.id in verification_results:
+                    is_available, error_msg = verification_results[result.id]
+                    
+                    # Update result status
+                    if is_available:
+                        result.status = SearchStatus.VERIFIED
+                    else:
+                        result.status = SearchStatus.UNVERIFIED
+                        result.error_message = error_msg
+                    
+                    # Update cache
+                    self.verification_cache.set(result.youtube_url, is_available, error_msg)
+                else:
+                    # Verification failed
+                    result.status = SearchStatus.FAILED
+        
+        # Update statistics
+        self._update_verification_stats()
+        
+        # Set status back to idle
+        self.state.status = AppStatus.IDLE
+        
+        # Log final stats
+        stats = self.state.get_statistics()
+        print(f"StateManager: Verification complete - "
+              f"{stats['verified']} verified, {stats['unverified']} unavailable")
+        
+        # Send final state update
+        await self.send_state()
+    
+    async def verify_single_result(self, result_id: str):
+        """Verify a single result by ID"""
+        result = self.state.get_result_by_id(result_id)
+        if not result:
+            return
+        
+        # Check cache first
+        cached = self.verification_cache.get(result.youtube_url)
+        
+        if cached is not None:
+            is_available, error_msg = cached
+            print(f"StateManager: Using cached verification for {result.title}")
+        else:
+            # Get cookie options
+            cookie_options = {}
+            if self.state.config.cookie_info.yt_dlp_compatible and self.state.config.cookie_info.recommended_browser:
+                cookie_options["cookiesfrombrowser"] = (self.state.config.cookie_info.recommended_browser, None, None, None)
+            
+            # Verify URL
+            is_available, error_msg = await self.availability_service.verify_availability(
+                result.youtube_url,
+                cookie_options
+            )
+            
+            # Update cache
+            self.verification_cache.set(result.youtube_url, is_available, error_msg)
+        
+        # Update result
+        if is_available:
+            result.status = SearchStatus.VERIFIED
+            result.error_message = None
+        else:
+            result.status = SearchStatus.UNVERIFIED
+            result.error_message = error_msg
+        
+        # Update statistics and send state
+        self._update_verification_stats()
         await self.send_state()
     
     def _update_verification_stats(self):

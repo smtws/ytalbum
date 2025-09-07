@@ -20,16 +20,27 @@ class YouTubeDeduplicator:
     @staticmethod
     def extract_youtube_id(url: str) -> Optional[str]:
         """
-        Extract YouTube video ID from various YouTube URL formats
+        Extract YouTube video or playlist ID from various YouTube URL formats
         
         Supported formats:
-        - https://www.youtube.com/watch?v=dQw4w9WgXcQ
-        - https://youtu.be/dQw4w9WgXcQ
-        - https://youtube.com/watch?v=dQw4w9WgXcQ
-        - https://m.youtube.com/watch?v=dQw4w9WgXcQ
+        - https://www.youtube.com/watch?v=dQw4w9WgXcQ (video)
+        - https://youtu.be/dQw4w9WgXcQ (video)
+        - https://youtube.com/watch?v=dQw4w9WgXcQ (video)
+        - https://m.youtube.com/watch?v=dQw4w9WgXcQ (video)
+        - https://www.youtube.com/playlist?list=PLxxxxxxxxx (playlist)
         """
         if not url:
             return None
+        
+        # Handle playlist URLs - our primary target format
+        if "youtube.com/playlist" in url:
+            parsed = urlparse(url)
+            query_params = parse_qs(parsed.query)
+            if 'list' in query_params:
+                playlist_id = query_params['list'][0]
+                # YouTube playlist IDs are typically 34 characters starting with PL
+                if len(playlist_id) >= 10:  # Allow various playlist ID lengths
+                    return f"playlist:{playlist_id}"  # Prefix to distinguish from video IDs
         
         # Handle youtu.be short links
         if "youtu.be/" in url:
