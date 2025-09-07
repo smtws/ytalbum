@@ -71,10 +71,11 @@ class AppState:
 - Handles state transitions
 
 Key methods:
-- `start_search(query)` - Resets results, starts search services
-- `add_result(item)` - Adds new result with verified=null
+- `start_search(query)` - Resets results, starts ALL search services in parallel
+- `add_result(item)` - Adds new result (only after YouTube ID deduplication)
 - `update_result(id, metadata)` - Updates result with verification data
-- `remove_result(id)` - Removes duplicate/low-quality result
+- `validate_result(item)` - Uses Quality Manager to validate URL accessibility
+- `remove_result(id)` - Removes duplicate/low-quality/invalid result
 - `send_state()` - Sends complete AppState to frontend
 
 ### 1.3 Result Object (`/backend/core/models.py`)
@@ -102,17 +103,20 @@ class Result:
 ## Phase 2: Services (Stateless Workers)
 
 ### 2.1 Search Services (`/backend/services/search/`)
-Each strategy is a separate service that:
+Each strategy is a separate service that runs in parallel:
 - Receives: artist name, optional album
 - Returns: List[Result] with verified=None
 - Does NOT send WebSocket updates
 - Does NOT modify state
 
-Services:
+Services (all original search strategies as separate services):
 - `channel_search.py` - Find artist channels
 - `youtube_music_search.py` - Direct YT Music search
 - `playlist_search.py` - Find playlists
 - `google_search.py` - Google for YouTube links
+- `direct_album_search.py` - Direct artist + album search
+- `genre_context_search.py` - Search with genre context
+- `alternative_title_search.py` - Search with alternative titles
 
 ### 2.2 Verification Services (`/backend/services/verification/`)
 - Receives: Result object
@@ -120,15 +124,26 @@ Services:
 - Does NOT modify the Result directly
 
 Services:
-- `musicbrainz_verifier.py` - Check against MusicBrainz
+- `musicbrainz_verifier.py` - Check against MusicBrainz (initial implementation)
 - `spotify_verifier.py` - (Future) Spotify verification
 - `lastfm_verifier.py` - (Future) Last.fm verification
+- `discogs_verifier.py` - (Future) Discogs verification
 
-### 2.3 Quality Manager (`/backend/services/quality_manager.py`)
+### 2.3 Deduplication & Quality Services (`/backend/services/`)
+
+#### 2.3.1 YouTube ID Deduplicator (`youtube_deduplicator.py`)
+- Receives: new_result, existing_results
+- Returns: Decision (add_new, reject_duplicate)
+- Filters out YouTube ID duplicates BEFORE verification
+- Prevents duplicate results from entering the AppState
+
+#### 2.3.2 Quality Manager (`quality_manager.py`)
 - Receives: new_result, existing_results
 - Returns: Decision (keep_new, replace_id, reject)
-- Handles deduplication logic
+- Handles quality-based deduplication
 - Calculates quality scores
+- Validates YouTube URLs are still accessible (HTTP request)
+- Used after verification for quality comparison and URL validation
 
 ### 2.4 Download Services (`/backend/services/download/`)
 - `downloader.py` - yt-dlp wrapper
@@ -202,7 +217,8 @@ export const useAppStore = defineStore('app', {
 5. **No Partial Updates**: Replace entire state on frontend
 6. **Verified is Tri-State**: null (pending), true, false
 7. **Order Matters**: Results list maintains discovery order
-8. **Quality Decides**: QualityManager handles all deduplication
+8. **YouTube ID First**: Deduplicate on YouTube ID before verification
+9. **Quality Decides**: QualityManager handles quality-based deduplication after verification
 
 ## Benefits
 
