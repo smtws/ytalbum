@@ -171,14 +171,27 @@ class ChannelSearchService:
                         
                         if self._is_album_playlist(playlist_data, album):
                             # Return the playlist itself as a result (not individual tracks)
+                            # Extract thumbnail URL (prefer best quality)
+                            thumbnail_url = None
+                            if 'thumbnail' in playlist_data:
+                                thumbnail_url = playlist_data['thumbnail']
+                            elif 'thumbnails' in playlist_data and playlist_data['thumbnails']:
+                                thumbnail_url = playlist_data['thumbnails'][-1].get('url')  # Last is usually best quality
+
+                            # Extract track count (playlist_count for playlists, 1 for single videos >10min)
+                            track_count = playlist_data.get('playlist_count')
+                            if track_count is None:
+                                # Single video that passed duration filter (>10min) - assume 1 track
+                                track_count = 1
+
                             result = YouTubeDeduplicator.prepare_result(
                                 url=playlist_data.get('webpage_url', ''),
                                 title=playlist_data.get('title', ''),
                                 artist=artist,
                                 channel=channel['title'],
                                 discovered_by=self.service_name,
-                                view_count=playlist_data.get('view_count'),
-                                duration=playlist_data.get('duration')
+                                thumbnail_url=thumbnail_url,
+                                track_count=track_count
                             )
                             
                             if result:
@@ -234,14 +247,27 @@ class ChannelSearchService:
                         track_data = json.loads(line)
                         
                         # Create Result object
+                        # Extract thumbnail URL (prefer best quality)
+                        thumbnail_url = None
+                        if 'thumbnail' in track_data:
+                            thumbnail_url = track_data['thumbnail']
+                        elif 'thumbnails' in track_data and track_data['thumbnails']:
+                            thumbnail_url = track_data['thumbnails'][-1].get('url')  # Last is usually best quality
+
+                        # Extract track count (playlist_count for playlists, 1 for single videos >10min)
+                        track_count = track_data.get('playlist_count')
+                        if track_count is None:
+                            # Single video that passed duration filter (>10min) - assume 1 track
+                            track_count = 1
+
                         result = YouTubeDeduplicator.prepare_result(
                             url=track_data.get('webpage_url', ''),
                             title=track_data.get('title', ''),
                             artist=artist,
                             channel=channel,
                             discovered_by=self.service_name,
-                            view_count=track_data.get('view_count'),
-                            duration=track_data.get('duration')
+                            thumbnail_url=thumbnail_url,
+                            track_count=track_count
                         )
                         
                         if result:

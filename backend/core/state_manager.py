@@ -151,8 +151,26 @@ class StateManager:
             # Process each result through deduplication AND verification
             added_count = 0
             for result in results:
-                if YouTubeDeduplicator.should_add_result(result, self.state.results):
-                    # Check availability BEFORE adding to state
+                dedup_result = YouTubeDeduplicator.should_add_result(result, self.state.results)
+                
+                if dedup_result == "replace":
+                    # Better quality duplicate found - replace existing
+                    is_available = await self._check_availability_before_adding(result, cookie_options)
+                    
+                    if is_available:
+                        # Find and replace the existing result
+                        existing = YouTubeDeduplicator.find_duplicate(result, self.state.results)
+                        if existing:
+                            # Replace existing result with better quality one
+                            existing_index = self.state.results.index(existing)
+                            self.state.results[existing_index] = result
+                            print(f"StateManager: Replaced {result.youtube_id} with better metadata")
+                            await self.send_state()
+                    else:
+                        print(f"StateManager: Better quality duplicate unavailable: {result.title}")
+                        
+                elif dedup_result == True:
+                    # Unique result - add normally
                     is_available = await self._check_availability_before_adding(result, cookie_options)
                     
                     if is_available:
@@ -162,6 +180,8 @@ class StateManager:
                             await self.send_state()  # Send update for each new result
                     else:
                         print(f"StateManager: Skipping unavailable result: {result.title}")
+                
+                # If dedup_result == False, skip (existing duplicate is better)
             
             print(f"StateManager: {strategy_name} added {added_count}/{len(results)} unique results")
             await self.search_strategy_completed(strategy_name, added_count)
@@ -257,6 +277,17 @@ class StateManager:
         self.state.status = AppStatus.IDLE  # No need for separate verification phase
         print(f"StateManager: Search completed. Found {self.state.total_found} results")
         
+        # Filter out single tracks (keep only multi-track albums/playlists)
+        initial_count = len(self.state.results)
+        multi_track_results = [r for r in self.state.results if r.track_count is None or r.track_count > 1]
+        single_track_count = initial_count - len(multi_track_results)
+        
+        if single_track_count > 0:
+            self.state.results = multi_track_results
+            self.state.total_found = len(multi_track_results)
+            print(f"StateManager: Filtered out {single_track_count} single tracks, "
+                  f"kept {len(multi_track_results)} multi-track results")
+        
         # All results are already verified during addition
         stats = self.state.get_statistics()
         print(f"StateManager: All results pre-verified - "
@@ -284,10 +315,9 @@ class StateManager:
             if cached is not None:
                 is_available, error_msg = cached
                 if is_available:
-                    result.status = SearchStatus.VERIFIED
+                    pass  # Result is available - no action needed
                 else:
-                    result.status = SearchStatus.UNVERIFIED
-                    result.error_message = error_msg
+                    pass  # Result unavailable - cache tracks this
                 verified_from_cache += 1
             else:
                 # Needs verification
@@ -309,18 +339,17 @@ class StateManager:
                 if result.id in verification_results:
                     is_available, error_msg = verification_results[result.id]
                     
-                    # Update result status
+                    # Availability tracked in cache only
                     if is_available:
-                        result.status = SearchStatus.VERIFIED
+                        pass  # Result is available
                     else:
-                        result.status = SearchStatus.UNVERIFIED
-                        result.error_message = error_msg
+                        pass  # Result unavailable
                     
                     # Update cache
                     self.verification_cache.set(result.youtube_url, is_available, error_msg)
                 else:
-                    # Verification failed
-                    result.status = SearchStatus.FAILED
+                    # Verification failed - tracked in cache
+                    pass
         
         # Update statistics
         self._update_verification_stats()
@@ -365,10 +394,10 @@ class StateManager:
         
         # Update result
         if is_available:
-            result.status = SearchStatus.VERIFIED
+            pass  # Available - tracked in cache
             result.error_message = None
         else:
-            result.status = SearchStatus.UNVERIFIED
+            pass  # Unavailable - tracked in cache
             result.error_message = error_msg
         
         # Update statistics and send state

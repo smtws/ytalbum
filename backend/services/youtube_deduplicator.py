@@ -126,6 +126,7 @@ class YouTubeDeduplicator:
     def should_add_result(new_result: Result, existing_results: List[Result]) -> bool:
         """
         Determine if new result should be added (not a duplicate)
+        Prioritizes results with better metadata (higher track count, thumbnails)
         
         Args:
             new_result: New result to check
@@ -138,14 +139,63 @@ class YouTubeDeduplicator:
             print(f"YouTubeDeduplicator: Rejecting result without YouTube ID: {new_result.title}")
             return False
         
-        is_duplicate = YouTubeDeduplicator.check_duplicate(new_result, existing_results)
+        # Check for exact duplicate
+        existing_duplicate = YouTubeDeduplicator.find_duplicate(new_result, existing_results)
         
-        if is_duplicate:
-            print(f"YouTubeDeduplicator: Rejecting duplicate {new_result.youtube_id} - {new_result.title}")
-            return False
+        if existing_duplicate:
+            # Compare metadata quality to decide which to keep
+            new_is_better = YouTubeDeduplicator._is_better_quality(new_result, existing_duplicate)
+            
+            if new_is_better:
+                print(f"YouTubeDeduplicator: Found duplicate {new_result.youtube_id} - {new_result.title}")
+                print(f"YouTubeDeduplicator: New result has better metadata - SHOULD REPLACE existing")
+                return "replace"  # Special return value for replacement
+            else:
+                print(f"YouTubeDeduplicator: Rejecting duplicate {new_result.youtube_id} - existing has better metadata")
+                return False
         
         print(f"YouTubeDeduplicator: Accepting unique result {new_result.youtube_id} - {new_result.title}")
         return True
+    
+    @staticmethod
+    def find_duplicate(new_result: Result, existing_results: List[Result]) -> Optional[Result]:
+        """Find existing duplicate result by YouTube ID"""
+        for existing in existing_results:
+            if existing.youtube_id == new_result.youtube_id:
+                return existing
+        return None
+    
+    @staticmethod
+    def _is_better_quality(new_result: Result, existing_result: Result) -> bool:
+        """
+        Compare metadata quality between two results
+        Returns True if new_result has better quality metadata
+        """
+        new_score = 0
+        existing_score = 0
+        
+        # Track count comparison (higher is better)
+        new_tracks = new_result.track_count or 0
+        existing_tracks = existing_result.track_count or 0
+        
+        if new_tracks > existing_tracks:
+            new_score += 3
+        elif existing_tracks > new_tracks:
+            existing_score += 3
+        
+        # Thumbnail availability (having thumbnail is better)
+        if new_result.thumbnail_url and not existing_result.thumbnail_url:
+            new_score += 2
+        elif existing_result.thumbnail_url and not new_result.thumbnail_url:
+            existing_score += 2
+        
+        # Quality score comparison
+        if new_result.quality_score > existing_result.quality_score:
+            new_score += 1
+        elif existing_result.quality_score > new_result.quality_score:
+            existing_score += 1
+        
+        return new_score > existing_score
     
     @staticmethod
     def get_statistics(results: List[Result]) -> dict:

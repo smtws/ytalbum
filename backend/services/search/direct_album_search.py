@@ -203,14 +203,27 @@ class DirectAlbumSearchService:
                     try:
                         data = json.loads(line)
                         
+                        # Extract thumbnail URL (prefer best quality)
+                        thumbnail_url = None
+                        if 'thumbnail' in data:
+                            thumbnail_url = data['thumbnail']
+                        elif 'thumbnails' in data and data['thumbnails']:
+                            thumbnail_url = data['thumbnails'][-1].get('url')  # Last is usually best quality
+                        
+                        # Extract track count (playlist_count for playlists, 1 for single videos >10min)
+                        track_count = data.get('playlist_count')
+                        if track_count is None:
+                            # Single video that passed duration filter (>10min) - assume 1 track
+                            track_count = 1
+                        
                         result = YouTubeDeduplicator.prepare_result(
                             url=data.get('webpage_url', ''),
                             title=data.get('title', ''),
                             artist=artist,
                             channel=data.get('uploader', 'Unknown'),
                             discovered_by=self.service_name,
-                            view_count=data.get('view_count'),
-                            duration=data.get('duration')
+                            thumbnail_url=thumbnail_url,
+                            track_count=track_count
                         )
                         
                         if result:

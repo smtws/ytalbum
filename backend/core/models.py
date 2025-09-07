@@ -76,8 +76,8 @@ class Result(BaseModel):
     
     # Quality metrics
     quality_score: float = 0.0
-    view_count: Optional[int] = None
-    duration: Optional[int] = None  # seconds
+    thumbnail_url: Optional[str] = None
+    track_count: Optional[int] = None  # playlist_count for playlists, chapter_count for videos
     
     # Discovery metadata
     discovered_at: datetime = Field(default_factory=datetime.utcnow)
