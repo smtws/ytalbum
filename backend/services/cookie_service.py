@@ -7,7 +7,10 @@ Detects and manages cookies for yt-dlp to work properly with age-restricted/priv
 import os
 import json
 from pathlib import Path
+from datetime import datetime
 from typing import Optional, List, Dict, Any
+
+from backend.core.models import CookieInfo
 
 
 class CookieService:
@@ -219,3 +222,45 @@ class CookieService:
             "cookie_support_available": bool(recommended),
             "details": found_cookies
         }
+    
+    @staticmethod
+    def detect_and_create_cookie_info() -> CookieInfo:
+        """
+        Detect cookies and create CookieInfo object for AppState
+        
+        Returns:
+            CookieInfo object with current detection results
+        """
+        found_cookies = CookieService.find_cookie_files()
+        recommended = CookieService.get_recommended_cookie_file()
+        cookie_options = CookieService.get_yt_dlp_cookie_options()
+        
+        # Determine recommended browser from file path
+        recommended_browser = None
+        if recommended:
+            for browser, paths in CookieService.COOKIE_PATHS.items():
+                for path_template in paths:
+                    expanded = os.path.expanduser(os.path.expandvars(path_template))
+                    if "*" not in expanded and recommended == expanded:
+                        recommended_browser = browser
+                        break
+                if recommended_browser:
+                    break
+        
+        # Test yt-dlp compatibility
+        yt_dlp_compatible = bool(cookie_options)
+        
+        cookie_info = CookieInfo(
+            browsers_detected=list(found_cookies.keys()),
+            recommended_browser=recommended_browser,
+            cookie_files_count=sum(len(files) for files in found_cookies.values()),
+            cookie_support_available=bool(recommended),
+            last_detection=datetime.utcnow(),
+            yt_dlp_compatible=yt_dlp_compatible
+        )
+        
+        print(f"CookieService: Detected {len(found_cookies)} browsers with {cookie_info.cookie_files_count} cookie files")
+        if recommended_browser:
+            print(f"CookieService: Recommended browser: {recommended_browser}")
+        
+        return cookie_info

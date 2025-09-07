@@ -38,6 +38,21 @@ class AppStatus(str, Enum):
     PROCESSING = "processing"
 
 
+class CookieInfo(BaseModel):
+    """Cookie detection and status information"""
+    browsers_detected: List[str] = Field(default_factory=list)
+    recommended_browser: Optional[str] = None
+    cookie_files_count: int = 0
+    cookie_support_available: bool = False
+    last_detection: Optional[datetime] = None
+    yt_dlp_compatible: bool = False
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
 class Config(BaseModel):
     """Application configuration"""
     output_directory: str = "/home/tordt/Downloads/YT-Music"
@@ -46,6 +61,9 @@ class Config(BaseModel):
     max_parallel_downloads: int = 3
     remove_intro_outro: bool = True
     debug: bool = False
+    
+    # Cookie configuration
+    cookie_info: CookieInfo = Field(default_factory=CookieInfo)
 
 
 class Result(BaseModel):

@@ -10,8 +10,8 @@ from fastapi.responses import FileResponse
 import json
 import os
 
-from core.state_manager import StateManager
-from core.models import Result
+from backend.core.state_manager import StateManager
+from backend.core.models import Result
 
 # Initialize FastAPI app
 app = FastAPI(title="YouTube Music Downloader")
@@ -85,6 +85,9 @@ async def handle_websocket_message(message: dict):
         # Test with dummy data
         await test_with_dummy_data()
     
+    elif msg_type == "refresh_cookies":
+        await state_manager.refresh_cookie_detection()
+    
     else:
         print(f"Unknown message type: {msg_type}")
 
@@ -141,11 +144,18 @@ async def test_with_dummy_data():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    cookie_info = state_manager.state.config.cookie_info
     return {
         "status": "healthy",
         "connected_clients": len(state_manager.websockets),
         "current_state": state_manager.state.status,
-        "results_count": state_manager.get_result_count()
+        "results_count": state_manager.get_result_count(),
+        "cookie_support": {
+            "browsers_detected": cookie_info.browsers_detected,
+            "recommended_browser": cookie_info.recommended_browser,
+            "cookie_support_available": cookie_info.cookie_support_available,
+            "yt_dlp_compatible": cookie_info.yt_dlp_compatible
+        }
     }
 
 if __name__ == "__main__":

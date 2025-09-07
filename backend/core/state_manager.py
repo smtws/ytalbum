@@ -13,6 +13,7 @@ from fastapi import WebSocket
 from .models import AppState, AppStatus, Result, SearchStatus
 from backend.services.youtube_deduplicator import YouTubeDeduplicator
 from backend.services.search.channel_search import ChannelSearchService
+from backend.services.cookie_service import CookieService
 
 
 class StateManager:
@@ -25,6 +26,9 @@ class StateManager:
         self.state = AppState()
         self.websockets: List[WebSocket] = []
         self.search_tasks: List[asyncio.Task] = []
+        
+        # Detect and store cookie information
+        self.state.config.cookie_info = CookieService.detect_and_create_cookie_info()
         
         # Initialize search services
         self.search_services = {
@@ -235,3 +239,11 @@ class StateManager:
             "current_status": self.state.status,
             "results_found": self.state.total_found
         }
+    
+    async def refresh_cookie_detection(self):
+        """Refresh cookie detection and update AppState"""
+        print("StateManager: Refreshing cookie detection...")
+        self.state.config.cookie_info = CookieService.detect_and_create_cookie_info()
+        self.state.update_timestamp()
+        await self.send_state()
+        print(f"StateManager: Cookie detection refreshed - {len(self.state.config.cookie_info.browsers_detected)} browsers detected")
