@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Callable
 from fastapi import WebSocket
 
-from .models import AppState, AppStatus, Result, SearchStatus
+from .models import AppState, AppStatus, Result, SearchStatus, CurrentState
 from backend.services.youtube_deduplicator import YouTubeDeduplicator
 from backend.services.search.channel_search import ChannelSearchService
 from backend.services.search.youtube_music_search import YouTubeMusicSearchService
@@ -21,6 +21,7 @@ from backend.services.search.genre_context_search import GenreContextSearchServi
 from backend.services.search.alternative_title_search import AlternativeTitleSearchService
 from backend.services.cookie_service import CookieService
 from backend.services.availability_verification_service import AvailabilityVerificationService, VerificationCache
+from backend.services.normalization_service import NormalizationService
 
 
 class StateManager:
@@ -51,6 +52,9 @@ class StateManager:
         # Initialize availability verification service with cache
         self.availability_service = AvailabilityVerificationService()
         self.verification_cache = VerificationCache(cache_duration_minutes=30)
+        
+        # Track normalization tasks for race condition handling
+        self.normalization_tasks: Dict[str, asyncio.Task] = {}  # youtube_id -> task
         
     async def add_websocket(self, websocket: WebSocket):
         """Add WebSocket connection"""
@@ -107,13 +111,18 @@ class StateManager:
         self.state.status = AppStatus.SEARCHING
         self.state.update_timestamp()
         
+        # Reset activity tracking
+        self.state.current_state = CurrentState()
+        self.state.current_state.strategies_total = len(strategies)
+        
         # Cancel any existing search tasks
         for task in self.search_tasks:
             if not task.done():
                 task.cancel()
         self.search_tasks = []
         
-        await self.send_state()
+        # Set initial activity
+        await self._update_activity(f"Starting search for '{query}'...")
         
         # Start all search services in parallel
         await self._start_search_services(strategies)
@@ -137,6 +146,9 @@ class StateManager:
     async def _run_search_service(self, strategy_name: str, query: str):
         """Run a single search service and process its results"""
         try:
+            # Start strategy tracking
+            await self._start_strategy(strategy_name)
+            
             service = self.search_services[strategy_name]
             
             # Get cookie options from AppState (single source of truth)
@@ -161,13 +173,20 @@ class StateManager:
                         # Find and replace the existing result
                         existing = YouTubeDeduplicator.find_duplicate(result, self.state.results)
                         if existing:
+                            # Merge with existing metadata before replacing
+                            result = YouTubeDeduplicator.merge_with_existing_metadata(result, existing)
+                            
                             # Replace existing result with better quality one
                             existing_index = self.state.results.index(existing)
                             self.state.results[existing_index] = result
                             print(f"StateManager: Replaced {result.youtube_id} with better metadata")
-                            await self.send_state()
+                            
+                            # Track the found item (replacement)
+                            await self._increment_found(result.title, result.artist)
+                            # Trigger normalization if needed
+                            await self._trigger_normalization_if_needed(result)
                     else:
-                        print(f"StateManager: Better quality duplicate unavailable: {result.title}")
+                        await self._increment_failed(result.title, "unavailable")
                         
                 elif dedup_result == True:
                     # Unique result - add normally
@@ -177,17 +196,22 @@ class StateManager:
                         success = self.state.add_result(result)
                         if success:
                             added_count += 1
-                            await self.send_state()  # Send update for each new result
+                            # Track the found item
+                            await self._increment_found(result.title, result.artist)
+                            # Trigger normalization for albums/playlists
+                            await self._trigger_normalization_if_needed(result)
                     else:
-                        print(f"StateManager: Skipping unavailable result: {result.title}")
+                        await self._increment_failed(result.title, "unavailable")
                 
                 # If dedup_result == False, skip (existing duplicate is better)
             
             print(f"StateManager: {strategy_name} added {added_count}/{len(results)} unique results")
+            await self._complete_strategy(strategy_name, added_count)
             await self.search_strategy_completed(strategy_name, added_count)
             
         except Exception as e:
             print(f"StateManager: Search service {strategy_name} failed: {e}")
+            await self._increment_failed(strategy_name, str(e))
             await self.search_strategy_completed(strategy_name, 0)
 
     async def add_result(self, result: Result) -> bool:
@@ -293,7 +317,18 @@ class StateManager:
         print(f"StateManager: All results pre-verified - "
               f"{stats['verified']} available, {stats['unverified']} skipped")
         
-        await self.send_state()
+        # Set final status and activity
+        await self._set_search_status()  # Reset all flags
+        
+        total_items = len(self.state.results)
+        normalized_items = self.state.current_state.items_normalized
+        
+        if total_items == 0:
+            await self._update_activity("Search completed - no results found")
+        elif normalized_items > 0:
+            await self._update_activity(f"Search completed - found {total_items} items, normalized {normalized_items}")
+        else:
+            await self._update_activity(f"Search completed - found {total_items} items")
     
     async def verify_all_results(self):
         """Verify availability of all results using cache and batch verification"""
@@ -436,4 +471,171 @@ class StateManager:
             "current_status": self.state.status,
             "results_found": self.state.total_found
         }
+    
+    async def _trigger_normalization_if_needed(self, result: Result):
+        """
+        Trigger normalization for albums/playlists (track_count > 1)
+        Handles race conditions and replacement scenarios
+        """
+        # Only normalize albums/playlists, not single tracks
+        track_count = result.track_count or 0
+        if track_count <= 1:
+            return
+        
+        # Check if already has normalization data
+        if result.verification_metadata and 'normalized_title' in result.verification_metadata:
+            print(f"StateManager: Result {result.youtube_id} already has normalization data")
+            return
+        
+        # Cancel any existing normalization task for this YouTube ID
+        if result.youtube_id in self.normalization_tasks:
+            existing_task = self.normalization_tasks[result.youtube_id]
+            if not existing_task.done():
+                existing_task.cancel()
+                print(f"StateManager: Cancelled previous normalization for {result.youtube_id}")
+        
+        # Start normalization task
+        task = asyncio.create_task(self._normalize_result(result))
+        self.normalization_tasks[result.youtube_id] = task
+    
+    async def _normalize_result(self, result: Result):
+        """
+        Normalize a result asynchronously
+        Handles race conditions where result might be replaced during normalization
+        """
+        try:
+            youtube_id = result.youtube_id
+            print(f"StateManager: Starting normalization for {youtube_id} - {result.title}")
+            
+            # Create normalized metadata
+            result_dict = result.model_dump()
+            normalized_metadata = NormalizationService.create_normalized_metadata(result_dict)
+            
+            # Small delay to simulate processing (in real case, MusicBrainz lookup would go here)
+            await asyncio.sleep(0.1)
+            
+            # Find current result by YouTube ID (might have been replaced)
+            current_result = self.state.get_result_by_youtube_id(youtube_id)
+            
+            if not current_result:
+                print(f"StateManager: Result {youtube_id} was removed during normalization")
+                return
+            
+            # Merge with any existing metadata
+            if current_result.verification_metadata:
+                normalized_metadata = NormalizationService.merge_metadata(
+                    current_result.verification_metadata,
+                    normalized_metadata
+                )
+            
+            # Update the current result with normalized metadata
+            current_result.verification_metadata = normalized_metadata
+            self.state.update_timestamp()
+            
+            print(f"StateManager: Normalized {youtube_id} - '{normalized_metadata.get('normalized_title')}'")
+            
+            # Track normalization completion
+            await self._increment_normalized(
+                normalized_metadata.get('normalized_title', current_result.title),
+                normalized_metadata.get('normalized_artist', current_result.artist)
+            )
+            
+        except asyncio.CancelledError:
+            print(f"StateManager: Normalization cancelled for {result.youtube_id}")
+        except Exception as e:
+            print(f"StateManager: Normalization failed for {result.youtube_id}: {e}")
+        finally:
+            # Clean up task tracking
+            if result.youtube_id in self.normalization_tasks:
+                del self.normalization_tasks[result.youtube_id]
+    
+    # ====== ACTIVITY TRACKING METHODS ======
+    
+    async def _update_activity(self, message: str):
+        """Update current activity and send state"""
+        self.state.current_state.update_activity(message)
+        await self.send_state()
+    
+    async def _increment_found(self, title: str, artist: str = ""):
+        """Increment found counter and update activity"""
+        self.state.current_state.items_found += 1
+        
+        # Create user-friendly activity message
+        if artist:
+            activity_msg = f"Found {artist} - {title}"
+        else:
+            activity_msg = f"Found {title}"
+        
+        await self._update_activity(activity_msg)
+    
+    async def _increment_normalized(self, normalized_title: str, artist: str = ""):
+        """Increment normalized counter and update activity"""
+        self.state.current_state.items_normalized += 1
+        
+        # Create user-friendly activity message
+        if artist:
+            activity_msg = f"Normalized {artist} - {normalized_title}"
+        else:
+            activity_msg = f"Normalized {normalized_title}"
+        
+        await self._update_activity(activity_msg)
+    
+    async def _increment_verified(self, title: str, artist: str = "", source: str = "MusicBrainz"):
+        """Increment verified counter and update activity"""
+        self.state.current_state.items_verified += 1
+        
+        # Create user-friendly activity message
+        if artist:
+            activity_msg = f"Verified {artist} - {title} with {source}"
+        else:
+            activity_msg = f"Verified {title} with {source}"
+        
+        await self._update_activity(activity_msg)
+    
+    async def _increment_unverified(self, title: str, artist: str = "", reason: str = ""):
+        """Increment unverified counter and update activity"""
+        self.state.current_state.items_unverified += 1
+        
+        # Create user-friendly activity message
+        if artist:
+            activity_msg = f"Could not verify {artist} - {title}"
+        else:
+            activity_msg = f"Could not verify {title}"
+        
+        if reason:
+            activity_msg += f" ({reason})"
+        
+        await self._update_activity(activity_msg)
+    
+    async def _increment_failed(self, title: str, reason: str = ""):
+        """Increment failed counter and update activity"""
+        self.state.current_state.items_failed += 1
+        
+        activity_msg = f"Failed: {title}"
+        if reason:
+            activity_msg += f" ({reason})"
+        
+        await self._update_activity(activity_msg)
+    
+    async def _start_strategy(self, strategy_name: str):
+        """Mark strategy as starting"""
+        self.state.current_state.active_strategy = strategy_name
+        self.state.current_state.is_searching = True
+        
+        strategy_display = strategy_name.replace('_', ' ').title()
+        await self._update_activity(f"Searching with {strategy_display}...")
+    
+    async def _complete_strategy(self, strategy_name: str, results_count: int):
+        """Mark strategy as completed"""
+        self.state.current_state.strategies_completed += 1
+        self.state.current_state.active_strategy = None
+        
+        strategy_display = strategy_name.replace('_', ' ').title()
+        await self._update_activity(f"Completed {strategy_display} - found {results_count} items")
+    
+    async def _set_search_status(self, is_searching: bool = False, is_normalizing: bool = False, is_verifying: bool = False):
+        """Update search status flags"""
+        self.state.current_state.is_searching = is_searching
+        self.state.current_state.is_normalizing = is_normalizing
+        self.state.current_state.is_verifying = is_verifying
     

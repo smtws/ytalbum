@@ -170,6 +170,9 @@ class YouTubeDeduplicator:
         """
         Compare metadata quality between two results
         Returns True if new_result has better quality metadata
+        
+        NOTE: Does NOT consider normalized/verification metadata in quality calculation
+        Only compares raw discovery metadata to ensure fair comparison
         """
         new_score = 0
         existing_score = 0
@@ -189,13 +192,50 @@ class YouTubeDeduplicator:
         elif existing_result.thumbnail_url and not new_result.thumbnail_url:
             existing_score += 2
         
-        # Quality score comparison
+        # Quality score comparison (raw quality only, not enriched)
         if new_result.quality_score > existing_result.quality_score:
             new_score += 1
         elif existing_result.quality_score > new_result.quality_score:
             existing_score += 1
         
         return new_score > existing_score
+    
+    @staticmethod
+    def merge_with_existing_metadata(new_result: Result, existing_result: Result) -> Result:
+        """
+        Merge new result with existing metadata preservation
+        Keeps normalized and verification metadata from existing result
+        
+        Args:
+            new_result: New result with potentially better raw data
+            existing_result: Existing result with metadata to preserve
+            
+        Returns:
+            New result with preserved metadata
+        """
+        # Preserve these metadata fields from existing result
+        if existing_result.verification_metadata:
+            # Check if existing has normalization data
+            if 'normalized_title' in existing_result.verification_metadata:
+                # Preserve all normalization and enrichment data
+                new_result.verification_metadata = existing_result.verification_metadata.copy()
+                print(f"YouTubeDeduplicator: Preserved normalization metadata for {new_result.youtube_id}")
+            
+            # Also preserve any MusicBrainz or other enrichment data
+            if 'mbid' in existing_result.verification_metadata:
+                if not new_result.verification_metadata:
+                    new_result.verification_metadata = {}
+                new_result.verification_metadata.update({
+                    k: v for k, v in existing_result.verification_metadata.items()
+                    if k.startswith('mb_') or k == 'mbid'
+                })
+                print(f"YouTubeDeduplicator: Preserved MusicBrainz metadata for {new_result.youtube_id}")
+        
+        # Preserve verification status if already verified
+        if existing_result.verified is not None:
+            new_result.verified = existing_result.verified
+        
+        return new_result
     
     @staticmethod
     def get_statistics(results: List[Result]) -> dict:

@@ -5,7 +5,7 @@ Checks if YouTube URLs are still accessible (not deleted/private/unavailable)
 """
 
 import asyncio
-import subprocess
+import aiohttp
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from backend.core.models import Result
@@ -14,73 +14,72 @@ from backend.core.models import Result
 class AvailabilityVerificationService:
     """
     Stateless service that verifies YouTube content availability
-    Uses yt-dlp to check if URLs are still accessible
+    Uses fast HTTP HEAD requests to check if URLs are still accessible
     """
     
     def __init__(self):
         self.service_name = "availability_verification"
+        self.session = None
+    
+    async def _get_session(self):
+        """Get or create aiohttp session"""
+        if self.session is None or self.session.closed:
+            timeout = aiohttp.ClientTimeout(total=3, connect=1)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            self.session = aiohttp.ClientSession(timeout=timeout, headers=headers)
+        return self.session
     
     async def verify_availability(self, url: str, cookie_options: Optional[Dict] = None) -> Tuple[bool, Optional[str]]:
         """
-        Verify if a YouTube URL is still available
+        Verify if a YouTube URL is still available using fast HTTP HEAD request
         
         Args:
             url: YouTube URL to check
-            cookie_options: Cookie options from StateManager
+            cookie_options: Ignored for HTTP-based verification
             
         Returns:
             Tuple of (is_available, error_message)
         """
         try:
-            cmd = [
-                "yt-dlp",
-                "--no-download",  # Don't download, just check
-                "--print", "%(title)s",  # Print title if available
-                "--quiet",  # Suppress progress output
-                "--no-warnings",
-                url
-            ]
+            session = await self._get_session()
             
-            # Add cookie options if provided
-            if cookie_options and "cookiesfrombrowser" in cookie_options:
-                browser_info = cookie_options["cookiesfrombrowser"]
-                cmd.extend(["--cookies-from-browser", browser_info[0]])
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
-            except asyncio.TimeoutError:
-                return False, "Verification timeout"
-            
-            if process.returncode == 0:
-                # URL is available
-                return True, None
-            else:
-                # Parse error message
-                error_msg = stderr.decode('utf-8').strip() if stderr else "Unknown error"
+            # Use HEAD request for speed - we only need status code
+            async with session.head(url, allow_redirects=True) as response:
+                status = response.status
                 
-                # Common error patterns
-                if "Private video" in error_msg:
-                    return False, "Private video"
-                elif "Video unavailable" in error_msg:
-                    return False, "Video unavailable"
-                elif "deleted" in error_msg.lower():
-                    return False, "Video deleted"
-                elif "copyright" in error_msg.lower():
-                    return False, "Copyright blocked"
-                elif "not available" in error_msg.lower():
-                    return False, "Not available in your region"
+                # YouTube status codes:
+                # 200 = Available
+                # 404 = Not found/deleted
+                # 403 = Private/restricted
+                # 429 = Rate limited
+                
+                if status == 200:
+                    return True, None
+                elif status == 404:
+                    return False, "Video not found"
+                elif status == 403:
+                    return False, "Video private or restricted"
+                elif status == 429:
+                    return False, "Rate limited"
+                elif 500 <= status < 600:
+                    return False, f"Server error ({status})"
                 else:
-                    return False, f"Unavailable: {error_msg[:100]}"
+                    return False, f"HTTP {status}"
                     
+        except asyncio.TimeoutError:
+            return False, "Connection timeout"
+        except aiohttp.ClientError as e:
+            return False, f"Network error: {str(e)[:50]}"
         except Exception as e:
             print(f"AvailabilityVerificationService: Verification failed for {url}: {e}")
-            return False, f"Verification error: {str(e)}"
+            return False, f"Verification error: {str(e)[:50]}"
+    
+    async def close(self):
+        """Close the aiohttp session"""
+        if self.session and not self.session.closed:
+            await self.session.close()
     
     async def verify_batch(self, results: List[Result], cookie_options: Optional[Dict] = None, 
                           max_concurrent: int = 5) -> Dict[str, Tuple[bool, Optional[str]]]:
@@ -132,7 +131,7 @@ class AvailabilityVerificationService:
                 # Exception occurred
                 print(f"AvailabilityVerificationService: Verification exception: {item}")
         
-        print(f"AvailabilityVerificationService: Verification complete - "
+        print(f"AvailabilityVerificationService: Fast HTTP verification complete - "
               f"{available_count} available, {unavailable_count} unavailable")
         
         return verification_results
@@ -155,8 +154,9 @@ class AvailabilityVerificationService:
         """Get service information and status"""
         return {
             "name": self.service_name,
-            "description": "Verifies YouTube content availability",
-            "cookie_support": True,
+            "description": "Fast HTTP availability verification",
+            "method": "HTTP HEAD requests (3s timeout)",
+            "cookie_support": False,  # HTTP-based, no cookies needed
             "status": "ready"
         }
 

@@ -47,6 +47,46 @@ class CookieInfo(BaseModel):
     yt_dlp_compatible: bool = False
 
 
+class CurrentState(BaseModel):
+    """Real-time activity and progress tracking for user feedback"""
+    # Activity counts
+    items_found: int = 0
+    items_normalized: int = 0
+    items_verified: int = 0
+    items_unverified: int = 0
+    items_failed: int = 0
+    
+    # Current activity status
+    last_activity: str = "Ready to search"
+    last_activity_timestamp: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Progress indicators
+    is_searching: bool = False
+    is_normalizing: bool = False
+    is_verifying: bool = False
+    
+    # Search strategy progress
+    active_strategy: Optional[str] = None
+    strategies_completed: int = 0
+    strategies_total: int = 0
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+    
+    def update_activity(self, message: str):
+        """Update last activity with timestamp"""
+        self.last_activity = message
+        self.last_activity_timestamp = datetime.utcnow()
+    
+    def get_progress_percent(self) -> int:
+        """Get overall progress percentage"""
+        if self.strategies_total == 0:
+            return 0
+        return int((self.strategies_completed / self.strategies_total) * 100)
+
+
 class Config(BaseModel):
     """Application configuration"""
     output_directory: str = "/home/tordt/Downloads/YT-Music"
@@ -102,6 +142,9 @@ class AppState(BaseModel):
     # Configuration
     config: Config = Field(default_factory=Config)
     
+    # Real-time activity tracking
+    current_state: CurrentState = Field(default_factory=CurrentState)
+    
     # Search state
     search_query: str = ""
     search_started_at: Optional[datetime] = None
@@ -111,7 +154,7 @@ class AppState(BaseModel):
     # Results (ordered list - NEVER dict)
     results: List[Result] = Field(default_factory=list)
     
-    # Statistics
+    # Statistics (legacy - use current_state for real-time)
     total_found: int = 0
     total_verified: int = 0
     total_unverified: int = 0
