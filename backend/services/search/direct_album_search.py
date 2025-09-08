@@ -23,7 +23,7 @@ class DirectAlbumSearchService:
     
     def __init__(self):
         self.service_name = "direct_album_search"    
-    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Search for specific artist + album combinations
         
@@ -48,19 +48,19 @@ class DirectAlbumSearchService:
         try:
             if album:
                 # Strategy 1: Exact artist + album search
-                exact_results = await self._search_exact_album(artist, album, cookie_options)
+                exact_results = await self._search_exact_album(artist, album, cookie_options, ytdlp_executor)
                 results.extend(exact_results)
                 
                 # Strategy 2: Quoted search for precision
-                quoted_results = await self._search_quoted_album(artist, album, cookie_options)
+                quoted_results = await self._search_quoted_album(artist, album, cookie_options, ytdlp_executor)
                 results.extend(quoted_results)
                 
                 # Strategy 3: Album year context (if detectable)
-                year_results = await self._search_with_year_context(artist, album, cookie_options)
+                year_results = await self._search_with_year_context(artist, album, cookie_options, ytdlp_executor)
                 results.extend(year_results)
             else:
                 # General artist search when no specific album
-                general_results = await self._search_artist_albums(artist, cookie_options)
+                general_results = await self._search_artist_albums(artist, cookie_options, ytdlp_executor)
                 results.extend(general_results)
             
             print(f"DirectAlbumSearchService: Found {len(results)} total results")
@@ -70,7 +70,7 @@ class DirectAlbumSearchService:
         
         return results
     
-    async def _search_exact_album(self, artist: str, album: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_exact_album(self, artist: str, album: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search for exact artist + album combination"""
         results = []
         
@@ -85,7 +85,7 @@ class DirectAlbumSearchService:
             ]
             
             for query in queries:
-                query_results = await self._execute_search(query, artist, cookie_options)
+                query_results = await self._execute_search(query, artist, cookie_options, ytdlp_executor=ytdlp_executor)
                 # Filter for high relevance
                 relevant = [r for r in query_results if self._is_highly_relevant(r, artist, album)]
                 results.extend(relevant)
@@ -95,7 +95,7 @@ class DirectAlbumSearchService:
         
         return results
     
-    async def _search_quoted_album(self, artist: str, album: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_quoted_album(self, artist: str, album: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search with quoted terms for precision"""
         results = []
         
@@ -109,7 +109,7 @@ class DirectAlbumSearchService:
             ]
             
             for query in queries:
-                query_results = await self._execute_search(query, artist, cookie_options)
+                query_results = await self._execute_search(query, artist, cookie_options, ytdlp_executor=ytdlp_executor)
                 results.extend(query_results)
             
         except Exception as e:
@@ -117,7 +117,7 @@ class DirectAlbumSearchService:
         
         return results
     
-    async def _search_with_year_context(self, artist: str, album: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_with_year_context(self, artist: str, album: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search with potential year context"""
         results = []
         
@@ -137,7 +137,7 @@ class DirectAlbumSearchService:
                 ]
                 
                 for query in queries:
-                    query_results = await self._execute_search(query, artist, cookie_options, limit=3)  # Small limit
+                    query_results = await self._execute_search(query, artist, cookie_options, ytdlp_executor=ytdlp_executor, limit=3)  # Small limit
                     # Only take highly relevant results for year searches
                     relevant = [r for r in query_results if self._is_highly_relevant(r, artist, album)]
                     results.extend(relevant)
@@ -147,7 +147,7 @@ class DirectAlbumSearchService:
         
         return results
     
-    async def _search_artist_albums(self, artist: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_artist_albums(self, artist: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search for artist's albums when no specific album provided"""
         results = []
         
@@ -161,7 +161,7 @@ class DirectAlbumSearchService:
             ]
             
             for query in queries:
-                query_results = await self._execute_search(query, artist, cookie_options)
+                query_results = await self._execute_search(query, artist, cookie_options, ytdlp_executor=ytdlp_executor)
                 results.extend(query_results)
             
         except Exception as e:
@@ -169,7 +169,7 @@ class DirectAlbumSearchService:
         
         return results
     
-    async def _execute_search(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None, limit: int = 12) -> List[Result]:
+    async def _execute_search(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None, limit: int = 12) -> List[Result]:
         """Execute a single search query"""
         results = []
         
@@ -188,16 +188,16 @@ class DirectAlbumSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("DirectAlbumSearchService: Warning - no ytdlp_executor provided, skipping query")
+                return results
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.decode('utf-8') if isinstance(stdout, bytes) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
-            
-            if process.returncode == 0 and stdout:
-                lines = stdout.decode('utf-8').strip().split('\n')
+            if returncode == 0 and stdout:
+                lines = stdout.strip().split('\n')
                 
                 for line in lines:
                     try:

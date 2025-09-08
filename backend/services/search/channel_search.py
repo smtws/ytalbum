@@ -24,7 +24,7 @@ class ChannelSearchService:
     def __init__(self):
         self.service_name = "channel_search"
     
-    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Search for artist channels and extract album content
         
@@ -32,6 +32,7 @@ class ChannelSearchService:
             artist: Artist name to search for
             album: Optional specific album name
             cookie_options: Cookie options from StateManager (single source of truth)
+            ytdlp_executor: Rate-limited yt-dlp executor function from StateManager
             
         Returns:
             List of Result objects (stateless - doesn't modify state)
@@ -47,12 +48,12 @@ class ChannelSearchService:
         
         try:
             # Step 1: Find artist channels (limit to top channels only)
-            channels = await self._find_artist_channels(artist, cookie_options)
+            channels = await self._find_artist_channels(artist, cookie_options, ytdlp_executor)
             print(f"ChannelSearchService: Found {len(channels)} channels")
             
             # Step 2: Extract content from channels (limit extraction scope)
             for channel in channels[:3]:  # Limit to top 3 most relevant channels
-                channel_results = await self._extract_channel_content(channel, artist, album, cookie_options)
+                channel_results = await self._extract_channel_content(channel, artist, album, cookie_options, ytdlp_executor)
                 results.extend(channel_results)
             
             print(f"ChannelSearchService: Found {len(results)} total results (optimized strategy)")
@@ -62,7 +63,7 @@ class ChannelSearchService:
         
         return results
     
-    async def _find_artist_channels(self, artist: str, cookie_options: Dict[str, Any]) -> List[Dict[str, str]]:
+    async def _find_artist_channels(self, artist: str, cookie_options: Dict[str, Any], ytdlp_executor: Optional[callable] = None) -> List[Dict[str, str]]:
         """
         Find YouTube channels for the artist
         
@@ -87,17 +88,15 @@ class ChannelSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            # Run command
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Run command with rate limiting
+            if ytdlp_executor:
+                stdout, stderr, returncode = await ytdlp_executor(cmd)
+            else:
+                print("ChannelSearchService: Warning - no ytdlp_executor provided, skipping search")
+                return []
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
-            
-            if process.returncode == 0 and stdout:
-                lines = stdout.decode('utf-8').strip().split('\n')
+            if returncode == 0 and stdout:
+                lines = stdout.strip().split('\n')
                 seen_channels = set()
                 
                 for line in lines:
@@ -126,7 +125,8 @@ class ChannelSearchService:
     
     async def _extract_channel_content(self, channel: Dict[str, str], 
                                      artist: str, album: Optional[str] = None, 
-                                     cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+                                     cookie_options: Optional[Dict[str, Any]] = None, 
+                                     ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Extract album/playlist content from a channel
         
@@ -154,16 +154,15 @@ class ChannelSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Run command with rate limiting
+            if ytdlp_executor:
+                stdout, stderr, returncode = await ytdlp_executor(cmd)
+            else:
+                print("ChannelSearchService: Warning - no ytdlp_executor provided, skipping search")
+                return []
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
-            
-            if process.returncode == 0 and stdout:
-                lines = stdout.decode('utf-8').strip().split('\n')
+            if returncode == 0 and stdout:
+                lines = stdout.strip().split('\n')
                 
                 for line in lines:
                     try:
@@ -231,16 +230,15 @@ class ChannelSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Run command with rate limiting
+            if ytdlp_executor:
+                stdout, stderr, returncode = await ytdlp_executor(cmd)
+            else:
+                print("ChannelSearchService: Warning - no ytdlp_executor provided, skipping detailed extraction")
+                return results
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45)
-            
-            if process.returncode == 0 and stdout:
-                lines = stdout.decode('utf-8').strip().split('\n')
+            if returncode == 0 and stdout:
+                lines = stdout.strip().split('\n')
                 
                 for line in lines:
                     try:

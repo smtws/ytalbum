@@ -22,6 +22,8 @@ from backend.services.search.alternative_title_search import AlternativeTitleSea
 from backend.services.cookie_service import CookieService
 from backend.services.availability_verification_service import AvailabilityVerificationService, VerificationCache
 from backend.services.normalization_service import NormalizationService
+from backend.services.musicbrainz_service import MusicBrainzService, MetadataCache
+from backend.services.ytdlp_rate_limiter import YTDLPRateLimiter
 
 
 class StateManager:
@@ -53,8 +55,16 @@ class StateManager:
         self.availability_service = AvailabilityVerificationService()
         self.verification_cache = VerificationCache(cache_duration_minutes=30)
         
-        # Track normalization tasks for race condition handling
+        # Initialize metadata services and cache
+        self.musicbrainz_service = MusicBrainzService()
+        self.metadata_cache = MetadataCache(cache_duration_hours=24)
+        
+        # Initialize yt-dlp rate limiter (0.5s delay = 2 requests/second)
+        self.ytdlp_rate_limiter = YTDLPRateLimiter(delay=0.5)
+        
+        # Track async tasks for race condition handling
         self.normalization_tasks: Dict[str, asyncio.Task] = {}  # youtube_id -> task
+        self.metadata_tasks: Dict[str, asyncio.Task] = {}  # youtube_id -> task
         
     async def add_websocket(self, websocket: WebSocket):
         """Add WebSocket connection"""
@@ -156,7 +166,7 @@ class StateManager:
             if self.state.config.cookie_info.yt_dlp_compatible and self.state.config.cookie_info.recommended_browser:
                 cookie_options["cookiesfrombrowser"] = (self.state.config.cookie_info.recommended_browser, None, None, None)
             
-            results = await service.search(query, cookie_options=cookie_options)
+            results = await service.search(query, cookie_options=cookie_options, ytdlp_executor=self.execute_ytdlp_command)
             
             print(f"StateManager: {strategy_name} returned {len(results)} results")
             
@@ -207,7 +217,11 @@ class StateManager:
             
             print(f"StateManager: {strategy_name} added {added_count}/{len(results)} unique results")
             await self._complete_strategy(strategy_name, added_count)
-            await self.search_strategy_completed(strategy_name, added_count)
+            
+            # Check if all strategies are complete and do first cleanup
+            if len(self.state.search_strategies_completed) >= len(self.state.search_strategies_total):
+                print(f"StateManager: All search strategies completed - running single track cleanup")
+                await self._remove_single_tracks()
             
         except Exception as e:
             print(f"StateManager: Search service {strategy_name} failed: {e}")
@@ -540,6 +554,54 @@ class StateManager:
                 normalized_metadata.get('normalized_artist', current_result.artist)
             )
             
+            # Check for normalized content duplicates before metadata retrieval
+            duplicate_result = self._find_normalized_duplicate(current_result)
+            if duplicate_result:
+                print(f"StateManager: Found normalized duplicate - {normalized_metadata.get('normalized_artist')} / {normalized_metadata.get('normalized_album')}")
+                
+                # Compare content quality to decide which to keep
+                if self._is_better_content_quality(current_result, duplicate_result):
+                    print(f"StateManager: New result has better content quality - replacing existing")
+                    # Preserve any existing metadata from duplicate
+                    if duplicate_result.verification_metadata:
+                        # Merge metadata, keeping normalization from current result
+                        merged_metadata = duplicate_result.verification_metadata.copy()
+                        merged_metadata.update(current_result.verification_metadata)
+                        current_result.verification_metadata = merged_metadata
+                    
+                    # Replace duplicate with current result
+                    self._replace_result_in_state(duplicate_result, current_result)
+                    
+                    # Cancel any active metadata tasks for the duplicate
+                    if duplicate_result.youtube_id in self.metadata_tasks:
+                        self.metadata_tasks[duplicate_result.youtube_id].cancel()
+                        del self.metadata_tasks[duplicate_result.youtube_id]
+                        print(f"StateManager: Cancelled metadata task for replaced duplicate {duplicate_result.youtube_id}")
+                else:
+                    print(f"StateManager: Existing result has better content quality - removing current")
+                    # Transfer normalization metadata to existing result if it doesn't have it
+                    if not duplicate_result.verification_metadata or 'normalized_title' not in duplicate_result.verification_metadata:
+                        if not duplicate_result.verification_metadata:
+                            duplicate_result.verification_metadata = {}
+                        duplicate_result.verification_metadata.update(current_result.verification_metadata)
+                        self.state.update_timestamp()
+                    
+                    # Remove current result from state
+                    self._remove_result_from_state(current_result)
+                    
+                    # Cancel any active normalization task for current result
+                    if current_result.youtube_id in self.normalization_tasks:
+                        del self.normalization_tasks[current_result.youtube_id]
+                    
+                    # Don't trigger metadata retrieval for removed result
+                    return
+                
+                # Send state update after deduplication
+                await self.send_state()
+            
+            # Trigger metadata retrieval after successful normalization (and deduplication)
+            await self._trigger_metadata_retrieval_if_needed(current_result)
+            
         except asyncio.CancelledError:
             print(f"StateManager: Normalization cancelled for {result.youtube_id}")
         except Exception as e:
@@ -638,4 +700,425 @@ class StateManager:
         self.state.current_state.is_searching = is_searching
         self.state.current_state.is_normalizing = is_normalizing
         self.state.current_state.is_verifying = is_verifying
+    
+    # ====== METADATA RETRIEVAL METHODS ======
+    
+    async def _trigger_metadata_retrieval_if_needed(self, result: Result):
+        """
+        Trigger metadata retrieval for normalized results
+        Only retrieves if normalized data exists and metadata not yet retrieved
+        """
+        # Check if normalization data exists
+        if not result.verification_metadata or 'normalized_title' not in result.verification_metadata:
+            return
+        
+        # Check if metadata already retrieved
+        if 'mbid' in result.verification_metadata:
+            print(f"StateManager: Result {result.youtube_id} already has metadata")
+            return
+        
+        # Extract normalized data for metadata query
+        normalized_title = result.verification_metadata.get('normalized_title')
+        normalized_artist = result.verification_metadata.get('normalized_artist', result.artist)
+        
+        if not normalized_title or not normalized_artist:
+            print(f"StateManager: Missing normalized data for {result.youtube_id}")
+            return
+        
+        # Parse "Artist - Album" format
+        if " - " in normalized_title:
+            artist_part, album_part = normalized_title.split(" - ", 1)
+            # Use the artist from normalized title, fallback to normalized_artist
+            query_artist = artist_part
+            query_album = album_part
+        else:
+            # Single word title, might be self-titled or channel content
+            query_artist = normalized_artist
+            query_album = normalized_title
+        
+        # Cancel any existing metadata task for this YouTube ID
+        if result.youtube_id in self.metadata_tasks:
+            existing_task = self.metadata_tasks[result.youtube_id]
+            if not existing_task.done():
+                existing_task.cancel()
+                print(f"StateManager: Cancelled previous metadata retrieval for {result.youtube_id}")
+        
+        # Start metadata retrieval task
+        task = asyncio.create_task(self._retrieve_metadata(result, query_artist, query_album))
+        self.metadata_tasks[result.youtube_id] = task
+    
+    async def _retrieve_metadata(self, result: Result, artist: str, album: str):
+        """
+        Retrieve metadata from MusicBrainz with caching and race condition handling
+        """
+        try:
+            youtube_id = result.youtube_id
+            print(f"StateManager: Starting metadata retrieval for {youtube_id} - {artist} / {album}")
+            
+            # Check cache first
+            cached_metadata = self.metadata_cache.get("musicbrainz", artist, album)
+            if cached_metadata is not None:
+                metadata = cached_metadata
+                print(f"StateManager: Using cached metadata for {artist} - {album}")
+            else:
+                # Retrieve from MusicBrainz
+                await self._set_search_status(is_verifying=True)
+                metadata = await self.musicbrainz_service.search_release(artist, album)
+                
+                # Cache the result (including None for "not found")
+                self.metadata_cache.set("musicbrainz", artist, album, metadata)
+                await self._set_search_status(is_verifying=False)
+            
+            # Find current result by YouTube ID (might have been replaced during retrieval)
+            current_result = self.state.get_result_by_youtube_id(youtube_id)
+            
+            if not current_result:
+                print(f"StateManager: Result {youtube_id} was removed during metadata retrieval")
+                return
+            
+            # Merge metadata into verification_metadata
+            if not current_result.verification_metadata:
+                current_result.verification_metadata = {}
+            
+            if metadata:
+                # Add MusicBrainz metadata to existing verification data
+                current_result.verification_metadata.update(metadata)
+                self.state.update_timestamp()
+                
+                print(f"StateManager: Added MusicBrainz metadata for {youtube_id} - MBID: {metadata.get('mbid')}")
+                
+                # Track verification success
+                await self._increment_verified(
+                    album,
+                    artist,
+                    "MusicBrainz"
+                )
+                
+                # Check for MBID-based duplicates after successful metadata retrieval
+                mbid = metadata.get('mbid')
+                if mbid:
+                    duplicate_results = self._find_mbid_duplicates(current_result, mbid)
+                    if duplicate_results:
+                        print(f"StateManager: Found {len(duplicate_results)} MBID duplicates for {mbid}")
+                        
+                        # Find the best quality result among all duplicates + current
+                        all_results = [current_result] + duplicate_results
+                        best_result = max(all_results, key=lambda r: self._get_content_priority(r))
+                        
+                        # If current result is not the best, find which one is
+                        for candidate in all_results:
+                            if self._is_better_content_quality(candidate, best_result):
+                                best_result = candidate
+                        
+                        # Merge metadata from all duplicates into best result
+                        other_results = [r for r in all_results if r != best_result]
+                        best_result = self._merge_mbid_metadata(best_result, other_results)
+                        
+                        # Update state: keep best result, remove others
+                        for result_to_remove in other_results:
+                            # If removing current result, we need to handle it specially
+                            if result_to_remove.youtube_id == current_result.youtube_id:
+                                # Transfer current result's position to best result if different
+                                if best_result.youtube_id != current_result.youtube_id:
+                                    self._replace_result_in_state(current_result, best_result)
+                                    print(f"StateManager: Replaced current result {current_result.youtube_id} with better MBID duplicate {best_result.youtube_id}")
+                            else:
+                                # Remove duplicate from state
+                                self._remove_result_from_state(result_to_remove)
+                                
+                                # Cancel any active metadata tasks for removed duplicates
+                                if result_to_remove.youtube_id in self.metadata_tasks:
+                                    self.metadata_tasks[result_to_remove.youtube_id].cancel()
+                                    del self.metadata_tasks[result_to_remove.youtube_id]
+                                    print(f"StateManager: Cancelled metadata task for removed MBID duplicate {result_to_remove.youtube_id}")
+                        
+                        # Send state update after MBID deduplication
+                        await self.send_state()
+                        
+                        # Final single track cleanup after MBID deduplication (last final deduplication)
+                        print(f"StateManager: Running final single track cleanup after MBID deduplication")
+                        await self._remove_single_tracks()
+            else:
+                # Mark as unverified (not found in MusicBrainz)
+                current_result.verification_metadata['mb_not_found'] = datetime.utcnow().isoformat()
+                self.state.update_timestamp()
+                
+                print(f"StateManager: No MusicBrainz match found for {youtube_id} - {artist} / {album}")
+                
+                # Track verification failure
+                await self._increment_unverified(
+                    album,
+                    artist,
+                    "not found in MusicBrainz"
+                )
+                
+        except asyncio.CancelledError:
+            print(f"StateManager: Metadata retrieval cancelled for {result.youtube_id}")
+        except Exception as e:
+            print(f"StateManager: Metadata retrieval failed for {result.youtube_id}: {e}")
+            await self._increment_failed(f"Metadata retrieval for {artist} - {album}", str(e))
+        finally:
+            # Clean up task tracking
+            if result.youtube_id in self.metadata_tasks:
+                del self.metadata_tasks[result.youtube_id]
+    
+    async def execute_ytdlp_command(self, cmd: list, **kwargs) -> tuple:
+        """
+        Execute yt-dlp command with centralized rate limiting
+        
+        This is the ONLY method search services should use for yt-dlp calls.
+        Ensures consistent rate limiting across all search strategies.
+        
+        Args:
+            cmd: Command list for yt-dlp subprocess
+            **kwargs: Additional arguments for subprocess execution
+            
+        Returns:
+            (stdout, stderr, returncode) tuple
+        """
+        return await self.ytdlp_rate_limiter.execute_subprocess(cmd, **kwargs)
+    
+    def _get_content_priority(self, result: Result) -> int:
+        """
+        Get content priority score for deduplication quality comparison
+        Higher score = better quality content type
+        
+        Returns:
+            3: Playlist/Album (multiple tracks)
+            2: Chaptered album (single video with chapters) 
+            1: Single track
+        """
+        track_count = result.track_count or 0
+        
+        if track_count > 1:
+            return 3  # Playlist/Album - highest priority
+        
+        # Check for chapter indicators in title/description
+        title_lower = result.title.lower()
+        if any(indicator in title_lower for indicator in ['chapter', 'full album', 'complete album']):
+            return 2  # Chaptered album - medium priority
+        
+        return 1  # Single track - lowest priority
+    
+    def _is_better_content_quality(self, new_result: Result, existing_result: Result) -> bool:
+        """
+        Compare content quality between two results with same normalized content
+        Returns True if new_result has better quality than existing_result
+        
+        Priority: Playlists > Chaptered albums > Single tracks
+        """
+        new_priority = self._get_content_priority(new_result)
+        existing_priority = self._get_content_priority(existing_result)
+        
+        if new_priority != existing_priority:
+            return new_priority > existing_priority
+        
+        # Same content type, use existing quality metrics
+        # Use the same logic as YouTubeDeduplicator but without metadata consideration
+        new_score = 0
+        existing_score = 0
+        
+        # Track count comparison
+        new_tracks = new_result.track_count or 0
+        existing_tracks = existing_result.track_count or 0
+        if new_tracks > existing_tracks:
+            new_score += 3
+        elif existing_tracks > new_tracks:
+            existing_score += 3
+        
+        # Thumbnail availability
+        if new_result.thumbnail_url and not existing_result.thumbnail_url:
+            new_score += 2
+        elif existing_result.thumbnail_url and not new_result.thumbnail_url:
+            existing_score += 2
+        
+        # Quality score comparison (discovery quality only)
+        if new_result.quality_score > existing_result.quality_score:
+            new_score += 1
+        elif existing_result.quality_score > new_result.quality_score:
+            existing_score += 1
+        
+        return new_score > existing_score
+    
+    def _find_normalized_duplicate(self, target_result: Result) -> Optional[Result]:
+        """
+        Find existing result in state.results with same normalized content
+        
+        Args:
+            target_result: Result with normalized metadata to check for duplicates
+            
+        Returns:
+            Existing duplicate result or None if no duplicate found
+        """
+        if not target_result.verification_metadata:
+            return None
+        
+        target_artist = target_result.verification_metadata.get('normalized_artist', '').lower()
+        target_album = target_result.verification_metadata.get('normalized_album', '').lower()
+        
+        if not target_artist or not target_album:
+            return None
+        
+        # Search existing results for normalized content match
+        for existing_result in self.state.results:
+            if existing_result.youtube_id == target_result.youtube_id:
+                continue  # Skip self
+                
+            if not existing_result.verification_metadata:
+                continue
+                
+            existing_artist = existing_result.verification_metadata.get('normalized_artist', '').lower()
+            existing_album = existing_result.verification_metadata.get('normalized_album', '').lower()
+            
+            if existing_artist == target_artist and existing_album == target_album:
+                return existing_result
+        
+        return None
+    
+    def _find_mbid_duplicates(self, target_result: Result, mbid: str) -> List[Result]:
+        """
+        Find existing results in state.results with same MusicBrainz ID
+        
+        Args:
+            target_result: Result to exclude from search (usually the current result)
+            mbid: MusicBrainz ID to search for
+            
+        Returns:
+            List of existing duplicate results (excluding target_result)
+        """
+        duplicates = []
+        
+        if not mbid:
+            return duplicates
+        
+        for existing_result in self.state.results:
+            if existing_result.youtube_id == target_result.youtube_id:
+                continue  # Skip target result
+                
+            if not existing_result.verification_metadata:
+                continue
+                
+            existing_mbid = existing_result.verification_metadata.get('mbid')
+            if existing_mbid == mbid:
+                duplicates.append(existing_result)
+        
+        return duplicates
+    
+    def _merge_mbid_metadata(self, best_result: Result, duplicate_results: List[Result]) -> Result:
+        """
+        Merge MusicBrainz metadata from duplicate results into the best result
+        
+        Args:
+            best_result: The result to keep (highest content quality)
+            duplicate_results: List of duplicate results to merge from
+            
+        Returns:
+            The best_result with merged metadata
+        """
+        if not best_result.verification_metadata:
+            best_result.verification_metadata = {}
+        
+        # Merge metadata from all duplicates
+        for duplicate in duplicate_results:
+            if duplicate.verification_metadata:
+                # Preserve existing metadata, but don't overwrite better data
+                for key, value in duplicate.verification_metadata.items():
+                    if key not in best_result.verification_metadata or not best_result.verification_metadata[key]:
+                        best_result.verification_metadata[key] = value
+        
+        print(f"StateManager: Merged MBID metadata from {len(duplicate_results)} duplicates into {best_result.youtube_id}")
+        return best_result
+    
+    def _replace_result_in_state(self, old_result: Result, new_result: Result):
+        """
+        Replace an existing result in state.results with a new result in-place
+        Preserves list position and triggers state update
+        """
+        try:
+            # Find index of old result
+            old_index = self.state.results.index(old_result)
+            
+            # Replace in-place
+            self.state.results[old_index] = new_result
+            
+            # Update timestamp and notify frontend
+            self.state.update_timestamp()
+            
+            print(f"StateManager: Replaced result {old_result.youtube_id} with {new_result.youtube_id}")
+            
+        except ValueError:
+            print(f"StateManager: Could not find result {old_result.youtube_id} to replace")
+    
+    def _remove_result_from_state(self, result: Result):
+        """
+        Remove a result from state.results and update counters
+        """
+        try:
+            # Remove from results list
+            self.state.results.remove(result)
+            
+            # Update total found counter
+            self.state.total_found = len(self.state.results)
+            
+            # Update timestamp and notify frontend
+            self.state.update_timestamp()
+            
+            print(f"StateManager: Removed duplicate result {result.youtube_id}")
+            
+        except ValueError:
+            print(f"StateManager: Could not find result {result.youtube_id} to remove")
+    
+    async def _remove_single_tracks(self):
+        """
+        Remove single tracks when album alternatives exist for the same artist
+        Only removes singles (priority 1) if albums/playlists (priority >= 2) exist
+        """
+        if not self.state.results:
+            return
+        
+        # Group results by normalized artist
+        artist_results = {}
+        for result in self.state.results:
+            if not result.verification_metadata:
+                continue
+                
+            artist = result.verification_metadata.get('normalized_artist', '').lower()
+            if not artist:
+                continue
+                
+            if artist not in artist_results:
+                artist_results[artist] = []
+            artist_results[artist].append(result)
+        
+        # Find singles to remove
+        singles_to_remove = []
+        
+        for artist, results in artist_results.items():
+            # Check if this artist has any album-quality content
+            has_albums = any(self._get_content_priority(r) >= 2 for r in results)
+            
+            if has_albums:
+                # Remove singles for this artist since albums exist
+                singles = [r for r in results if self._get_content_priority(r) == 1]
+                singles_to_remove.extend(singles)
+        
+        # Remove identified singles
+        if singles_to_remove:
+            removed_count = 0
+            for single in singles_to_remove:
+                try:
+                    self.state.results.remove(single)
+                    removed_count += 1
+                except ValueError:
+                    continue
+            
+            if removed_count > 0:
+                # Update counters
+                self.state.total_found = len(self.state.results)
+                self.state.update_timestamp()
+                
+                print(f"StateManager: Removed {removed_count} single tracks (albums available for same artists)")
+                
+                # Send state update to frontend
+                await self.send_state()
     

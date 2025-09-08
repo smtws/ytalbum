@@ -43,7 +43,7 @@ class AlternativeTitleSearchService:
             "f_to_ph": lambda name: name.replace("f", "ph").replace("F", "Ph")
         }
     
-    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Search with alternative artist names and title variations
         
@@ -67,15 +67,15 @@ class AlternativeTitleSearchService:
         
         try:
             # Strategy 1: Name variation searches
-            variation_results = await self._search_name_variations(artist, album, cookie_options)
+            variation_results = await self._search_name_variations(artist, album, cookie_options, ytdlp_executor)
             results.extend(variation_results)
             
             # Strategy 2: Common misspelling searches
-            misspelling_results = await self._search_common_misspellings(artist, album, cookie_options)
+            misspelling_results = await self._search_common_misspellings(artist, album, cookie_options, ytdlp_executor)
             results.extend(misspelling_results)
             
             # Strategy 3: Abbreviated and extended name searches
-            abbreviated_results = await self._search_abbreviated_names(artist, album, cookie_options)
+            abbreviated_results = await self._search_abbreviated_names(artist, album, cookie_options, ytdlp_executor)
             results.extend(abbreviated_results)
             
             print(f"AlternativeTitleSearchService: Found {len(results)} alternative results")
@@ -85,7 +85,7 @@ class AlternativeTitleSearchService:
         
         return results
     
-    async def _search_name_variations(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_name_variations(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search with different name variations"""
         results = []
         
@@ -102,7 +102,7 @@ class AlternativeTitleSearchService:
             
             # Search with each variation
             for variant in list(variations)[:4]:  # Limit to 4 variations to avoid spam
-                variant_results = await self._search_with_alternative_artist(variant, album, cookie_options)
+                variant_results = await self._search_with_alternative_artist(variant, album, cookie_options, ytdlp_executor)
                 # Only take highly relevant results for variations
                 relevant = [r for r in variant_results if self._is_variation_relevant(r, artist, variant)]
                 results.extend(relevant)
@@ -112,7 +112,7 @@ class AlternativeTitleSearchService:
         
         return results
     
-    async def _search_common_misspellings(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_common_misspellings(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search with common misspelling patterns"""
         results = []
         
@@ -134,7 +134,7 @@ class AlternativeTitleSearchService:
             
             # Search with each misspelling
             for misspelling in list(misspellings)[:3]:  # Limit to 3 misspellings
-                misspelling_results = await self._search_with_alternative_artist(misspelling, album, cookie_options)
+                misspelling_results = await self._search_with_alternative_artist(misspelling, album, cookie_options, ytdlp_executor)
                 # Filter for relevance
                 relevant = [r for r in misspelling_results if self._is_misspelling_relevant(r, artist)]
                 results.extend(relevant)
@@ -144,7 +144,7 @@ class AlternativeTitleSearchService:
         
         return results
     
-    async def _search_abbreviated_names(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_abbreviated_names(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search with abbreviated and extended names"""
         results = []
         
@@ -165,7 +165,7 @@ class AlternativeTitleSearchService:
             
             # Search with abbreviations
             for abbrev in abbreviated_variants:
-                abbrev_results = await self._search_with_alternative_artist(abbrev, album, cookie_options)
+                abbrev_results = await self._search_with_alternative_artist(abbrev, album, cookie_options, ytdlp_executor)
                 # Filter for abbreviation relevance
                 relevant = [r for r in abbrev_results if self._is_abbreviation_relevant(r, artist, abbrev)]
                 results.extend(relevant)
@@ -175,7 +175,7 @@ class AlternativeTitleSearchService:
         
         return results
     
-    async def _search_with_alternative_artist(self, alternative_artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_with_alternative_artist(self, alternative_artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Execute search with alternative artist name"""
         results = []
         
@@ -191,16 +191,26 @@ class AlternativeTitleSearchService:
                     f"{alternative_artist} discography"
                 ]
             
-            for query in queries:
-                query_results = await self._execute_search(query, alternative_artist, cookie_options)
-                results.extend(query_results)
+            # Execute queries in parallel for better performance
+            query_tasks = [
+                self._execute_search(query, alternative_artist, cookie_options, ytdlp_executor)
+                for query in queries
+            ]
+            
+            query_results_list = await asyncio.gather(*query_tasks, return_exceptions=True)
+            
+            for query_results in query_results_list:
+                if isinstance(query_results, Exception):
+                    print(f"AlternativeTitleSearchService: Query failed: {query_results}")
+                else:
+                    results.extend(query_results)
             
         except Exception as e:
             print(f"AlternativeTitleSearchService: Alternative artist '{alternative_artist}' search failed: {e}")
         
         return results
     
-    async def _execute_search(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None, limit: int = 6) -> List[Result]:
+    async def _execute_search(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None, limit: int = 6) -> List[Result]:
         """Execute a single search query"""
         results = []
         
@@ -219,15 +229,15 @@ class AlternativeTitleSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("AlternativeTitleSearchService: Warning - no ytdlp_executor provided, skipping query")
+                return results
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.encode() if isinstance(stdout, str) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
-            
-            if process.returncode == 0 and stdout:
+            if returncode == 0 and stdout:
                 lines = stdout.decode('utf-8').strip().split('\n')
                 
                 for line in lines:

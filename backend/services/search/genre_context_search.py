@@ -37,7 +37,7 @@ class GenreContextSearchService:
             "reggae": ["reggae", "ska", "dub", "dancehall"]
         }
     
-    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Optimized search with genre context and internal deduplication
         
@@ -60,12 +60,12 @@ class GenreContextSearchService:
         
         try:
             # Strategy 1: Auto-detect genre and search ONLY detected genres (reduced scope)
-            detected_genres = await self._detect_artist_genre(artist, cookie_options)
+            detected_genres = await self._detect_artist_genre(artist, cookie_options, ytdlp_executor)
             
             # Only use top 2 detected genres (reduced from all detected + 5 priority genres)
             for genre in detected_genres[:2]:
                 genre_results = await self._search_with_specific_genre(
-                    artist, album, genre, cookie_options, limit=4  # Reduced from 8
+                    artist, album, genre, cookie_options, ytdlp_executor, limit=4  # Reduced from 8
                 )
                 results.extend(genre_results)
             
@@ -75,7 +75,7 @@ class GenreContextSearchService:
                 query = f"{artist} {album if album else ''} {music_term}"
                 
                 term_results = await self._execute_search(
-                    query, artist, cookie_options, limit=5
+                    query, artist, cookie_options, ytdlp_executor, limit=5
                 )
                 results.extend(term_results)
             
@@ -86,16 +86,16 @@ class GenreContextSearchService:
         
         return results
     
-    async def _search_with_auto_genre(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_with_auto_genre(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Auto-detect likely genre from initial search and use for context"""
         results = []
         
         try:
             # First, do a quick search to detect genre
-            detected_genres = await self._detect_artist_genre(artist, cookie_options)
+            detected_genres = await self._detect_artist_genre(artist, cookie_options, ytdlp_executor)
             
             for genre in detected_genres[:2]:  # Use top 2 detected genres
-                genre_results = await self._search_with_specific_genre(artist, album, genre, cookie_options)
+                genre_results = await self._search_with_specific_genre(artist, album, genre, cookie_options, ytdlp_executor)
                 results.extend(genre_results)
             
         except Exception as e:
@@ -103,7 +103,7 @@ class GenreContextSearchService:
         
         return results
     
-    async def _search_multiple_genres(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_multiple_genres(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search with multiple genre contexts"""
         results = []
         
@@ -112,7 +112,7 @@ class GenreContextSearchService:
             priority_genres = ["metal", "rock", "pop", "electronic", "hip-hop"]
             
             for genre in priority_genres:
-                genre_results = await self._search_with_specific_genre(artist, album, genre, cookie_options, limit=5)
+                genre_results = await self._search_with_specific_genre(artist, album, genre, cookie_options, ytdlp_executor, limit=5)
                 results.extend(genre_results)
             
         except Exception as e:
@@ -120,7 +120,7 @@ class GenreContextSearchService:
         
         return results
     
-    async def _search_with_music_terms(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_with_music_terms(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search with general music terms for context"""
         results = []
         
@@ -139,9 +139,19 @@ class GenreContextSearchService:
                         f"{artist} {term} discography"
                     ]
                 
-                for query in queries:
-                    query_results = await self._execute_search(query, artist, cookie_options, limit=6)
-                    results.extend(query_results)
+                # Execute queries in parallel for better performance
+                query_tasks = [
+                    self._execute_search(query, artist, cookie_options, ytdlp_executor, limit=6)
+                    for query in queries
+                ]
+                
+                query_results_list = await asyncio.gather(*query_tasks, return_exceptions=True)
+                
+                for query_results in query_results_list:
+                    if isinstance(query_results, Exception):
+                        print(f"GenreContextSearchService: Query failed: {query_results}")
+                    else:
+                        results.extend(query_results)
             
         except Exception as e:
             print(f"GenreContextSearchService: Music terms search failed: {e}")
@@ -149,7 +159,7 @@ class GenreContextSearchService:
         return results
     
     async def _search_with_specific_genre(self, artist: str, album: Optional[str] = None, 
-                                        genre: str = "", cookie_options: Optional[Dict[str, Any]] = None, limit: int = 8) -> List[Result]:
+                                        genre: str = "", cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None, limit: int = 8) -> List[Result]:
         """Search with a specific genre context"""
         results = []
         
@@ -169,18 +179,28 @@ class GenreContextSearchService:
                     f"{artist} {primary_genre} discography -compilation"
                 ]
             
-            for query in queries:
-                query_results = await self._execute_search(query, artist, cookie_options, limit)
-                # Filter for genre relevance
-                relevant = [r for r in query_results if self._is_genre_relevant(r, genre)]
-                results.extend(relevant)
+            # Execute queries in parallel for better performance
+            query_tasks = [
+                self._execute_search(query, artist, cookie_options, ytdlp_executor, limit)
+                for query in queries
+            ]
+            
+            query_results_list = await asyncio.gather(*query_tasks, return_exceptions=True)
+            
+            for query_results in query_results_list:
+                if isinstance(query_results, Exception):
+                    print(f"GenreContextSearchService: Genre query failed: {query_results}")
+                else:
+                    # Filter for genre relevance
+                    relevant = [r for r in query_results if self._is_genre_relevant(r, genre)]
+                    results.extend(relevant)
             
         except Exception as e:
             print(f"GenreContextSearchService: Genre '{genre}' search failed: {e}")
         
         return results
     
-    async def _detect_artist_genre(self, artist: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[str]:
+    async def _detect_artist_genre(self, artist: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[str]:
         """Detect artist's likely genre from a quick search"""
         detected_genres = []
         
@@ -199,15 +219,15 @@ class GenreContextSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("GenreContextSearchService: Warning - no ytdlp_executor provided, skipping genre detection")
+                return ["rock", "pop"]  # Fallback genres
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.encode() if isinstance(stdout, str) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
-            
-            if process.returncode == 0 and stdout:
+            if returncode == 0 and stdout:
                 lines = stdout.decode('utf-8').strip().split('\n')
                 
                 genre_mentions = {}
@@ -237,7 +257,7 @@ class GenreContextSearchService:
         
         return detected_genres or ["rock", "pop"]  # Default fallback genres
     
-    async def _execute_search(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None, limit: int = 8) -> List[Result]:
+    async def _execute_search(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None, limit: int = 8) -> List[Result]:
         """Execute a single search query"""
         results = []
         
@@ -255,15 +275,15 @@ class GenreContextSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("GenreContextSearchService: Warning - no ytdlp_executor provided, skipping query")
+                return results
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.encode() if isinstance(stdout, str) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=18)
-            
-            if process.returncode == 0 and stdout:
+            if returncode == 0 and stdout:
                 lines = stdout.decode('utf-8').strip().split('\n')
                 
                 for line in lines:

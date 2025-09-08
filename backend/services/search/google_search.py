@@ -24,7 +24,7 @@ class GoogleSearchService:
     
     def __init__(self):
         self.service_name = "google_search"    
-    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Use Google search to find YouTube album links
         
@@ -48,11 +48,11 @@ class GoogleSearchService:
         
         try:
             # Strategy 1: Google search for YouTube album links
-            google_results = await self._google_search_youtube_albums(artist, album, cookie_options)
+            google_results = await self._google_search_youtube_albums(artist, album, cookie_options, ytdlp_executor)
             results.extend(google_results)
             
             # Strategy 2: Site-specific search on YouTube
-            site_results = await self._site_specific_youtube_search(artist, album, cookie_options)
+            site_results = await self._site_specific_youtube_search(artist, album, cookie_options, ytdlp_executor)
             results.extend(site_results)
             
             print(f"GoogleSearchService: Found {len(results)} total results")
@@ -62,7 +62,7 @@ class GoogleSearchService:
         
         return results
     
-    async def _google_search_youtube_albums(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _google_search_youtube_albums(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Use Google search with site:youtube.com restriction"""
         results = []
         
@@ -84,7 +84,7 @@ class GoogleSearchService:
                 ]
             
             for query in queries:
-                query_results = await self._execute_google_search(query, artist, cookie_options)
+                query_results = await self._execute_google_search(query, artist, cookie_options, ytdlp_executor)
                 results.extend(query_results)
             
         except Exception as e:
@@ -92,7 +92,7 @@ class GoogleSearchService:
         
         return results
     
-    async def _site_specific_youtube_search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _site_specific_youtube_search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search specific YouTube URL patterns"""
         results = []
         
@@ -112,7 +112,7 @@ class GoogleSearchService:
                 ]
             
             for query in queries:
-                query_results = await self._search_with_yt_dlp(query, artist, cookie_options)
+                query_results = await self._search_with_yt_dlp(query, artist, cookie_options, ytdlp_executor)
                 results.extend(query_results)
             
         except Exception as e:
@@ -120,7 +120,7 @@ class GoogleSearchService:
         
         return results
     
-    async def _execute_google_search(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _execute_google_search(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Execute Google search and extract YouTube URLs
         Note: This is a simplified implementation. Real Google search would require API access.
@@ -142,15 +142,15 @@ class GoogleSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("GoogleSearchService: Warning - no ytdlp_executor provided, skipping query")
+                return results
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.encode() if isinstance(stdout, str) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
-            
-            if process.returncode == 0 and stdout:
+            if returncode == 0 and stdout:
                 lines = stdout.decode('utf-8').strip().split('\n')
                 
                 for line in lines:
@@ -195,7 +195,7 @@ class GoogleSearchService:
         
         return results
     
-    async def _search_with_yt_dlp(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_with_yt_dlp(self, query: str, artist: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Use yt-dlp for site-specific searches"""
         results = []
         
@@ -213,15 +213,15 @@ class GoogleSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("GoogleSearchService: Warning - no ytdlp_executor provided, skipping query")
+                return results
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.encode() if isinstance(stdout, str) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
-            
-            if process.returncode == 0 and stdout:
+            if returncode == 0 and stdout:
                 lines = stdout.decode('utf-8').strip().split('\n')
                 
                 for line in lines:

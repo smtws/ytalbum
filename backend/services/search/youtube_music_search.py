@@ -23,7 +23,7 @@ class YouTubeMusicSearchService:
     
     def __init__(self):
         self.service_name = "youtube_music_search"    
-    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Search YouTube Music directly for artist albums
         
@@ -47,11 +47,11 @@ class YouTubeMusicSearchService:
         
         try:
             # Strategy 1: YouTube Music search for full albums
-            music_results = await self._search_youtube_music_albums(artist, album, cookie_options)
+            music_results = await self._search_youtube_music_albums(artist, album, cookie_options, ytdlp_executor)
             results.extend(music_results)
             
             # Strategy 2: Regular YouTube search with music keywords
-            youtube_results = await self._search_youtube_with_music_keywords(artist, album, cookie_options)
+            youtube_results = await self._search_youtube_with_music_keywords(artist, album, cookie_options, ytdlp_executor)
             results.extend(youtube_results)
             
             print(f"YouTubeMusicSearchService: Found {len(results)} total results")
@@ -61,7 +61,7 @@ class YouTubeMusicSearchService:
         
         return results
     
-    async def _search_youtube_music_albums(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_youtube_music_albums(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search YouTube Music specifically for albums"""
         results = []
         
@@ -86,16 +86,15 @@ class YouTubeMusicSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            # Run command
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("YouTubeMusicSearchService: Warning - no ytdlp_executor provided, skipping query")
+                return results
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.encode() if isinstance(stdout, str) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
-            
-            if process.returncode == 0 and stdout:
+            if returncode == 0 and stdout:
                 lines = stdout.decode('utf-8').strip().split('\n')
                 
                 for line in lines:
@@ -138,7 +137,7 @@ class YouTubeMusicSearchService:
         
         return results
     
-    async def _search_youtube_with_music_keywords(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_youtube_with_music_keywords(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search regular YouTube with music-specific keywords"""
         results = []
         
@@ -159,16 +158,26 @@ class YouTubeMusicSearchService:
                     f"{artist} album collection"
                 ]
             
-            for query in queries:
-                query_results = await self._search_single_youtube_query(query, cookie_options)
-                results.extend(query_results)
+            # Execute queries in parallel for better performance
+            query_tasks = [
+                self._search_single_youtube_query(query, cookie_options, ytdlp_executor)
+                for query in queries
+            ]
+            
+            query_results_list = await asyncio.gather(*query_tasks, return_exceptions=True)
+            
+            for query_results in query_results_list:
+                if isinstance(query_results, Exception):
+                    print(f"YouTubeMusicSearchService: Query failed: {query_results}")
+                else:
+                    results.extend(query_results)
             
         except Exception as e:
             print(f"YouTubeMusicSearchService: YouTube keyword search failed: {e}")
         
         return results
     
-    async def _search_single_youtube_query(self, query: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_single_youtube_query(self, query: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Execute a single YouTube search query"""
         results = []
         
@@ -187,15 +196,15 @@ class YouTubeMusicSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("YouTubeMusicSearchService: Warning - no ytdlp_executor provided, skipping query")
+                return results
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.encode() if isinstance(stdout, str) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=25)
-            
-            if process.returncode == 0 and stdout:
+            if returncode == 0 and stdout:
                 lines = stdout.decode('utf-8').strip().split('\n')
                 
                 for line in lines:

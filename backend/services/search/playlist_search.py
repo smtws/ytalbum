@@ -23,7 +23,7 @@ class PlaylistSearchService:
     
     def __init__(self):
         self.service_name = "playlist_search"    
-    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def search(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """
         Search for album playlists on YouTube
         
@@ -47,15 +47,15 @@ class PlaylistSearchService:
         
         try:
             # Strategy 1: Search for official playlists
-            official_results = await self._search_official_playlists(artist, album, cookie_options)
+            official_results = await self._search_official_playlists(artist, album, cookie_options, ytdlp_executor)
             results.extend(official_results)
             
             # Strategy 2: Search for user-created album playlists
-            user_results = await self._search_user_album_playlists(artist, album, cookie_options)
+            user_results = await self._search_user_album_playlists(artist, album, cookie_options, ytdlp_executor)
             results.extend(user_results)
             
             # Strategy 3: Search for label/compilation playlists
-            label_results = await self._search_label_playlists(artist, album, cookie_options)
+            label_results = await self._search_label_playlists(artist, album, cookie_options, ytdlp_executor)
             results.extend(label_results)
             
             print(f"PlaylistSearchService: Found {len(results)} total playlist results")
@@ -65,7 +65,7 @@ class PlaylistSearchService:
         
         return results
     
-    async def _search_official_playlists(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_official_playlists(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search for official artist/label playlists"""
         results = []
         
@@ -87,7 +87,7 @@ class PlaylistSearchService:
                 ]
             
             for query in queries:
-                playlist_results = await self._search_playlists_with_query(query, cookie_options)
+                playlist_results = await self._search_playlists_with_query(query, cookie_options, ytdlp_executor)
                 # Filter for official content
                 official_filtered = [r for r in playlist_results if self._is_likely_official(r)]
                 results.extend(official_filtered)
@@ -97,7 +97,7 @@ class PlaylistSearchService:
         
         return results
     
-    async def _search_user_album_playlists(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_user_album_playlists(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search for user-created album playlists"""
         results = []
         
@@ -117,7 +117,7 @@ class PlaylistSearchService:
                 ]
             
             for query in queries:
-                playlist_results = await self._search_playlists_with_query(query, cookie_options)
+                playlist_results = await self._search_playlists_with_query(query, cookie_options, ytdlp_executor)
                 # Filter for album-like content
                 album_filtered = [r for r in playlist_results if self._is_likely_album_playlist(r, artist, album)]
                 results.extend(album_filtered)
@@ -127,7 +127,7 @@ class PlaylistSearchService:
         
         return results
     
-    async def _search_label_playlists(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_label_playlists(self, artist: str, album: Optional[str] = None, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Search for record label and compilation playlists"""
         results = []
         
@@ -144,7 +144,7 @@ class PlaylistSearchService:
                     queries.append(f"{artist} album {keyword}")
             
             for query in queries:
-                playlist_results = await self._search_playlists_with_query(query, cookie_options)
+                playlist_results = await self._search_playlists_with_query(query, cookie_options, ytdlp_executor)
                 # Filter for label content
                 label_filtered = [r for r in playlist_results if self._is_likely_label_content(r)]
                 results.extend(label_filtered)
@@ -154,7 +154,7 @@ class PlaylistSearchService:
         
         return results
     
-    async def _search_playlists_with_query(self, query: str, cookie_options: Optional[Dict[str, Any]] = None) -> List[Result]:
+    async def _search_playlists_with_query(self, query: str, cookie_options: Optional[Dict[str, Any]] = None, ytdlp_executor: Optional[callable] = None) -> List[Result]:
         """Execute a single playlist search query"""
         results = []
         
@@ -172,15 +172,15 @@ class PlaylistSearchService:
                 browser_info = cookie_options["cookiesfrombrowser"]
                 cmd.extend(["--cookies-from-browser", browser_info[0]])
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Always use ytdlp_executor for optimal performance
+            if not ytdlp_executor:
+                print("PlaylistSearchService: Warning - no ytdlp_executor provided, skipping query")
+                return results
+                
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            stdout = stdout.encode() if isinstance(stdout, str) else stdout
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
-            
-            if process.returncode == 0 and stdout:
+            if returncode == 0 and stdout:
                 lines = stdout.decode('utf-8').strip().split('\n')
                 
                 for line in lines:

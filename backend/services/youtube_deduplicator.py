@@ -222,13 +222,14 @@ class YouTubeDeduplicator:
                 print(f"YouTubeDeduplicator: Preserved normalization metadata for {new_result.youtube_id}")
             
             # Also preserve any MusicBrainz or other enrichment data
-            if 'mbid' in existing_result.verification_metadata:
+            if any(k.startswith('mb_') or k == 'mbid' for k in existing_result.verification_metadata.keys()):
                 if not new_result.verification_metadata:
                     new_result.verification_metadata = {}
-                new_result.verification_metadata.update({
+                mb_metadata = {
                     k: v for k, v in existing_result.verification_metadata.items()
-                    if k.startswith('mb_') or k == 'mbid'
-                })
+                    if k.startswith('mb_') or k == 'mbid' or k == 'service'
+                }
+                new_result.verification_metadata.update(mb_metadata)
                 print(f"YouTubeDeduplicator: Preserved MusicBrainz metadata for {new_result.youtube_id}")
         
         # Preserve verification status if already verified
