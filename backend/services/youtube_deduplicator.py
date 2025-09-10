@@ -204,7 +204,7 @@ class YouTubeDeduplicator:
     def merge_with_existing_metadata(new_result: Result, existing_result: Result) -> Result:
         """
         Merge new result with existing metadata preservation
-        Keeps normalized and verification metadata from existing result
+        Preserves ANY existing metadata regardless of format (pre-normalization stage)
         
         Args:
             new_result: New result with potentially better raw data
@@ -213,24 +213,18 @@ class YouTubeDeduplicator:
         Returns:
             New result with preserved metadata
         """
-        # Preserve these metadata fields from existing result
+        # Preserve ANY existing metadata fields (agnostic to format)
         if existing_result.verification_metadata:
-            # Check if existing has normalization data
-            if 'normalized_title' in existing_result.verification_metadata:
-                # Preserve all normalization and enrichment data
-                new_result.verification_metadata = existing_result.verification_metadata.copy()
-                print(f"YouTubeDeduplicator: Preserved normalization metadata for {new_result.youtube_id}")
-            
-            # Also preserve any MusicBrainz or other enrichment data
-            if any(k.startswith('mb_') or k == 'mbid' for k in existing_result.verification_metadata.keys()):
-                if not new_result.verification_metadata:
-                    new_result.verification_metadata = {}
-                mb_metadata = {
-                    k: v for k, v in existing_result.verification_metadata.items()
-                    if k.startswith('mb_') or k == 'mbid' or k == 'service'
-                }
-                new_result.verification_metadata.update(mb_metadata)
-                print(f"YouTubeDeduplicator: Preserved MusicBrainz metadata for {new_result.youtube_id}")
+            new_result.verification_metadata = existing_result.verification_metadata.copy()
+            print(f"YouTubeDeduplicator: Preserved verification_metadata for {new_result.youtube_id}")
+        
+        if existing_result.normalized:
+            new_result.normalized = existing_result.normalized.copy()
+            print(f"YouTubeDeduplicator: Preserved normalized metadata for {new_result.youtube_id}")
+        
+        if existing_result.metadata:
+            new_result.metadata = existing_result.metadata.copy()
+            print(f"YouTubeDeduplicator: Preserved metadata for {new_result.youtube_id}")
         
         # Preserve verification status if already verified
         if existing_result.verified is not None:

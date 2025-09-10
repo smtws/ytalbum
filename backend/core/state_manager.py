@@ -86,11 +86,21 @@ class StateManager:
     
     async def send_state(self):
         """Send complete AppState to all connected clients"""
+        print(f"DEBUG: send_state called, {len(self.websockets)} websockets connected")
         if not self.websockets:
             return
         
         # Convert to dict with JSON-compatible datetime serialization
         state_dict = self.state.model_dump(mode='json')
+        
+        # Check actual data being sent
+        results = state_dict.get("results", [])
+        if results:
+            sample_result = results[-1]  # Last result
+            print(f"DEBUG: Sample result JSON keys: {list(sample_result.keys())}")
+            print(f"DEBUG: normalized field: {sample_result.get('normalized', 'MISSING')}")
+            print(f"DEBUG: metadata field: {sample_result.get('metadata', 'MISSING')}")
+        
         message = {
             "type": "state_update",
             "data": state_dict,
@@ -525,7 +535,7 @@ class StateManager:
             return
         
         # Check if already has normalization data
-        if result.verification_metadata and 'normalized_title' in result.verification_metadata:
+        if result.normalized and 'title' in result.normalized:
             print(f"StateManager: Result {result.youtube_id} already has normalization data")
             return
         
@@ -564,14 +574,24 @@ class StateManager:
                 return
             
             # Merge with any existing metadata
-            if current_result.verification_metadata:
+            if current_result.normalized:
+                # Convert current normalized data to old format for merge compatibility
+                current_old_format = {
+                    'normalized_title': current_result.normalized.get('title', ''),
+                    'normalized_artist': current_result.normalized.get('artist', ''),
+                    'normalized_album': current_result.normalized.get('album', '')
+                }
                 normalized_metadata = NormalizationService.merge_metadata(
-                    current_result.verification_metadata,
+                    current_old_format,
                     normalized_metadata
                 )
             
-            # Update the current result with normalized metadata
-            current_result.verification_metadata = normalized_metadata
+            # Update the current result with normalized metadata in new format
+            current_result.normalized = {
+                'title': normalized_metadata.get('normalized_title', ''),
+                'artist': normalized_metadata.get('normalized_artist', ''),
+                'album': normalized_metadata.get('normalized_album', '')
+            }
             self.state.update_timestamp()
             
             print(f"StateManager: Normalized {youtube_id} - '{normalized_metadata.get('normalized_title')}'")
@@ -587,11 +607,12 @@ class StateManager:
                 if self._is_better_content_quality(current_result, duplicate_result):
                     print(f"StateManager: New result has better content quality - removing existing duplicate")
                     # Transfer any existing metadata from duplicate to current result
-                    if duplicate_result.verification_metadata:
-                        # Merge metadata, keeping normalization from current result
-                        merged_metadata = duplicate_result.verification_metadata.copy()
-                        merged_metadata.update(current_result.verification_metadata)
-                        current_result.verification_metadata = merged_metadata
+                    if duplicate_result.normalized:
+                        # Keep current normalized data (better quality)
+                        pass
+                    if duplicate_result.metadata:
+                        # Transfer metadata from duplicate
+                        current_result.metadata = duplicate_result.metadata.copy()
                     
                     # Remove the lower quality duplicate from state
                     self._remove_result_from_state(duplicate_result, "after_normalization")
@@ -606,10 +627,8 @@ class StateManager:
                 else:
                     print(f"StateManager: Existing result has better content quality - removing current")
                     # Transfer normalization metadata to existing result if it doesn't have it
-                    if not duplicate_result.verification_metadata or 'normalized_title' not in duplicate_result.verification_metadata:
-                        if not duplicate_result.verification_metadata:
-                            duplicate_result.verification_metadata = {}
-                        duplicate_result.verification_metadata.update(current_result.verification_metadata)
+                    if not duplicate_result.normalized:
+                        duplicate_result.normalized = current_result.normalized.copy()
                         self.state.update_timestamp()
                     
                     # Remove current result from state (lower quality)
@@ -715,17 +734,17 @@ class StateManager:
         Only retrieves if normalized data exists and metadata not yet retrieved
         """
         # Check if normalization data exists
-        if not result.verification_metadata or 'normalized_title' not in result.verification_metadata:
+        if not result.normalized or 'title' not in result.normalized:
             return
         
         # Check if metadata already retrieved
-        if 'mbid' in result.verification_metadata:
+        if result.metadata and 'id' in result.metadata:
             print(f"StateManager: Result {result.youtube_id} already has metadata")
             return
         
         # Extract normalized data for metadata query
-        normalized_title = result.verification_metadata.get('normalized_title')
-        normalized_artist = result.verification_metadata.get('normalized_artist', result.artist)
+        normalized_title = result.normalized.get('title')
+        normalized_artist = result.normalized.get('artist', result.artist)
         
         if not normalized_title or not normalized_artist:
             print(f"StateManager: Missing normalized data for {result.youtube_id}")
@@ -761,6 +780,12 @@ class StateManager:
             youtube_id = result.youtube_id
             print(f"StateManager: Starting metadata retrieval for {youtube_id} - {artist} / {album}")
             
+            # Find current result first
+            current_result = self.state.get_result_by_youtube_id(youtube_id)
+            if not current_result:
+                print(f"StateManager: Result {youtube_id} not found for metadata processing")
+                return
+            
             # Check cache first
             cached_metadata = self.metadata_cache.get("musicbrainz", artist, album)
             if cached_metadata is not None:
@@ -775,33 +800,53 @@ class StateManager:
                 self.metadata_cache.set("musicbrainz", artist, album, metadata)
                 # Verification complete
             
-            # Find current result by YouTube ID (might have been replaced during retrieval)
+            # Recheck current result by YouTube ID (might have been replaced during retrieval)
             current_result = self.state.get_result_by_youtube_id(youtube_id)
             
             if not current_result:
                 print(f"StateManager: Result {youtube_id} was removed during metadata retrieval")
                 return
             
-            # Merge metadata into verification_metadata
-            if not current_result.verification_metadata:
-                current_result.verification_metadata = {}
+            # Add normalization data AFTER re-fetching the result object
+            normalized_title = self.normalization_service.normalize_album_title(current_result.title, current_result.artist)
+            normalized_artist = self.normalization_service.normalize_artist_name(current_result.artist)
             
+            # Populate structured normalization field
+            if not current_result.normalized:
+                current_result.normalized = {}
+            current_result.normalized.update({
+                "title": normalized_title,
+                "artist": normalized_artist
+            })
+            
+            # Send state update after normalization
+            await self.send_state()
+            
+            # Store metadata in new format
             if metadata:
-                # Add MusicBrainz metadata to existing verification data
-                current_result.verification_metadata.update(metadata)
+                current_result.metadata = metadata.copy()
+                
+                # ALSO populate structured metadata field
+                if not current_result.metadata:
+                    current_result.metadata = {}
+                current_result.metadata.update(metadata)
+                
                 self.state.update_timestamp()
                 # Removed verification stats  # Update the statistics after marking as verified
                 
-                print(f"StateManager: Added MusicBrainz metadata for {youtube_id} - MBID: {metadata.get('mbid')}")
+                print(f"StateManager: Added MusicBrainz metadata for {youtube_id} - ID: {metadata.get('id')}")
+                
+                # Send state update after metadata retrieval
+                await self.send_state()
                 
                 # Track verification success
                 
                 # Check for MBID-based duplicates after successful metadata retrieval
-                mbid = metadata.get('mbid')
-                if mbid:
-                    duplicate_results = self._find_mbid_duplicates(current_result, mbid)
+                metadata_id = metadata.get('id')
+                if metadata_id:
+                    duplicate_results = self._find_metadata_id_duplicates(current_result, metadata_id)
                     if duplicate_results:
-                        print(f"StateManager: Found {len(duplicate_results)} MBID duplicates for {mbid}")
+                        print(f"StateManager: Found {len(duplicate_results)} metadata ID duplicates for {metadata_id}")
                         
                         # Find the best quality result among all duplicates + current
                         all_results = [current_result] + duplicate_results
@@ -814,7 +859,7 @@ class StateManager:
                         
                         # Merge metadata from all duplicates into best result
                         other_results = [r for r in all_results if r != best_result]
-                        best_result = self._merge_mbid_metadata(best_result, other_results)
+                        best_result = self._merge_metadata_id_metadata(best_result, other_results)
                         
                         # Update state: keep best result, remove others
                         for result_to_remove in other_results:
@@ -827,11 +872,11 @@ class StateManager:
                             if result_to_remove.youtube_id in self.metadata_tasks:
                                 self.metadata_tasks[result_to_remove.youtube_id].cancel()
                                 del self.metadata_tasks[result_to_remove.youtube_id]
-                                print(f"StateManager: Cancelled metadata task for removed MBID duplicate {result_to_remove.youtube_id}")
+                                print(f"StateManager: Cancelled metadata task for removed metadata ID duplicate {result_to_remove.youtube_id}")
                             
                             # If we're removing the current result, we need to stop processing it
                             if result_to_remove.youtube_id == current_result.youtube_id:
-                                print(f"StateManager: Current result {current_result.youtube_id} removed - better MBID duplicate {best_result.youtube_id} kept")
+                                print(f"StateManager: Current result {current_result.youtube_id} removed - better metadata ID duplicate {best_result.youtube_id} kept")
                                 return  # Don't continue processing removed result
                         
                         # Send state update after MBID deduplication
@@ -841,8 +886,10 @@ class StateManager:
                         print(f"StateManager: Running final single track cleanup after MBID deduplication")
                         await self._remove_single_tracks()
             else:
-                # Mark as unverified (not found in MusicBrainz)
-                current_result.verification_metadata['mb_not_found'] = datetime.utcnow().isoformat()
+                # Mark as unverified (not found in MusicBrainz) in new format
+                if not current_result.metadata:
+                    current_result.metadata = {}
+                current_result.metadata['mb_not_found'] = datetime.utcnow().isoformat()
                 self.state.update_timestamp()
                 # Removed verification stats  # Update the statistics after marking as unverified
                 
@@ -948,11 +995,11 @@ class StateManager:
         Returns:
             Existing duplicate result or None if no duplicate found
         """
-        if not target_result.verification_metadata:
+        if not target_result.normalized:
             return None
         
-        target_artist = target_result.verification_metadata.get('normalized_artist', '').lower()
-        target_album = target_result.verification_metadata.get('normalized_album', '').lower()
+        target_artist = target_result.normalized.get('artist', '').lower()
+        target_album = target_result.normalized.get('album', '').lower()
         
         if not target_artist or not target_album:
             return None
@@ -962,49 +1009,49 @@ class StateManager:
             if existing_result.youtube_id == target_result.youtube_id:
                 continue  # Skip self
                 
-            if not existing_result.verification_metadata:
+            if not existing_result.normalized:
                 continue
                 
-            existing_artist = existing_result.verification_metadata.get('normalized_artist', '').lower()
-            existing_album = existing_result.verification_metadata.get('normalized_album', '').lower()
+            existing_artist = existing_result.normalized.get('artist', '').lower()
+            existing_album = existing_result.normalized.get('album', '').lower()
             
             if existing_artist == target_artist and existing_album == target_album:
                 return existing_result
         
         return None
     
-    def _find_mbid_duplicates(self, target_result: Result, mbid: str) -> List[Result]:
+    def _find_metadata_id_duplicates(self, target_result: Result, metadata_id: str) -> List[Result]:
         """
-        Find existing results in state.results with same MusicBrainz ID
+        Find existing results in state.results with same metadata ID
         
         Args:
             target_result: Result to exclude from search (usually the current result)
-            mbid: MusicBrainz ID to search for
+            metadata_id: Metadata ID to search for
             
         Returns:
             List of existing duplicate results (excluding target_result)
         """
         duplicates = []
         
-        if not mbid:
+        if not metadata_id:
             return duplicates
         
         for existing_result in self.state.results:
             if existing_result.youtube_id == target_result.youtube_id:
                 continue  # Skip target result
                 
-            if not existing_result.verification_metadata:
+            if not existing_result.metadata:
                 continue
                 
-            existing_mbid = existing_result.verification_metadata.get('mbid')
-            if existing_mbid == mbid:
+            existing_id = existing_result.metadata.get('id')
+            if existing_id == metadata_id:
                 duplicates.append(existing_result)
         
         return duplicates
     
-    def _merge_mbid_metadata(self, best_result: Result, duplicate_results: List[Result]) -> Result:
+    def _merge_metadata_id_metadata(self, best_result: Result, duplicate_results: List[Result]) -> Result:
         """
-        Merge MusicBrainz metadata from duplicate results into the best result
+        Merge metadata from duplicate results into the best result
         
         Args:
             best_result: The result to keep (highest content quality)
@@ -1013,16 +1060,16 @@ class StateManager:
         Returns:
             The best_result with merged metadata
         """
-        if not best_result.verification_metadata:
-            best_result.verification_metadata = {}
+        if not best_result.metadata:
+            best_result.metadata = {}
         
         # Merge metadata from all duplicates
         for duplicate in duplicate_results:
-            if duplicate.verification_metadata:
+            if duplicate.metadata:
                 # Preserve existing metadata, but don't overwrite better data
-                for key, value in duplicate.verification_metadata.items():
-                    if key not in best_result.verification_metadata or not best_result.verification_metadata[key]:
-                        best_result.verification_metadata[key] = value
+                for key, value in duplicate.metadata.items():
+                    if key not in best_result.metadata or not best_result.metadata[key]:
+                        best_result.metadata[key] = value
         
         print(f"StateManager: Merged MBID metadata from {len(duplicate_results)} duplicates into {best_result.youtube_id}")
         return best_result
@@ -1081,10 +1128,10 @@ class StateManager:
             # Group results by normalized artist
             artist_results = {}
             for result in self.state.results:
-                if not result.verification_metadata:
+                if not result.normalized:
                     continue
                     
-                artist = result.verification_metadata.get('normalized_artist', '').lower()
+                artist = result.normalized.get('artist', '').lower()
                 if not artist:
                     continue
                     

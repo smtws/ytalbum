@@ -142,6 +142,10 @@ class Result(BaseModel):
     download_status: DownloadStatus = DownloadStatus.QUEUED
     output_path: Optional[str] = None
     
+    # Structured enrichment data (separate from verification_metadata for deduplication compatibility)
+    normalized: Dict[str, Any] = Field(default_factory=dict)  # From NormalizationService
+    metadata: Dict[str, Any] = Field(default_factory=dict)    # From MusicBrainzService
+    
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()

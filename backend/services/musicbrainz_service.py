@@ -181,7 +181,7 @@ class MusicBrainzService:
         metadata = {
             'service': 'musicbrainz',
             'retrieved_at': datetime.utcnow().isoformat(),
-            'mbid': release['id'],
+            'id': release['id'],
             'mb_title': release.get('title'),
             'mb_artist': None,
             'mb_date': release.get('date'),
@@ -214,7 +214,7 @@ class MusicBrainzService:
             total_tracks = sum(medium.get('track-count', 0) for medium in release['media'])
             metadata['mb_track_count'] = total_tracks if total_tracks > 0 else None
         
-        print(f"MusicBrainzService: Enriched metadata for MBID {metadata['mbid']}")
+        print(f"MusicBrainzService: Enriched metadata for ID {metadata['id']}")
         return metadata
     
     async def close(self):
