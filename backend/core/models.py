@@ -47,28 +47,15 @@ class CookieInfo(BaseModel):
     yt_dlp_compatible: bool = False
 
 
+# Clean nested structure models
 class CurrentState(BaseModel):
-    """Real-time activity and progress tracking for user feedback"""
-    # Activity counts
-    items_found: int = 0
-    items_normalized: int = 0
-    items_verified: int = 0
-    items_unverified: int = 0
-    items_failed: int = 0
-    
-    # Current activity status
+    """Volatile stuff like current action"""
+    status: AppStatus = AppStatus.IDLE
     last_activity: str = "Ready to search"
     last_activity_timestamp: datetime = Field(default_factory=datetime.utcnow)
+    active_strategies: List[str] = Field(default_factory=list)
     
-    # Progress indicators
-    is_searching: bool = False
-    is_normalizing: bool = False
-    is_verifying: bool = False
-    
-    # Search strategy progress
-    active_strategy: Optional[str] = None
-    strategies_completed: int = 0
-    strategies_total: int = 0
+    # Note: Activity state is tracked via status, last_activity, and active_strategies
     
     class Config:
         json_encoders = {
@@ -82,9 +69,26 @@ class CurrentState(BaseModel):
     
     def get_progress_percent(self) -> int:
         """Get overall progress percentage"""
-        if self.strategies_total == 0:
-            return 0
-        return int((self.strategies_completed / self.strategies_total) * 100)
+        # Note: This method is now deprecated since strategies_completed/total moved to Totals
+        # Use AppState.get_progress_percent() instead
+        return 0
+
+
+class Totals(BaseModel):
+    """Strategy progress and results tracking"""
+    strategies_completed: int = 0
+    strategies_total: int = 0
+    results: int = 0
+    found: int = 0
+    duplicates: int = 0
+    singles_removed: int = 0
+
+
+class Job(BaseModel):
+    """Contains stuff like query and timestamp of current search/job"""
+    query: str = ""
+    started_at: Optional[datetime] = None
+    strategies_completed: List[str] = Field(default_factory=list)
 
 
 class Config(BaseModel):
@@ -95,6 +99,17 @@ class Config(BaseModel):
     max_parallel_downloads: int = 3
     remove_intro_outro: bool = True
     debug: bool = False
+    
+    # Search configuration  
+    enabled_strategies: List[str] = Field(default_factory=lambda: [
+        "channel_search",
+        "youtube_music_search", 
+        "playlist_search",
+        "direct_album_search",
+        "google_search",
+        "genre_context_search",
+        "alternative_title_search"
+    ])
     
     # Cookie configuration
     cookie_info: CookieInfo = Field(default_factory=CookieInfo)
@@ -134,32 +149,17 @@ class Result(BaseModel):
 
 
 class AppState(BaseModel):
-    """Single source of truth - all application state"""
-    # Application status
-    status: AppStatus = AppStatus.IDLE
+    """Clean nested structure - single source of truth"""
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     
     # Configuration
     config: Config = Field(default_factory=Config)
     
-    # Real-time activity tracking
-    current_state: CurrentState = Field(default_factory=CurrentState)
-    
-    # Search state
-    search_query: str = ""
-    search_started_at: Optional[datetime] = None
-    search_strategies_completed: List[str] = Field(default_factory=list)
-    search_strategies_total: List[str] = Field(default_factory=list)
-    
-    # Results (ordered list - NEVER dict)
-    results: List[Result] = Field(default_factory=list)
-    
-    # Statistics (legacy - use current_state for real-time)
-    total_found: int = 0
-    total_verified: int = 0
-    total_unverified: int = 0
-    total_failed: int = 0
-    duplicates_removed: int = 0
+    # Clean nested structure matching your design
+    current: CurrentState = Field(default_factory=CurrentState)    # Volatile stuff like current action
+    totals: Totals = Field(default_factory=Totals)                # Contains counters
+    job: Job = Field(default_factory=Job)                         # Contains stuff like query and timestamp
+    results: List[Result] = Field(default_factory=list)          # Speaks for itself
     
     # Download state
     download_queue: List[str] = Field(default_factory=list)  # result IDs
@@ -198,7 +198,7 @@ class AppState(BaseModel):
             return False  # Duplicate
         
         self.results.append(result)
-        self.total_found += 1
+        # Don't modify counters here - let StateManager handle counting
         self.update_timestamp()
         return True
     
@@ -207,8 +207,7 @@ class AppState(BaseModel):
         for i, result in enumerate(self.results):
             if result.id == result_id:
                 del self.results[i]
-                self.total_found -= 1
-                self.duplicates_removed += 1
+                # Don't modify counters here - let StateManager handle counting
                 self.update_timestamp()
                 return True
         return False
@@ -237,5 +236,11 @@ class AppState(BaseModel):
             "verified": verified,
             "unverified": unverified,
             "pending": pending,
-            "duplicates_removed": self.duplicates_removed
+            "duplicates_removed": self.totals.duplicates_removed
         }
+    
+    def get_progress_percent(self) -> int:
+        """Get overall search progress percentage"""
+        if self.totals.strategies_total == 0:
+            return 0
+        return int((self.totals.strategies_completed / self.totals.strategies_total) * 100)

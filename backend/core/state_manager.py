@@ -6,6 +6,7 @@ THE ONLY component that modifies AppState. Single source of truth coordinator.
 
 import asyncio
 import json
+import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Callable
 from fastapi import WebSocket
@@ -37,6 +38,10 @@ class StateManager:
         self.websockets: List[WebSocket] = []
         self.search_tasks: List[asyncio.Task] = []
         
+        # Track YouTube IDs already counted as duplicates (prevent double-counting)
+        self.duplicate_counted_ids: set = set()
+        
+        
         # Detect and store cookie information
         self.state.config.cookie_info = CookieService.detect_and_create_cookie_info()
         
@@ -56,6 +61,7 @@ class StateManager:
         self.verification_cache = VerificationCache(cache_duration_minutes=30)
         
         # Initialize metadata services and cache
+        self.normalization_service = NormalizationService()
         self.musicbrainz_service = MusicBrainzService()
         self.metadata_cache = MetadataCache(cache_duration_hours=24)
         
@@ -65,6 +71,7 @@ class StateManager:
         # Track async tasks for race condition handling
         self.normalization_tasks: Dict[str, asyncio.Task] = {}  # youtube_id -> task
         self.metadata_tasks: Dict[str, asyncio.Task] = {}  # youtube_id -> task
+        
         
     async def add_websocket(self, websocket: WebSocket):
         """Add WebSocket connection"""
@@ -82,8 +89,8 @@ class StateManager:
         if not self.websockets:
             return
         
-        # Convert to dict and handle datetime serialization
-        state_dict = self.state.model_dump()
+        # Convert to dict with JSON-compatible datetime serialization
+        state_dict = self.state.model_dump(mode='json')
         message = {
             "type": "state_update",
             "data": state_dict,
@@ -103,27 +110,39 @@ class StateManager:
         for ws in disconnected:
             self.websockets.remove(ws)
     
-    async def start_search(self, query: str, strategies: List[str]):
-        """Start search process - resets state and coordinates all services"""
+    async def start_search(self, query: str):
+        """Start search process - creates fresh AppState and coordinates all services"""
+        # Prevent duplicate search requests
+        if self.state.current.status == AppStatus.SEARCHING:
+            print(f"StateManager: Search already in progress, ignoring duplicate request for '{query}'")
+            return
+            
         print(f"StateManager: Starting search for '{query}'")
         
-        # Reset state
-        self.state.search_query = query
-        self.state.search_started_at = datetime.utcnow()
-        self.state.search_strategies_completed = []
-        self.state.search_strategies_total = strategies
-        self.state.results = []
-        self.state.total_found = 0
-        self.state.total_verified = 0
-        self.state.total_unverified = 0
-        self.state.total_failed = 0
-        self.state.duplicates_removed = 0
-        self.state.status = AppStatus.SEARCHING
-        self.state.update_timestamp()
+        # Create fresh AppState object (resets ALL counters and tracking)
+        old_config = self.state.config  # Preserve config
+        self.state = AppState()
+        self.state.config = old_config  # Restore config
         
-        # Reset activity tracking
-        self.state.current_state = CurrentState()
-        self.state.current_state.strategies_total = len(strategies)
+        # Reset duplicate tracking
+        self.duplicate_counted_ids.clear()
+        
+        # Clear all caches at search start (fresh search, no cached data)
+        self.verification_cache.cache.clear()
+        if hasattr(self, 'normalization_service') and hasattr(self.normalization_service, 'cache'):
+            self.normalization_service.cache.clear()
+        if hasattr(self, 'musicbrainz_service') and hasattr(self.musicbrainz_service, 'cache'):
+            self.musicbrainz_service.cache.clear()
+        
+        # Set search parameters
+        self.state.job.query = query
+        self.state.job.started_at = datetime.utcnow()
+        self.state.job.strategies_completed = []
+        self.state.current.status = AppStatus.SEARCHING
+        # Use enabled strategies from config
+        strategies = self.state.config.enabled_strategies
+        self.state.totals.strategies_total = len(strategies)
+        self.state.update_timestamp()
         
         # Cancel any existing search tasks
         for task in self.search_tasks:
@@ -144,7 +163,7 @@ class StateManager:
         for strategy in strategies:
             if strategy in self.search_services:
                 task = asyncio.create_task(
-                    self._run_search_service(strategy, self.state.search_query)
+                    self._run_search_service(strategy, self.state.job.query)
                 )
                 search_tasks.append(task)
                 print(f"StateManager: Started search service: {strategy}")
@@ -175,29 +194,26 @@ class StateManager:
             for result in results:
                 dedup_result = YouTubeDeduplicator.should_add_result(result, self.state.results)
                 
-                if dedup_result == "replace":
-                    # Better quality duplicate found - replace existing
-                    is_available = await self._check_availability_before_adding(result, cookie_options)
-                    
-                    if is_available:
-                        # Find and replace the existing result
-                        existing = YouTubeDeduplicator.find_duplicate(result, self.state.results)
-                        if existing:
-                            # Merge with existing metadata before replacing
-                            result = YouTubeDeduplicator.merge_with_existing_metadata(result, existing)
-                            
-                            # Replace existing result with better quality one
-                            existing_index = self.state.results.index(existing)
-                            self.state.results[existing_index] = result
-                            print(f"StateManager: Replaced {result.youtube_id} with better metadata")
-                            
-                            # Track the found item (replacement)
-                            await self._increment_found(result.title, result.artist)
-                            # Trigger normalization if needed
-                            await self._trigger_normalization_if_needed(result)
-                    else:
-                        await self._increment_failed(result.title, "unavailable")
+                if dedup_result == "merge":
+                    # Better quality duplicate found - merge metadata with existing
+                    existing = YouTubeDeduplicator.find_duplicate(result, self.state.results)
+                    if existing:
+                        # Merge better metadata into existing result (no availability check needed)
+                        merged_result = self._merge_metadata(existing, result)
                         
+                        # Update the existing result in place
+                        existing_index = self.state.results.index(existing)
+                        self.state.results[existing_index] = merged_result
+                        print(f"StateManager: Merged better metadata for {result.youtube_id}")
+                        
+                        # Track the merge (but don't increment found count)
+                        await self._update_activity(f"Enhanced {merged_result.artist} - {merged_result.title}")
+                        
+                        # Update state and continue normalization if needed
+                        self.state.update_timestamp()
+                        await self.send_state()
+                        await self._trigger_normalization_if_needed(merged_result)
+                
                 elif dedup_result == True:
                     # Unique result - add normally
                     is_available = await self._check_availability_before_adding(result, cookie_options)
@@ -206,26 +222,37 @@ class StateManager:
                         success = self.state.add_result(result)
                         if success:
                             added_count += 1
-                            # Track the found item
-                            await self._increment_found(result.title, result.artist)
+                            # Update results count for frontend responsiveness
+                            self._update_results_count()
+                            # Track item as successfully found and added to AppState
+                            self.state.totals.found += 1
+                            
+                            print(f"StateManager: Found counter incremented to {self.state.totals.found} for {result.youtube_id}")
                             # Trigger normalization for albums/playlists
                             await self._trigger_normalization_if_needed(result)
+                        else:
+                            # AppState.add_result() returned False - race condition duplicate
+                            # Removed counting logic
+                            pass
                     else:
-                        await self._increment_failed(result.title, "unavailable")
+                        # Removed counting logic
+                        pass
                 
-                # If dedup_result == False, skip (existing duplicate is better)
+                else:  # dedup_result == False
+                    # Skip - existing duplicate is better (never added to AppState, so no duplicate counter)
+                    pass
             
             print(f"StateManager: {strategy_name} added {added_count}/{len(results)} unique results")
             await self._complete_strategy(strategy_name, added_count)
             
             # Check if all strategies are complete and do first cleanup
-            if len(self.state.search_strategies_completed) >= len(self.state.search_strategies_total):
+            if len(self.state.job.strategies_completed) >= self.state.totals.strategies_total:
                 print(f"StateManager: All search strategies completed - running single track cleanup")
                 await self._remove_single_tracks()
             
         except Exception as e:
             print(f"StateManager: Search service {strategy_name} failed: {e}")
-            await self._increment_failed(strategy_name, str(e))
+            # Removed counting logic
             await self.search_strategy_completed(strategy_name, 0)
 
     async def add_result(self, result: Result) -> bool:
@@ -235,12 +262,12 @@ class StateManager:
         """
         # Check for YouTube ID duplicate using deduplicator
         if not YouTubeDeduplicator.should_add_result(result, self.state.results):
-            self.state.duplicates_removed += 1
-            return False
+            return False  # Never added to AppState, so no duplicate counter
         
         # Add result
         success = self.state.add_result(result)
         if success:
+            self._update_results_count()
             print(f"StateManager: Added result {result.id} - {result.title}")
             await self.send_state()
         
@@ -252,7 +279,8 @@ class StateManager:
         if success:
             # Update statistics based on verification status
             if 'verified' in updates:
-                self._update_verification_stats()
+                # Removed verification stats
+                pass
             
             print(f"StateManager: Updated result {result_id} with {list(updates.keys())}")
             await self.send_state()
@@ -263,6 +291,7 @@ class StateManager:
         """Remove result (e.g., failed validation, low quality)"""
         success = self.state.remove_result(result_id)
         if success:
+            self._update_results_count()
             print(f"StateManager: Removed result {result_id} - {reason}")
             await self.send_state()
         
@@ -276,12 +305,12 @@ class StateManager:
     
     async def search_strategy_completed(self, strategy_name: str, results_count: int):
         """Mark search strategy as completed"""
-        if strategy_name not in self.state.search_strategies_completed:
-            self.state.search_strategies_completed.append(strategy_name)
+        if strategy_name not in self.state.job.strategies_completed:
+            self.state.job.strategies_completed.append(strategy_name)
             print(f"StateManager: Strategy '{strategy_name}' completed with {results_count} results")
         
         # Check if all strategies completed
-        if len(self.state.search_strategies_completed) >= len(self.state.search_strategies_total):
+        if len(self.state.job.strategies_completed) >= self.state.totals.strategies_total:
             await self.search_completed()
         
         await self.send_state()
@@ -312,36 +341,38 @@ class StateManager:
     
     async def search_completed(self):
         """All search strategies completed"""
-        self.state.status = AppStatus.IDLE  # No need for separate verification phase
-        print(f"StateManager: Search completed. Found {self.state.total_found} results")
+        self.state.current.status = AppStatus.IDLE  # No need for separate verification phase
+        print(f"StateManager: Search completed. Found {self.state.totals.found} results")
+        
+        # Search completed - all strategies finished
         
         # Filter out single tracks (keep only multi-track albums/playlists)
         initial_count = len(self.state.results)
+        single_tracks = [r for r in self.state.results if r.track_count is not None and r.track_count <= 1]
         multi_track_results = [r for r in self.state.results if r.track_count is None or r.track_count > 1]
-        single_track_count = initial_count - len(multi_track_results)
+        single_track_count = len(single_tracks)
         
         if single_track_count > 0:
+            # Track each single track removal as a duplicate
+            for single_track in single_tracks:
+                # Removed counting logic
+                pass
+            
             self.state.results = multi_track_results
-            self.state.total_found = len(multi_track_results)
             print(f"StateManager: Filtered out {single_track_count} single tracks, "
                   f"kept {len(multi_track_results)} multi-track results")
         
         # All results are already verified during addition
-        stats = self.state.get_statistics()
-        print(f"StateManager: All results pre-verified - "
-              f"{stats['verified']} available, {stats['unverified']} skipped")
+        # Removed statistics
         
         # Set final status and activity
-        await self._set_search_status()  # Reset all flags
+        self.state.current.status = AppStatus.IDLE
+        self.state.current.active_strategies.clear()
         
         total_items = len(self.state.results)
-        normalized_items = self.state.current_state.items_normalized
         
         if total_items == 0:
             await self._update_activity("Search completed - no results found")
-        elif normalized_items > 0:
-            await self._update_activity(f"Search completed - found {total_items} items, normalized {normalized_items}")
-        else:
             await self._update_activity(f"Search completed - found {total_items} items")
     
     async def verify_all_results(self):
@@ -401,15 +432,13 @@ class StateManager:
                     pass
         
         # Update statistics
-        self._update_verification_stats()
+        # Removed verification stats
         
         # Set status back to idle
-        self.state.status = AppStatus.IDLE
+        self.state.current.status = AppStatus.IDLE
         
         # Log final stats
-        stats = self.state.get_statistics()
-        print(f"StateManager: Verification complete - "
-              f"{stats['verified']} verified, {stats['unverified']} unavailable")
+        # Removed statistics
         
         # Send final state update
         await self.send_state()
@@ -450,15 +479,14 @@ class StateManager:
             result.error_message = error_msg
         
         # Update statistics and send state
-        self._update_verification_stats()
+        # Removed verification stats
         await self.send_state()
     
     def _update_verification_stats(self):
         """Update verification statistics"""
-        stats = self.state.get_statistics()
-        self.state.total_verified = stats["verified"]
-        self.state.total_unverified = stats["unverified"]
-        # Keep total_found as is (includes pending)
+        # Statistics are calculated dynamically from results
+        # No need to maintain separate counters
+        pass
     
     async def get_state(self) -> AppState:
         """Get current state (read-only access)"""
@@ -475,15 +503,15 @@ class StateManager:
     
     def get_search_progress(self) -> Dict[str, Any]:
         """Get search progress information"""
-        completed = len(self.state.search_strategies_completed)
-        total = len(self.state.search_strategies_total)
+        completed = len(self.state.job.strategies_completed)
+        total = self.state.totals.strategies_total
         
         return {
             "completed_strategies": completed,
             "total_strategies": total,
             "progress_percent": (completed / total * 100) if total > 0 else 0,
-            "current_status": self.state.status,
-            "results_found": self.state.total_found
+            "current_status": self.state.current.status,
+# Removed results_found counter
         }
     
     async def _trigger_normalization_if_needed(self, result: Result):
@@ -549,10 +577,6 @@ class StateManager:
             print(f"StateManager: Normalized {youtube_id} - '{normalized_metadata.get('normalized_title')}'")
             
             # Track normalization completion
-            await self._increment_normalized(
-                normalized_metadata.get('normalized_title', current_result.title),
-                normalized_metadata.get('normalized_artist', current_result.artist)
-            )
             
             # Check for normalized content duplicates before metadata retrieval
             duplicate_result = self._find_normalized_duplicate(current_result)
@@ -561,22 +585,24 @@ class StateManager:
                 
                 # Compare content quality to decide which to keep
                 if self._is_better_content_quality(current_result, duplicate_result):
-                    print(f"StateManager: New result has better content quality - replacing existing")
-                    # Preserve any existing metadata from duplicate
+                    print(f"StateManager: New result has better content quality - removing existing duplicate")
+                    # Transfer any existing metadata from duplicate to current result
                     if duplicate_result.verification_metadata:
                         # Merge metadata, keeping normalization from current result
                         merged_metadata = duplicate_result.verification_metadata.copy()
                         merged_metadata.update(current_result.verification_metadata)
                         current_result.verification_metadata = merged_metadata
                     
-                    # Replace duplicate with current result
-                    self._replace_result_in_state(duplicate_result, current_result)
+                    # Remove the lower quality duplicate from state
+                    self._remove_result_from_state(duplicate_result, "after_normalization")
+                    # Track duplicate removal
+                    # Removed counting logic
                     
                     # Cancel any active metadata tasks for the duplicate
                     if duplicate_result.youtube_id in self.metadata_tasks:
                         self.metadata_tasks[duplicate_result.youtube_id].cancel()
                         del self.metadata_tasks[duplicate_result.youtube_id]
-                        print(f"StateManager: Cancelled metadata task for replaced duplicate {duplicate_result.youtube_id}")
+                        print(f"StateManager: Cancelled metadata task for removed duplicate {duplicate_result.youtube_id}")
                 else:
                     print(f"StateManager: Existing result has better content quality - removing current")
                     # Transfer normalization metadata to existing result if it doesn't have it
@@ -586,8 +612,10 @@ class StateManager:
                         duplicate_result.verification_metadata.update(current_result.verification_metadata)
                         self.state.update_timestamp()
                     
-                    # Remove current result from state
-                    self._remove_result_from_state(current_result)
+                    # Remove current result from state (lower quality)
+                    self._remove_result_from_state(current_result, "after_normalization")
+                    # Track duplicate removal  
+                    # Removed counting logic
                     
                     # Cancel any active normalization task for current result
                     if current_result.youtube_id in self.normalization_tasks:
@@ -611,95 +639,73 @@ class StateManager:
             if result.youtube_id in self.normalization_tasks:
                 del self.normalization_tasks[result.youtube_id]
     
+    # ====== METADATA MERGING METHODS ======
+    
+    def _merge_metadata(self, existing_result: Result, new_result: Result) -> Result:
+        """
+        Merge better metadata from new_result into existing_result
+        Preserves normalization/verification metadata from existing result
+        """
+        # Start with existing result to preserve verification metadata
+        merged = existing_result.model_copy(deep=True)
+        
+        # Update with better raw metadata from new result
+        if new_result.track_count and (not existing_result.track_count or new_result.track_count > existing_result.track_count):
+            merged.track_count = new_result.track_count
+            
+        if new_result.thumbnail_url and not existing_result.thumbnail_url:
+            merged.thumbnail_url = new_result.thumbnail_url
+            
+        if new_result.quality_score > existing_result.quality_score:
+            merged.quality_score = new_result.quality_score
+            
+        # Update discovered_by to reflect multiple sources
+        if new_result.discovered_by and new_result.discovered_by not in merged.discovered_by:
+            if merged.discovered_by:
+                merged.discovered_by += f", {new_result.discovered_by}"
+            else:
+                merged.discovered_by = new_result.discovered_by
+        
+        print(f"StateManager: Merged metadata - track_count: {merged.track_count}, thumbnail: {'yes' if merged.thumbnail_url else 'no'}, sources: {merged.discovered_by}")
+        
+        return merged
+    
     # ====== ACTIVITY TRACKING METHODS ======
     
     async def _update_activity(self, message: str):
         """Update current activity and send state"""
-        self.state.current_state.update_activity(message)
+        self.state.current.update_activity(message)
         await self.send_state()
     
-    async def _increment_found(self, title: str, artist: str = ""):
-        """Increment found counter and update activity"""
-        self.state.current_state.items_found += 1
-        
-        # Create user-friendly activity message
-        if artist:
-            activity_msg = f"Found {artist} - {title}"
-        else:
-            activity_msg = f"Found {title}"
-        
-        await self._update_activity(activity_msg)
+    def _update_results_count(self):
+        """Update results count - simple count of current results"""
+        self.state.totals.results = len(self.state.results)
     
-    async def _increment_normalized(self, normalized_title: str, artist: str = ""):
-        """Increment normalized counter and update activity"""
-        self.state.current_state.items_normalized += 1
-        
-        # Create user-friendly activity message
-        if artist:
-            activity_msg = f"Normalized {artist} - {normalized_title}"
-        else:
-            activity_msg = f"Normalized {normalized_title}"
-        
-        await self._update_activity(activity_msg)
-    
-    async def _increment_verified(self, title: str, artist: str = "", source: str = "MusicBrainz"):
-        """Increment verified counter and update activity"""
-        self.state.current_state.items_verified += 1
-        
-        # Create user-friendly activity message
-        if artist:
-            activity_msg = f"Verified {artist} - {title} with {source}"
-        else:
-            activity_msg = f"Verified {title} with {source}"
-        
-        await self._update_activity(activity_msg)
-    
-    async def _increment_unverified(self, title: str, artist: str = "", reason: str = ""):
-        """Increment unverified counter and update activity"""
-        self.state.current_state.items_unverified += 1
-        
-        # Create user-friendly activity message
-        if artist:
-            activity_msg = f"Could not verify {artist} - {title}"
-        else:
-            activity_msg = f"Could not verify {title}"
-        
-        if reason:
-            activity_msg += f" ({reason})"
-        
-        await self._update_activity(activity_msg)
-    
-    async def _increment_failed(self, title: str, reason: str = ""):
-        """Increment failed counter and update activity"""
-        self.state.current_state.items_failed += 1
-        
-        activity_msg = f"Failed: {title}"
-        if reason:
-            activity_msg += f" ({reason})"
-        
-        await self._update_activity(activity_msg)
+    # ====== COUNTING LOGIC REMOVED =======
+    # Only strategy progress and simple results count tracked in totals now
     
     async def _start_strategy(self, strategy_name: str):
         """Mark strategy as starting"""
-        self.state.current_state.active_strategy = strategy_name
-        self.state.current_state.is_searching = True
+        if strategy_name not in self.state.current.active_strategies:
+            self.state.current.active_strategies.append(strategy_name)
+        # Activity tracked via status and last_activity
         
         strategy_display = strategy_name.replace('_', ' ').title()
         await self._update_activity(f"Searching with {strategy_display}...")
     
     async def _complete_strategy(self, strategy_name: str, results_count: int):
         """Mark strategy as completed"""
-        self.state.current_state.strategies_completed += 1
-        self.state.current_state.active_strategy = None
+        self.state.totals.strategies_completed += 1
+        if strategy_name in self.state.current.active_strategies:
+            self.state.current.active_strategies.remove(strategy_name)
         
         strategy_display = strategy_name.replace('_', ' ').title()
         await self._update_activity(f"Completed {strategy_display} - found {results_count} items")
+        
+        # Trigger completion check
+        await self.search_strategy_completed(strategy_name, results_count)
     
-    async def _set_search_status(self, is_searching: bool = False, is_normalizing: bool = False, is_verifying: bool = False):
-        """Update search status flags"""
-        self.state.current_state.is_searching = is_searching
-        self.state.current_state.is_normalizing = is_normalizing
-        self.state.current_state.is_verifying = is_verifying
+    # Note: Activity tracking now handled via status, last_activity, and active_strategies
     
     # ====== METADATA RETRIEVAL METHODS ======
     
@@ -762,12 +768,12 @@ class StateManager:
                 print(f"StateManager: Using cached metadata for {artist} - {album}")
             else:
                 # Retrieve from MusicBrainz
-                await self._set_search_status(is_verifying=True)
+                # Verification status tracked via last_activity
                 metadata = await self.musicbrainz_service.search_release(artist, album)
                 
                 # Cache the result (including None for "not found")
                 self.metadata_cache.set("musicbrainz", artist, album, metadata)
-                await self._set_search_status(is_verifying=False)
+                # Verification complete
             
             # Find current result by YouTube ID (might have been replaced during retrieval)
             current_result = self.state.get_result_by_youtube_id(youtube_id)
@@ -784,15 +790,11 @@ class StateManager:
                 # Add MusicBrainz metadata to existing verification data
                 current_result.verification_metadata.update(metadata)
                 self.state.update_timestamp()
+                # Removed verification stats  # Update the statistics after marking as verified
                 
                 print(f"StateManager: Added MusicBrainz metadata for {youtube_id} - MBID: {metadata.get('mbid')}")
                 
                 # Track verification success
-                await self._increment_verified(
-                    album,
-                    artist,
-                    "MusicBrainz"
-                )
                 
                 # Check for MBID-based duplicates after successful metadata retrieval
                 mbid = metadata.get('mbid')
@@ -816,21 +818,21 @@ class StateManager:
                         
                         # Update state: keep best result, remove others
                         for result_to_remove in other_results:
-                            # If removing current result, we need to handle it specially
+                            # Remove lower quality result from state (including current result if it's not the best)
+                            self._remove_result_from_state(result_to_remove, "after_musicbrainz")
+                            # Track MBID-based duplicate removal
+                            # Removed counting logic
+                            
+                            # Cancel any active metadata tasks for removed duplicates
+                            if result_to_remove.youtube_id in self.metadata_tasks:
+                                self.metadata_tasks[result_to_remove.youtube_id].cancel()
+                                del self.metadata_tasks[result_to_remove.youtube_id]
+                                print(f"StateManager: Cancelled metadata task for removed MBID duplicate {result_to_remove.youtube_id}")
+                            
+                            # If we're removing the current result, we need to stop processing it
                             if result_to_remove.youtube_id == current_result.youtube_id:
-                                # Transfer current result's position to best result if different
-                                if best_result.youtube_id != current_result.youtube_id:
-                                    self._replace_result_in_state(current_result, best_result)
-                                    print(f"StateManager: Replaced current result {current_result.youtube_id} with better MBID duplicate {best_result.youtube_id}")
-                            else:
-                                # Remove duplicate from state
-                                self._remove_result_from_state(result_to_remove)
-                                
-                                # Cancel any active metadata tasks for removed duplicates
-                                if result_to_remove.youtube_id in self.metadata_tasks:
-                                    self.metadata_tasks[result_to_remove.youtube_id].cancel()
-                                    del self.metadata_tasks[result_to_remove.youtube_id]
-                                    print(f"StateManager: Cancelled metadata task for removed MBID duplicate {result_to_remove.youtube_id}")
+                                print(f"StateManager: Current result {current_result.youtube_id} removed - better MBID duplicate {best_result.youtube_id} kept")
+                                return  # Don't continue processing removed result
                         
                         # Send state update after MBID deduplication
                         await self.send_state()
@@ -842,21 +844,17 @@ class StateManager:
                 # Mark as unverified (not found in MusicBrainz)
                 current_result.verification_metadata['mb_not_found'] = datetime.utcnow().isoformat()
                 self.state.update_timestamp()
+                # Removed verification stats  # Update the statistics after marking as unverified
                 
                 print(f"StateManager: No MusicBrainz match found for {youtube_id} - {artist} / {album}")
                 
                 # Track verification failure
-                await self._increment_unverified(
-                    album,
-                    artist,
-                    "not found in MusicBrainz"
-                )
                 
         except asyncio.CancelledError:
             print(f"StateManager: Metadata retrieval cancelled for {result.youtube_id}")
         except Exception as e:
             print(f"StateManager: Metadata retrieval failed for {result.youtube_id}: {e}")
-            await self._increment_failed(f"Metadata retrieval for {artist} - {album}", str(e))
+            # Removed counting logic
         finally:
             # Clean up task tracking
             if result.youtube_id in self.metadata_tasks:
@@ -923,19 +921,19 @@ class StateManager:
         existing_tracks = existing_result.track_count or 0
         if new_tracks > existing_tracks:
             new_score += 3
-        elif existing_tracks > new_tracks:
+        else:
             existing_score += 3
         
         # Thumbnail availability
         if new_result.thumbnail_url and not existing_result.thumbnail_url:
             new_score += 2
-        elif existing_result.thumbnail_url and not new_result.thumbnail_url:
+        else:
             existing_score += 2
         
         # Quality score comparison (discovery quality only)
         if new_result.quality_score > existing_result.quality_score:
             new_score += 1
-        elif existing_result.quality_score > new_result.quality_score:
+        else:
             existing_score += 1
         
         return new_score > existing_score
@@ -1049,21 +1047,24 @@ class StateManager:
         except ValueError:
             print(f"StateManager: Could not find result {old_result.youtube_id} to replace")
     
-    def _remove_result_from_state(self, result: Result):
+    def _remove_result_from_state(self, result: Result, reason: str = "duplicate"):
         """
         Remove a result from state.results and update counters
         """
         try:
             # Remove from results list
             self.state.results.remove(result)
+            self._update_results_count()
             
-            # Update total found counter
-            self.state.total_found = len(self.state.results)
+            # Increment duplicate counter
+            self.state.totals.duplicates += 1
+            
+            # Track removed duplicate
             
             # Update timestamp and notify frontend
             self.state.update_timestamp()
             
-            print(f"StateManager: Removed duplicate result {result.youtube_id}")
+            print(f"StateManager: Removed duplicate result {result.youtube_id} (reason: {reason}, duplicates: {self.state.totals.duplicates})")
             
         except ValueError:
             print(f"StateManager: Could not find result {result.youtube_id} to remove")
@@ -1073,52 +1074,59 @@ class StateManager:
         Remove single tracks when album alternatives exist for the same artist
         Only removes singles (priority 1) if albums/playlists (priority >= 2) exist
         """
-        if not self.state.results:
-            return
-        
-        # Group results by normalized artist
-        artist_results = {}
-        for result in self.state.results:
-            if not result.verification_metadata:
-                continue
-                
-            artist = result.verification_metadata.get('normalized_artist', '').lower()
-            if not artist:
-                continue
-                
-            if artist not in artist_results:
-                artist_results[artist] = []
-            artist_results[artist].append(result)
-        
-        # Find singles to remove
-        singles_to_remove = []
-        
-        for artist, results in artist_results.items():
-            # Check if this artist has any album-quality content
-            has_albums = any(self._get_content_priority(r) >= 2 for r in results)
+        try:
+            if not self.state.results:
+                return
             
-            if has_albums:
-                # Remove singles for this artist since albums exist
-                singles = [r for r in results if self._get_content_priority(r) == 1]
-                singles_to_remove.extend(singles)
-        
-        # Remove identified singles
-        if singles_to_remove:
-            removed_count = 0
-            for single in singles_to_remove:
-                try:
-                    self.state.results.remove(single)
-                    removed_count += 1
-                except ValueError:
+            # Group results by normalized artist
+            artist_results = {}
+            for result in self.state.results:
+                if not result.verification_metadata:
                     continue
+                    
+                artist = result.verification_metadata.get('normalized_artist', '').lower()
+                if not artist:
+                    continue
+                    
+                if artist not in artist_results:
+                    artist_results[artist] = []
+                artist_results[artist].append(result)
             
-            if removed_count > 0:
-                # Update counters
-                self.state.total_found = len(self.state.results)
-                self.state.update_timestamp()
+            # Find singles to remove
+            singles_to_remove = []
+            
+            for artist, results in artist_results.items():
+                # Check if this artist has any album-quality content
+                has_albums = any(self._get_content_priority(r) >= 2 for r in results)
                 
-                print(f"StateManager: Removed {removed_count} single tracks (albums available for same artists)")
+                if has_albums:
+                    # Remove singles for this artist since albums exist
+                    singles = [r for r in results if self._get_content_priority(r) == 1]
+                    singles_to_remove.extend(singles)
+            
+            # Remove identified singles
+            if singles_to_remove:
+                removed_count = 0
+                for single in singles_to_remove:
+                    try:
+                        self.state.results.remove(single)
+                        removed_count += 1
+                        # Increment singles removed counter (quality filtering, not deduplication)
+                        self.state.totals.singles_removed += 1
+                        
+                        # Track removed single
+                        
+                    except ValueError:
+                        continue
                 
-                # Send state update to frontend
-                await self.send_state()
-    
+                if removed_count > 0:
+                    # items_found maintains cumulative count - don't overwrite with current length
+                    self.state.update_timestamp()
+                    
+                    print(f"StateManager: Removed {removed_count} single tracks (albums available for same artists) (singles_removed: {self.state.totals.singles_removed})")
+                    
+                    # Send state update to frontend
+                    await self.send_state()
+        
+        except Exception as e:
+            print(f"StateManager: Single track cleanup failed: {e}")

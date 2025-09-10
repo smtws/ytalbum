@@ -7,14 +7,71 @@ WebSocket-based real-time communication with Vue.js frontend
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 import json
 import os
+import socket
+import ipaddress
+import logging
 
 from backend.core.state_manager import StateManager
 from backend.core.models import Result
 
+logger = logging.getLogger(__name__)
+
+def get_network_origins():
+    """Automatically detect network ranges and generate allowed origins"""
+    origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    
+    try:
+        # Get all network interfaces
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        
+        # Add the detected local IP
+        origins.append(f"http://{local_ip}:3000")
+        
+        # Try to detect common private network ranges
+        ip = ipaddress.IPv4Address(local_ip)
+        
+        # Generate origins for the detected network range
+        if ip.is_private:
+            network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
+            
+            # Add a few common IPs from the network range for development
+            for i in [1, 2, 10, 50, 100, 133, 150, 200]:
+                try:
+                    test_ip = str(network.network_address + i)
+                    if test_ip != str(network.network_address) and test_ip != str(network.broadcast_address):
+                        origins.append(f"http://{test_ip}:3000")
+                except:
+                    continue
+        
+        logger.info(f"Detected local IP: {local_ip}")
+        logger.info(f"Generated CORS origins: {origins[:10]}...")  # Show first 10
+        
+    except Exception as e:
+        logger.warning(f"Could not detect network configuration: {e}")
+        logger.info("Falling back to wildcard CORS for development")
+        return ["*"]
+    
+    return origins
+
 # Initialize FastAPI app
 app = FastAPI(title="YouTube Music Downloader")
+
+# Add CORS middleware with network detection
+allowed_origins = get_network_origins()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Global state manager instance
 state_manager = StateManager()
@@ -63,15 +120,8 @@ async def handle_websocket_message(message: dict):
     if msg_type == "start_search":
         query = data.get("query", "").strip()
         if query:
-            # Default search strategies
-            strategies = [
-                "channel_search",
-                "youtube_music_search", 
-                "playlist_search",
-                "direct_album_search",
-                "google_search"
-            ]
-            await state_manager.start_search(query, strategies)
+            # Default search strategies - use all available services
+            await state_manager.start_search(query)
         else:
             print("Empty search query received")
     
@@ -155,8 +205,35 @@ async def health_check():
         }
     }
 
+@app.post("/clear")
+async def clear_state():
+    """Clear all search results and reset state"""
+    await state_manager.clear_state()
+    return {"status": "cleared", "message": "All search results and state cleared"}
+
 if __name__ == "__main__":
     import uvicorn
-    print("Starting YouTube Music Downloader API...")
-    print("WebSocket endpoint: ws://localhost:8000/ws")
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    import logging
+    from backend.services.instance_manager import cleanup_existing_instances
+    
+    # Setup logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Clean up any existing instances and get a free port
+        logger.info("YouTube Music Downloader starting up...")
+        port = cleanup_existing_instances()
+        
+        print(f"Starting YouTube Music Downloader API on port {port}...")
+        print(f"WebSocket endpoint: ws://localhost:{port}/ws")
+        print(f"Health endpoint: http://localhost:{port}/health")
+        
+        # Start the server
+        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+        
+    except KeyboardInterrupt:
+        logger.info("Shutting down gracefully...")
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        raise

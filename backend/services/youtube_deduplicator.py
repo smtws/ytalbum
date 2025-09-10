@@ -133,7 +133,7 @@ class YouTubeDeduplicator:
             existing_results: List of existing results
             
         Returns:
-            True if should add, False if duplicate
+            True if should add, False if duplicate, "merge" if should merge with existing
         """
         if not new_result.youtube_id:
             print(f"YouTubeDeduplicator: Rejecting result without YouTube ID: {new_result.title}")
@@ -148,8 +148,8 @@ class YouTubeDeduplicator:
             
             if new_is_better:
                 print(f"YouTubeDeduplicator: Found duplicate {new_result.youtube_id} - {new_result.title}")
-                print(f"YouTubeDeduplicator: New result has better metadata - SHOULD REPLACE existing")
-                return "replace"  # Special return value for replacement
+                print(f"YouTubeDeduplicator: New result has better metadata - SHOULD MERGE with existing")
+                return "merge"  # Merge better metadata into existing result
             else:
                 print(f"YouTubeDeduplicator: Rejecting duplicate {new_result.youtube_id} - existing has better metadata")
                 return False
