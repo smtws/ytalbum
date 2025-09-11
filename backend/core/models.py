@@ -82,6 +82,8 @@ class Totals(BaseModel):
     found: int = 0
     duplicates: int = 0
     singles_removed: int = 0
+    metadata_verified: int = 0
+    metadata_not_found: int = 0
 
 
 class Job(BaseModel):
@@ -113,6 +115,24 @@ class Config(BaseModel):
     
     # Cookie configuration
     cookie_info: CookieInfo = Field(default_factory=CookieInfo)
+    
+    # MusicBrainz release prioritization by country (higher values = higher priority)
+    release_country_priority: Dict[str, int] = Field(default_factory=lambda: {
+        "US": 100,      # United States - often has comprehensive cover art
+        "DE": 90,       # Germany - strong music market with good metadata
+        "GB": 85,       # Great Britain - major music market
+        "XE": 80,       # Europe (general) - good coverage
+        "XW": 75,       # Worldwide releases
+        "CA": 70,       # Canada
+        "AU": 65,       # Australia
+        "JP": 60,       # Japan - sometimes has unique releases
+        "FR": 55,       # France
+        "NL": 50,       # Netherlands
+        "SE": 45,       # Sweden - for bands like Sabaton
+        "NO": 40,       # Norway
+        "FI": 35,       # Finland
+        # Add more as needed, lower values for less prioritized countries
+    })
 
 
 class Result(BaseModel):
@@ -240,7 +260,9 @@ class AppState(BaseModel):
             "verified": verified,
             "unverified": unverified,
             "pending": pending,
-            "duplicates_removed": self.totals.duplicates_removed
+            "duplicates_removed": self.totals.duplicates,
+            "metadata_verified": self.totals.metadata_verified,
+            "metadata_not_found": self.totals.metadata_not_found
         }
     
     def get_progress_percent(self) -> int:

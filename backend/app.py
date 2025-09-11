@@ -2,7 +2,22 @@
 """
 YouTube Music Downloader - FastAPI Application
 WebSocket-based real-time communication with Vue.js frontend
+
+WARNING: DO NOT run this directly with 'python3 -m uvicorn backend.app:app'!
+Use './start-backend.sh' instead for proper process management.
 """
+
+import os
+import sys
+
+# Hint about proper usage if run directly
+if __name__ == "__main__" or "uvicorn" in sys.argv[0]:
+    # Check if we're being run through the proper script
+    if not os.path.exists("/tmp/ytdl-backend.pid"):
+        print("⚠️  WARNING: Backend should be started via './start-backend.sh'")
+        print("   This ensures proper process management and prevents multiple instances.")
+        print("   Use './start-backend.sh start' instead of running uvicorn directly!")
+        print()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles

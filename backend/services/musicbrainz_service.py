@@ -18,12 +18,24 @@ class MusicBrainzService:
     Part of extensible metadata architecture supporting multiple sources
     """
     
-    def __init__(self):
+    def __init__(self, config=None):
         self.service_name = "musicbrainz"
         self.session = None
         self.base_url = "https://musicbrainz.org/ws/2"
         self.rate_limit_delay = 1.0  # MusicBrainz requires 1 request per second
         self.last_request_time = 0  # Will be set on first request
+        
+        # Country prioritization configuration
+        self.country_priority = {}
+        if config and hasattr(config, 'release_country_priority'):
+            self.country_priority = config.release_country_priority
+        else:
+            # Default prioritization if no config provided
+            self.country_priority = {
+                "US": 100, "DE": 90, "GB": 85, "XE": 80, "XW": 75,
+                "CA": 70, "AU": 65, "JP": 60, "FR": 55, "NL": 50,
+                "SE": 45, "NO": 40, "FI": 35
+            }
         
     async def _get_session(self):
         """Get or create aiohttp session with proper headers"""
@@ -55,13 +67,14 @@ class MusicBrainzService:
         # Update timestamp to mark this request time
         self.last_request_time = time.time()
     
-    async def search_release(self, artist: str, album: str) -> Optional[Dict[str, Any]]:
+    async def search_release(self, artist: str, album: str, track_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Search MusicBrainz for a release (album)
         
         Args:
             artist: Normalized artist name
             album: Normalized album title
+            track_count: Expected track count from YouTube result (for better matching)
             
         Returns:
             MusicBrainz metadata dict or None if not found
@@ -91,8 +104,8 @@ class MusicBrainzService:
                     releases = data.get('releases', [])
                     
                     if releases:
-                        # Find best match based on score and metadata quality
-                        best_release = self._select_best_release(releases, artist, album)
+                        # Find best match based on score, metadata quality, and track count
+                        best_release = self._select_best_release(releases, artist, album, track_count)
                         if best_release:
                             return await self._enrich_release_metadata(best_release)
                     
@@ -114,7 +127,7 @@ class MusicBrainzService:
             print(f"MusicBrainzService: Error searching for '{artist} - {album}': {e}")
             return None
     
-    def _select_best_release(self, releases: List[Dict], target_artist: str, target_album: str) -> Optional[Dict]:
+    def _select_best_release(self, releases: List[Dict], target_artist: str, target_album: str, target_track_count: Optional[int] = None) -> Optional[Dict]:
         """
         Select the best matching release from MusicBrainz results
         
@@ -122,6 +135,7 @@ class MusicBrainzService:
             releases: List of MusicBrainz release objects
             target_artist: Target artist name
             target_album: Target album title
+            target_track_count: Expected track count from YouTube (for prioritization)
             
         Returns:
             Best matching release or None
@@ -154,9 +168,33 @@ class MusicBrainzService:
                 score += 5
             if release.get('date'):
                 score += 3
-            if release.get('country'):
-                score += 2
+            
+            # Country prioritization (significant impact on release selection)
+            country = release.get('country', '')
+            if country in self.country_priority:
+                country_bonus = self.country_priority[country] / 10  # Scale to reasonable range
+                score += country_bonus
+                print(f"Country bonus: {country} (+{country_bonus})")
+            elif country:
+                score += 1  # Small bonus for having any country vs unknown
+            
+            # Note: Cover art evaluation removed since we fetch via separate API
                 
+            # Track count matching (highest priority for exact matches)
+            if target_track_count and 'media' in release:
+                release_track_count = sum(medium.get('track-count', 0) for medium in release['media'])
+                if release_track_count > 0:
+                    if release_track_count == target_track_count:
+                        score += 25  # High bonus for exact track count match
+                    elif abs(release_track_count - target_track_count) == 1:
+                        score += 15  # Good bonus for close match (±1 track)
+                    elif abs(release_track_count - target_track_count) <= 2:
+                        score += 8   # Some bonus for reasonable match (±2 tracks)
+                    else:
+                        # Penalty for significant track count mismatch
+                        track_diff = abs(release_track_count - target_track_count)
+                        score -= min(track_diff * 2, 10)  # Penalty up to -10
+            
             # Use MusicBrainz's own score if available
             if 'score' in release:
                 score += release['score'] / 10  # Scale down MB score
@@ -170,52 +208,166 @@ class MusicBrainzService:
     
     async def _enrich_release_metadata(self, release: Dict) -> Dict[str, Any]:
         """
-        Enrich release metadata with additional MusicBrainz data
+        Enrich release metadata with raw MusicBrainz data plus essential annotations
         
         Args:
             release: Basic MusicBrainz release object
             
         Returns:
-            Enriched metadata dictionary
+            Raw MusicBrainz data with service annotations and normalized frontend interface
         """
-        metadata = {
+        # Start with complete raw MusicBrainz data
+        metadata = release.copy()
+        
+        # Add essential service annotations for deduplication and tracking
+        metadata.update({
             'service': 'musicbrainz',
             'retrieved_at': datetime.utcnow().isoformat(),
-            'id': release['id'],
-            'mb_title': release.get('title'),
-            'mb_artist': None,
-            'mb_date': release.get('date'),
-            'mb_country': release.get('country'),
-            'mb_status': release.get('status'),
-            'mb_packaging': release.get('packaging'),
-            'mb_track_count': None,
-            'mb_release_group_id': None,
-            'mb_release_group_type': None,
-            'mb_quality': 'high' if release.get('date') and release.get('country') else 'medium'
-        }
+            'id': release['id']  # Critical: Keep id field for deduplication counting
+        })
         
-        # Extract artist information
-        if 'artist-credit' in release and release['artist-credit']:
-            artists = []
+        # Try to fetch cover art from Cover Art Archive API (separate from MusicBrainz web service)
+        release_id = release['id']
+        cover_art_urls = await self._get_cover_art_urls(release_id)
+        if cover_art_urls:
+            metadata['cover_art_urls'] = cover_art_urls
+            print(f"MusicBrainzService: Added cover art URLs for ID {metadata['id']}")
+        else:
+            print(f"MusicBrainzService: No cover art found for ID {metadata['id']}")
+        
+        # Create normalized frontend interface within metadata object 
+        # This is INSIDE the metadata object, separate from result.normalized
+        normalized = self._create_normalized_interface(release, cover_art_urls)
+        metadata['normalized'] = normalized
+        
+        print(f"MusicBrainzService: Preserved raw metadata and normalized interface for ID {metadata['id']}")
+        return metadata
+    
+    def _create_normalized_interface(self, release: Dict, cover_art_urls: Optional[Dict[str, str]]) -> Dict[str, Any]:
+        """
+        Create normalized frontend interface from MusicBrainz data
+        Data is copied/duplicated here for unified frontend access
+        
+        Args:
+            release: Raw MusicBrainz release object
+            cover_art_urls: Cover art URLs if available
+            
+        Returns:
+            Normalized metadata dict with standardized keys for frontend consumption
+        """
+        # Extract artist name from artist-credit structure
+        artist_name = ""
+        if 'artist-credit' in release:
             for credit in release['artist-credit']:
                 if isinstance(credit, dict) and 'artist' in credit:
-                    artists.append(credit['artist']['name'])
-            if artists:
-                metadata['mb_artist'] = ' & '.join(artists)
+                    artist_name = credit['artist']['name']
+                    break
         
-        # Extract release group information
-        if 'release-group' in release:
-            rg = release['release-group']
-            metadata['mb_release_group_id'] = rg.get('id')
-            metadata['mb_release_group_type'] = rg.get('primary-type')
-        
-        # Get track count if available
+        # Extract track count from media structure
+        track_count = 0
         if 'media' in release:
-            total_tracks = sum(medium.get('track-count', 0) for medium in release['media'])
-            metadata['mb_track_count'] = total_tracks if total_tracks > 0 else None
+            track_count = sum(medium.get('track-count', 0) for medium in release['media'])
         
-        print(f"MusicBrainzService: Enriched metadata for ID {metadata['id']}")
-        return metadata
+        # Extract year from date
+        release_year = ""
+        if release.get('date'):
+            release_year = release.get('date', '')[:4]
+        
+        # Build normalized interface with unified keys for cross-service compatibility
+        normalized = {
+            # Core metadata (available from all services) - COPIED for frontend convenience
+            'title': release.get('title', ''),
+            'artist': artist_name,
+            'release_date': release.get('date', ''),
+            'release_year': release_year,
+            'track_count': track_count,
+            'country': release.get('country', ''),
+            
+            # Cover art (unified interface for all metadata services) - COPIED for frontend convenience
+            'cover_art': {
+                'available': bool(cover_art_urls),
+                'front_cover': cover_art_urls.get('front') if cover_art_urls else None,
+                'thumbnail': cover_art_urls.get('front_250') if cover_art_urls else None,
+                'urls': cover_art_urls.copy() if cover_art_urls else {}
+            },
+            
+            # Service-specific extensions (allows services to add unique data)
+            'extensions': {
+                'musicbrainz': {
+                    'mbid': release.get('id', ''),
+                    'status': release.get('status', ''),
+                    'release_group_id': release.get('release-group', {}).get('id', ''),
+                    'primary_type': release.get('release-group', {}).get('primary-type', ''),
+                    'secondary_types': release.get('release-group', {}).get('secondary-type-list', [])
+                }
+            }
+        }
+        
+        return normalized
+    
+    
+    async def _get_cover_art_urls(self, release_mbid: str) -> Optional[Dict[str, str]]:
+        """
+        Get cover art URLs from Cover Art Archive API
+        Uses separate API call like reference implementation
+        """
+        try:
+            session = await self._get_session()
+            url = f"https://coverartarchive.org/release/{release_mbid}"
+            
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    # Look for front cover first (like reference implementation)
+                    for image in data.get('images', []):
+                        if 'Front' in image.get('types', []):
+                            thumbnails = image.get('thumbnails', {})
+                            
+                            # Build URLs dict with multiple sizes
+                            urls = {}
+                            if 'small' in thumbnails:
+                                urls['front_250'] = thumbnails['small']  # 250px
+                            if 'large' in thumbnails:
+                                urls['front_500'] = thumbnails['large']  # 500px  
+                            if image.get('image'):
+                                urls['front'] = image['image']  # Original
+                                urls['back'] = f"https://coverartarchive.org/release/{release_mbid}/back"  # Speculative back URL
+                            
+                            if urls:
+                                return urls
+                    
+                    # If no front cover, use first available image
+                    if data.get('images'):
+                        image = data['images'][0]
+                        thumbnails = image.get('thumbnails', {})
+                        urls = {}
+                        if 'small' in thumbnails:
+                            urls['front_250'] = thumbnails['small']
+                        if 'large' in thumbnails:
+                            urls['front_500'] = thumbnails['large']
+                        if image.get('image'):
+                            urls['front'] = image['image']
+                            urls['back'] = f"https://coverartarchive.org/release/{release_mbid}/back"
+                        
+                        if urls:
+                            return urls
+                
+                elif response.status == 404:
+                    # No cover art available for this release
+                    return None
+                else:
+                    print(f"Cover Art Archive HTTP {response.status} for release {release_mbid}")
+                    return None
+                    
+        except asyncio.TimeoutError:
+            print(f"Cover Art Archive timeout for release {release_mbid}")
+            return None
+        except Exception as e:
+            print(f"Cover Art Archive error for release {release_mbid}: {e}")
+            return None
+        
+        return None
     
     async def close(self):
         """Close the aiohttp session"""

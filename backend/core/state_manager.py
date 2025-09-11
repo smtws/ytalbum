@@ -234,6 +234,7 @@ class StateManager:
                             added_count += 1
                             # Update results count for frontend responsiveness
                             self._update_results_count()
+                            self._update_metadata_counts()
                             # Track item as successfully found and added to AppState
                             self.state.totals.found += 1
                             
@@ -278,6 +279,7 @@ class StateManager:
         success = self.state.add_result(result)
         if success:
             self._update_results_count()
+            self._update_metadata_counts()
             print(f"StateManager: Added result {result.id} - {result.title}")
             await self.send_state()
         
@@ -287,10 +289,9 @@ class StateManager:
         """Update result with new data (e.g., verification results)"""
         success = self.state.update_result(result_id, **updates)
         if success:
-            # Update statistics based on verification status
-            if 'verified' in updates:
-                # Removed verification stats
-                pass
+            # Update metadata counts if metadata was changed
+            if 'metadata' in updates:
+                self._update_metadata_counts()
             
             print(f"StateManager: Updated result {result_id} with {list(updates.keys())}")
             await self.send_state()
@@ -302,6 +303,7 @@ class StateManager:
         success = self.state.remove_result(result_id)
         if success:
             self._update_results_count()
+            self._update_metadata_counts()
             print(f"StateManager: Removed result {result_id} - {reason}")
             await self.send_state()
         
@@ -699,6 +701,21 @@ class StateManager:
     def _update_results_count(self):
         """Update results count - simple count of current results"""
         self.state.totals.results = len(self.state.results)
+    
+    def _update_metadata_counts(self):
+        """Update metadata verification counts in totals"""
+        metadata_verified = 0
+        metadata_not_found = 0
+        
+        for result in self.state.results:
+            # Count as verified if result has metadata with an ID (MusicBrainz, etc.)
+            if result.metadata and result.metadata.get('id'):
+                metadata_verified += 1
+            else:
+                metadata_not_found += 1
+        
+        self.state.totals.metadata_verified = metadata_verified
+        self.state.totals.metadata_not_found = metadata_not_found
     
     # ====== COUNTING LOGIC REMOVED =======
     # Only strategy progress and simple results count tracked in totals now
@@ -1102,6 +1119,7 @@ class StateManager:
             # Remove from results list
             self.state.results.remove(result)
             self._update_results_count()
+            self._update_metadata_counts()
             
             # Increment duplicate counter
             self.state.totals.duplicates += 1
