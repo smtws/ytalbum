@@ -12,6 +12,7 @@ from ytalbum.config import Config
 from ytalbum.download import load_plan, run, save_plan
 from ytalbum.models import Collection
 from ytalbum.plan import build_plan, merge_plans
+from ytalbum.service import Service, exit_code
 from ytalbum.youtube import BOT_CHECK, YouTube, is_transient
 
 FIXTURES = Path(__file__).parent.parent / "design-fixtures"
@@ -66,7 +67,7 @@ def test_fetch_stops_asking_after_the_first_bot_check(monkeypatch):
     assert all(e.skipped == BOT_CHECK for e in collection.entries)
 
 
-def test_partial_data_changes_nothing_on_disk(tmp_path, monkeypatch, capsys):
+def test_partial_data_changes_nothing_on_disk(tmp_path):
     # an album that is already in the library
     plan = build_plan(vol1())
     album_dir = tmp_path / plan.folder
@@ -82,9 +83,10 @@ def test_partial_data_changes_nothing_on_disk(tmp_path, monkeypatch, capsys):
                 e.skipped, e.transient = BOT_CHECK, True
             return c
 
-    code = cli._fetch_one(plan.source_url, tmp_path, BlockedYT(), "fetch", False)
-    assert code == cli.BLOCKED
-    assert "Nothing was changed" in capsys.readouterr().err
+    messages = []
+    outcome = Service(Config(musicbrainz=False), tmp_path, log=messages.append, yt=BlockedYT()).fetch(plan.source_url)
+    assert outcome.blocked and exit_code(outcome) == cli.BLOCKED
+    assert any("Nothing was changed" in m for m in messages)
     assert (album_dir / ".ytalbum.json").read_text() == before
     assert [p.name for p in tmp_path.iterdir()] == ["My Dark Lullabies"]
 

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ytalbum</title>
+  <meta name="theme-color" content="#1d1b22">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="bar">
+    <h1><img src="/icon.svg" alt="" width="24" height="24"> ytalbum</h1>
+    <form id="open" class="open" autocomplete="off">
+      <input id="q" name="q" type="text" placeholder="Paste a YouTube playlist, video or channel URL — or type an artist" aria-label="URL or artist">
+      <button type="submit">Go</button>
+    </form>
+    <button id="update" class="quiet" type="button" title="Check every album against its source">Update library</button>
+  </header>
+
+  <main>
+    <section id="results" class="panel" hidden></section>
+    <section id="album" class="panel" hidden></section>
+    <section>
+      <div class="section-head"><h2>Library</h2><span id="libpath" class="muted"></span></div>
+      <div id="grid" class="grid"></div>
+      <p id="empty" class="muted" hidden>Nothing here yet. Paste a playlist URL or type an artist above.</p>
+    </section>
+  </main>
+
+  <aside id="jobs" class="jobs" aria-live="polite"></aside>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,25 +1,19 @@
-"""Command line: `ytalbum fetch|plan|download|update|config`."""
+"""Command line: `ytalbum fetch|plan|download|update|search|serve|config`. A thin layer over service.py."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
 
 from . import config as config_mod
-from .enrich import enrich
-from .mb import MusicBrainz, default_cache_path
-from .download import find_plan, iter_plans, load_plan, relocate, run, save_plan
 from .models import AlbumPlan, PlanTrack, SourceRef
-from .plan import build_plan, merge_plans
-from .search import search_artist
-from .youtube import BOT_CHECK, NotSupported, YouTube, channel_base_url
-
-BLOCKED = 3  # exit code: YouTube is refusing requests right now; stop asking
+from .service import Service, exit_code
+from .youtube import NotSupported, channel_base_url
 
 PROV_MARK = {"mb": "MB", "yt_music": "YTM", "yt_title": "title", "playlist": "playlist", "user": "user"}
+BLOCKED = 3  # exit code: YouTube is refusing requests right now; stop asking
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -57,6 +51,11 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--dry-run", action="store_true", help="only report what changed")
     u.add_argument("--no-mb", action="store_true", help="skip the MusicBrainz lookup")
 
+    sv = sub.add_parser("serve", help="web UI for the library (also installable as an app)")
+    sv.add_argument("--library", type=Path)
+    sv.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to reach it from other devices (no login!)")
+    sv.add_argument("--port", type=int, default=8765)
+
     c = sub.add_parser("config", help="show or set configuration")
     c.add_argument("--library", type=Path, help="set the library root")
     c.add_argument("--cookies-from-browser", metavar="BROWSER[:PROFILE]", help="use a browser's YouTube login (for age-restricted videos); 'none' to unset")
@@ -76,12 +75,15 @@ def main(argv: list[str] | None = None) -> int:
                 return _config(args, cfg)
             case "fetch" | "plan":
                 return _fetch(args, cfg)
-            case "download":
-                return _download(args.album_dir, cfg)
-            case "update":
-                return _update(args, cfg)
             case "search":
                 return _search(args, cfg)
+            case "download":
+                return exit_code(_service(cfg, None).download_existing(args.album_dir))
+            case "update":
+                library = _library(args, cfg, required=True)
+                return 2 if library is None else exit_code(_service(cfg, library).update_all(report_only=args.dry_run))
+            case "serve":
+                return _serve(args, cfg)
     except NotSupported as e:
         print(f"not supported: {e}", file=sys.stderr)
         return 2
@@ -92,6 +94,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 # -- commands ----------------------------------------------------------------------------
+
+
+def _service(cfg: config_mod.Config, library: Path | None) -> Service:
+    if not cfg.resolved_js_runtime():
+        print("warning: no JavaScript runtime found (deno/node/bun/quickjs) — YouTube may hide formats or fail; see DESIGN.md §3.5", file=sys.stderr)
+    return Service(cfg, library, log=lambda s: print(s, file=sys.stderr), on_plan=_print_plan, on_track=_print_track)
 
 
 def _config(args: argparse.Namespace, cfg: config_mod.Config) -> int:
@@ -110,6 +118,7 @@ def _config(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     print(f"config file:  {config_mod.config_path()}")
     print(f"library_root: {cfg.library_root or '(not set)'}")
     print(f"cookies:      {cfg.cookies_file or cfg.cookies_from_browser or '(none — age-restricted videos are skipped)'}")
+    print(f"musicbrainz:  {'on' if cfg.musicbrainz else 'off'}")
     print(f"js runtime:   {' '.join(filter(None, runtime)) if runtime else 'NONE FOUND — install deno or node'}")
     return 0
 
@@ -119,196 +128,62 @@ def _fetch(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     library = _library(args, cfg, required=not dry)
     if library is None and not dry:
         return 2
-    _warn_js_runtime(cfg)
-    yt = YouTube(cfg)
+    service = _service(cfg, library)
 
     if not channel_base_url(args.url):
-        return _fetch_one(args.url, library, yt, args.cmd, dry, getattr(args, "dump_collection", None))
+        outcome = service.fetch(args.url, dry=dry, plan_only=args.cmd == "plan", dump=getattr(args, "dump_collection", None))
+        if outcome.status == "planned":
+            print(f"\nplan written to {outcome.album_dir}/.ytalbum.json\nedit it, then run: ytalbum download '{outcome.album_dir}'")
+        return exit_code(outcome)
 
     if args.cmd == "plan":
         print("`plan` takes one playlist; for a channel use `fetch --pick N --dry-run` first", file=sys.stderr)
         return 2
-    print(f"reading channel {args.url} …", file=sys.stderr)
-    refs = yt.list_channel(args.url)
-    if not refs:
+    groups = service.channel(args.url)
+    if not groups:
         print("this channel has no releases or playlists", file=sys.stderr)
         return 1
-    groups = [
-        (label, [r for r in refs if r.tab == tab])
-        for tab, label in (("releases", "Releases (official albums and singles)"), ("playlists", "Playlists"))
-    ]
-    return _pick_and_fetch([g for g in groups if g[1]], args, library, yt, dry)
+    return _pick_and_fetch(service, groups, args, dry)
 
 
 def _search(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     library = _library(args, cfg, required=not args.dry_run)
     if library is None and not args.dry_run:
         return 2
-    _warn_js_runtime(cfg)
-    yt = YouTube(cfg)
-    print(f"searching YouTube Music for {args.artist!r} …", file=sys.stderr)
-    result = search_artist(yt, args.artist, _musicbrainz() if cfg.musicbrainz else None)
+    service = _service(cfg, library)
+    result = service.search(args.artist)
     if not result.refs:
         print("nothing found", file=sys.stderr)
         return 1
     if result.channel_url:
         print(f"artist channel: {result.channel_url}", file=sys.stderr)
-    code = _pick_and_fetch(result.groups, args, library, yt, args.dry_run, after_list=lambda: _print_missing(result.missing))
-    return code
+    return _pick_and_fetch(service, result.groups, args, args.dry_run, missing=result.missing)
 
 
-def _print_missing(missing: list[str]) -> None:
+def _pick_and_fetch(service: Service, groups, args, dry: bool, missing: list[str] = ()) -> int:
+    refs = [r for _, group in groups for r in group]
+    _print_groups(groups, service.library_source_ids())
     if missing:
         print(f"\nMusicBrainz lists {len(missing)} more studio album(s) not found on YouTube: " + "; ".join(missing))
-
-
-def _pick_and_fetch(groups, args, library, yt, dry, after_list=lambda: None) -> int:
-    refs = [r for _, group in groups for r in group]
-    _print_groups(groups, library)
-    after_list()
     chosen = _choose(refs, args)
-    worst = 0
-    for i, ref in enumerate(chosen, 1):
-        print(f"\n=== [{i}/{len(chosen)}] {ref.title}", file=sys.stderr)
-        try:
-            code = _fetch_one(ref.url, library, yt, "fetch", dry)
-        except Exception as e:  # one broken source must not stop the others
-            print(f"  failed: {e}", file=sys.stderr)
-            code = 1
-        worst = max(worst, code)
-        if code == BLOCKED:
-            print(f"stopping: YouTube is blocking requests; {len(chosen) - i} not fetched", file=sys.stderr)
-            break
-    return worst
+    return exit_code(service.fetch_many(chosen, dry=dry)) if chosen else 0
 
 
-def _download(album_dir: Path, cfg: config_mod.Config) -> int:
-    plan = load_plan(album_dir)
-    if not plan:
-        print(f"no plan in {album_dir}", file=sys.stderr)
-        return 2
-    _warn_js_runtime(cfg)
-    library = album_dir.resolve().parents[1]  # <library>/<artist>/<album>
-    album_dir = relocate(album_dir, plan, library)
-    _print_plan(plan)
-    return _execute(plan, album_dir, YouTube(cfg))
-
-
-def _update(args: argparse.Namespace, cfg: config_mod.Config) -> int:
+def _serve(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     library = _library(args, cfg, required=True)
     if library is None:
         return 2
-    _warn_js_runtime(cfg)
-    albums = list(iter_plans(library))
-    if not albums:
-        print(f"no albums in {library}", file=sys.stderr)
-        return 0
-    yt = YouTube(cfg)
-    worst = 0
-    for i, (_, plan) in enumerate(albums, 1):
-        print(f"\n=== [{i}/{len(albums)}] {plan.albumartist} — {plan.album}", file=sys.stderr)
-        try:
-            code = _fetch_one(plan.source_url, library, yt, "fetch", False, report_only=args.dry_run)
-        except Exception as e:  # one broken source must not stop the others
-            print(f"  could not update: {e}", file=sys.stderr)
-            code = 1
-        worst = max(worst, code)
-        if code == BLOCKED:
-            print(f"stopping: YouTube is blocking requests; {len(albums) - i} album(s) not checked", file=sys.stderr)
-            break
-    return worst
+    from .web import serve
 
-
-# -- the shared path -----------------------------------------------------------------------
-
-
-_mb: MusicBrainz | None = None
-
-
-def _musicbrainz() -> MusicBrainz:
-    global _mb
-    if _mb is None:
-        _mb = MusicBrainz(default_cache_path())
-    return _mb
-
-
-def _fetch_one(
-    url: str,
-    library: Path | None,
-    yt: YouTube,
-    cmd: str,
-    dry: bool,
-    dump: Path | None = None,
-    report_only: bool = False,
-) -> int:
-    print(f"reading {url} …", file=sys.stderr)
-    collection = yt.fetch(url)
-    if dump:
-        dump.write_text(json.dumps(collection.to_dict(), indent=2, ensure_ascii=False) + "\n")
-    if unreadable := collection.unreadable:
-        # never classify, merge or rename from a partial view (DESIGN.md §3.8)
-        reason = unreadable[0].skipped
-        print(
-            f"{len(unreadable)} of {len(collection.entries)} videos could not be read right now ({reason}).\n"
-            "Nothing was changed — run the same command again later.",
-            file=sys.stderr,
-        )
-        return BLOCKED if reason == BOT_CHECK else 1
-    plan = build_plan(collection)
-    if yt.cfg.musicbrainz:
-        stats = enrich(plan, _musicbrainz(), progress=lambda msg: print(f"  {msg}", file=sys.stderr))
-        found = "release matched" if stats["release"] else f"{stats['tracks']}/{stats['looked_up']} tracks matched"
-        print(f"MusicBrainz: {found}", file=sys.stderr)
-
-    if dry or library is None:
-        _print_plan(plan)
-        return 0
-
-    if found := find_plan(library, plan.source_id):
-        old_dir, existing = found
-        known = {t.video_id for t in existing.tracks}
-        new = sum(t.video_id not in known for t in plan.tracks)
-        plan = merge_plans(existing, plan)
-        gone = sum(not t.in_source for t in plan.tracks)
-        print(f"existing album {old_dir.relative_to(library)}: {new} new, {gone} no longer in the source", file=sys.stderr)
-        if report_only:
-            return 0
-        album_dir = relocate(old_dir, plan, library)
-    else:
-        if report_only:
-            print(f"not in the library yet: {plan.folder}", file=sys.stderr)
-            return 0
-        album_dir = library / plan.folder
-    _print_plan(plan)
-
-    if cmd == "plan":
-        path = save_plan(plan, album_dir)
-        print(f"\nplan written to {path}\nedit it, then run: ytalbum download '{album_dir}'")
-        return 0
-    return _execute(plan, album_dir, yt)
-
-
-def _execute(plan: AlbumPlan, album_dir: Path, yt: YouTube) -> int:
-    todo = sum(t.state != "done" and t.in_source for t in plan.tracks)
-    print(f"\ndownloading {todo} of {len(plan.tracks)} tracks into {album_dir}")
-
-    def report(t: PlanTrack, what: str) -> None:
-        status = {"downloaded": "ok  ", "failed": "FAIL"}.get(what, what)
-        print(f"  {status} {t.number:02d} {t.artist} - {t.title}" + (f"  ({t.error})" if t.error and what == "failed" else ""))
-
-    run(plan, album_dir, yt, on_track=report)
-    failed = [t for t in plan.tracks if t.state != "done" and t.in_source]
-    print(f"{len(plan.tracks) - len(failed)}/{len(plan.tracks)} tracks done" + (f", {len(failed)} not yet — run again to retry" if failed else ""))
-    if any(t.error == BOT_CHECK for t in failed):
-        return BLOCKED
-    return 1 if failed else 0
+    serve(cfg, library, host=args.host, port=args.port)
+    return 0
 
 
 # -- helpers -------------------------------------------------------------------------------
 
 
 def _library(args: argparse.Namespace, cfg: config_mod.Config, required: bool) -> Path | None:
-    library = args.library or cfg.library_root
+    library = getattr(args, "library", None) or cfg.library_root
     if library is None and required:
         print("no library root: run `ytalbum config --library PATH` or pass --library", file=sys.stderr)
     return library.expanduser() if library else None
@@ -345,8 +220,7 @@ def _choose(refs: list[SourceRef], args: argparse.Namespace) -> list[SourceRef]:
         return []
 
 
-def _print_groups(groups: list[tuple[str, list[SourceRef]]], library: Path | None) -> None:
-    have = {p.source_id for _, p in iter_plans(library)} if library and library.exists() else set()
+def _print_groups(groups: list[tuple[str, list[SourceRef]]], have: set[str]) -> None:
     i = 0
     for label, refs in groups:
         print(f"\n{label}:")
@@ -360,13 +234,9 @@ def _print_groups(groups: list[tuple[str, list[SourceRef]]], library: Path | Non
             print(f"  {i:3d}  {r.title}" + (f"   ({', '.join(extra)})" if extra else "") + ("   ✓ in library" if r.source_id in have else ""))
 
 
-def _warn_js_runtime(cfg: config_mod.Config) -> None:
-    if not cfg.resolved_js_runtime():
-        print(
-            "warning: no JavaScript runtime found (deno/node/bun/quickjs) — "
-            "YouTube may hide formats or fail; see DESIGN.md §3.5",
-            file=sys.stderr,
-        )
+def _print_track(t: PlanTrack, what: str) -> None:
+    status = {"downloaded": "ok  ", "failed": "FAIL"}.get(what, what)
+    print(f"  {status} {t.number:02d} {t.artist} - {t.title}" + (f"  ({t.error})" if t.error and what == "failed" else ""))
 
 
 def _print_plan(plan: AlbumPlan) -> None:

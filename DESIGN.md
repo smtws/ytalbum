@@ -229,7 +229,17 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    Also fixed here: a new album's folder follows the enriched names; a merge never
    replaces a value by a less trusted one (user > MB > YT Music > title/playlist), so an
    `update --no-mb` or an MB outage cannot undo MusicBrainz corrections.
-7. Web UI / PWA on the library.
+7. ✅ Web UI / PWA on the library. *Done 2026-09-22:* `ytalbum serve` — stdlib HTTP
+   server + plain HTML/JS (no build step, no WebSocket state machine); library grid with
+   covers, album view with editable fields and provenance badges (edits = USER values,
+   then rename/retag on disk), one input for URL-or-artist (preview / pick from search
+   or channel), "Update library", job cards with logs. Jobs run one at a time in a
+   single worker. Orchestration moved to `service.py`, shared by CLI and web. Safety:
+   localhost by default, writes need an `X-Ytalbum` header (no cross-site POSTs), Host
+   check (DNS rebinding), covers only by album id, strict CSP, all YouTube text rendered
+   as text. Installable as an app when opened via localhost (service workers need a
+   secure context; over plain http on the LAN it works as a web page only).
+   Verified in a browser: grid, album view, update job ending "blocked" cleanly.
 8. Intro/outro trimming — **wanted, but only once slices 1–5 are stable(ish).** Must be
    non-destructive (keep the original, or store trim points in the plan) and never on
    by default for a track until it has been shown to work on real fixtures.

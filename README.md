@@ -12,6 +12,7 @@ uv run ytalbum update [--dry-run]                 # re-check every album in the 
 uv run ytalbum fetch  <url> --dry-run             # just show what would be written
 uv run ytalbum plan   <url>                       # write .ytalbum.json into the album folder, edit it …
 uv run ytalbum download <album-folder>            # … then download from the edited plan
+uv run ytalbum serve                              # web UI on http://localhost:8765 (--host 0.0.0.0 for the LAN, no login!)
 uv run pytest                                     # offline tests (fixtures in design-fixtures/)
 ```
 
