@@ -22,6 +22,7 @@ from .cover import square_if_padded
 from .models import AlbumPlan, PlanTrack
 from .plan import refresh_derived, wanted_filename, wanted_folder
 from .tag import image_mime, signature, tag_file
+from .trim import apply as apply_trim
 from .youtube import BOT_CHECK, YouTube, is_bot_check
 
 log = logging.getLogger(__name__)
@@ -117,6 +118,13 @@ def run(
         final = album_dir / track.filename
 
         if track.state == "done" and final.exists():
+            try:
+                if apply_trim(album_dir, track, final):
+                    track.tagged = None  # the new file needs its tags again
+                    on_track(track, "trimmed")
+            except RuntimeError as e:
+                track.error = str(e)
+                log.warning("%s: %s", track.filename, e)
             if track.tagged != signature(plan, track, cover):
                 track.tagged = tag_file(final, plan, track, cover)
                 save_plan(plan, album_dir)

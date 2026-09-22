@@ -395,6 +395,16 @@ class App:
                     raise ValueError("unknown album")
                 album_dir = found[0]
                 return self.jobs.submit("prune", f"Remove gone tracks from {found[1].album}", lambda s: s.prune(album_dir))
+            case "trim_channel":
+                channel = str(body.get("channel", "")).strip()
+                if not channel:
+                    raise ValueError("no channel")
+                from .service import parse_time
+
+                start, end = parse_time(body.get("start")), parse_time(body.get("end"))
+                if start is not None and end is not None and end <= start:
+                    raise ValueError("the end must come after the start")
+                return self.jobs.submit("trim", f"Trim all tracks from {channel}", lambda s: s.trim_channel(channel, start, end))
             case "edit":
                 source_id = str(body.get("id", ""))
                 if not self.album(source_id):

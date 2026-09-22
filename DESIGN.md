@@ -271,9 +271,16 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    Later: theme switch (auto/dark/light, remembered per browser); the page references
    `app.js`/`style.css` by content hash — a one-hour cache had kept the old script (no
    browser dropdown) alive after an update.
-8. Intro/outro trimming — **wanted, but only once slices 1–5 are stable(ish).** Must be
-   non-destructive (keep the original, or store trim points in the plan) and never on
-   by default for a track until it has been shown to work on real fixtures.
+8. ✅ Intro/outro trimming — **manual, after automatic detection was measured and dropped**
+   (2026-09-22). Measured on the owner's library: 0 of 39 videos have chapters; two
+   Napalm Records uploads share no detectable opening (loudness correlation +0.46, while
+   two unrelated Sabaton tracks reach +0.69) and no common silence structure; MusicBrainz
+   lengths show *that* there is extra material (30 of 66 tracks longer, up to +234 s) but
+   never where, and the big ones are cinematic music-video intros where a cut would hit
+   the song. So: trim points per track in the plan (`trim_start`/`trim_end`), cut
+   losslessly with `ffmpeg -c copy` from `.originals/<video_id>.opus`, which is kept, so
+   clearing the trim restores the original byte for byte; one button applies a trim to
+   every track of one uploader across the library.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

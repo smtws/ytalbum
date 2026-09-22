@@ -62,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--idle-exit", type=float, default=0, metavar="SECONDS", help="stop after this long without requests or jobs (for socket activation)")
 
     sd = sub.add_parser("service", help="run the web UI on demand via systemd (user level)")
-    sd.add_argument("action", choices=("install", "uninstall", "status"))
+    sd.add_argument("action", choices=("install", "uninstall", "status", "restart"))
+    sd.add_argument("--force", action="store_true", help="restart even while a job is running")
     sd.add_argument("--port", type=int, default=8765)
     sd.add_argument("--idle-exit", type=int, default=900, metavar="SECONDS")
 
@@ -226,6 +227,9 @@ def _systemd(args: argparse.Namespace, cfg: config_mod.Config) -> int:
             print(f"ready: open http://localhost:{args.port}/ — the web UI starts on demand and stops after {args.idle_exit}s idle")
         elif args.action == "uninstall":
             for line in systemd.uninstall():
+                print(line)
+        elif args.action == "restart":
+            for line in systemd.restart(args.force):
                 print(line)
         print(systemd.status())
     except (ValueError, RuntimeError) as e:

@@ -99,6 +99,7 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
                 filename="",  # set by refresh_derived
                 provenance={"artist": artist_prov, "title": title_prov},
                 auto={"artist": artist, "title": title},
+                channel=entry.channel,
             )
         )
 
@@ -178,6 +179,7 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
             _merge_fields(t, f, TRACK_FIELDS)
             if t.provenance.get("title") != Provenance.USER:
                 t.mbid = f.mbid or t.mbid
+            t.channel = f.channel or t.channel
 
     for f in fresh.tracks:
         if f.video_id not in known:

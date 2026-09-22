@@ -214,6 +214,11 @@ function renderAlbum() {
         h("span", { class: "n" }, t.disc > 1 ? `${t.disc}-${t.number}` : t.number)),
       h("td", {}, h("input", { type: "text", name: "artist", value: t.artist, "aria-label": "artist" })),
       h("td", {}, h("input", { type: "text", name: "title", value: t.title, "aria-label": "title" })),
+      h("td", { class: "trim" },
+        h("input", { type: "text", name: "trim_start", value: asTime(t.trim_start), placeholder: "0:00", "aria-label": "cut from the front", size: 5 }),
+        h("input", { type: "text", name: "trim_end", value: asTime(t.trim_end), placeholder: "end", "aria-label": "play until", size: 5 }),
+        t.channel ? h("button", { class: "quiet small", type: "button", title: `Apply this trim to every track from ${t.channel} in the library`,
+          onclick: (e) => trimChannel(t, e.currentTarget) }, "⇉") : null),
       h("td", { class: "src" }, provBadge(t.provenance.title)),
       h("td", { class: "src" },
         t.state === "done" ? h("span", { class: "badge ok" }, "✓") : t.state === "failed" ? h("span", { class: "badge bad", title: t.error || "" }, "failed") : h("span", { class: "badge" }, "pending"),
@@ -226,10 +231,10 @@ function renderAlbum() {
       h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; currentAlbum = null; } }, "Close")),
     h("form", { id: "albumform", onsubmit: saveAlbum },
       h("div", { class: "fields" }, field("Album artist", "albumartist", p.albumartist), field("Album", "album", p.album), field("Year", "year", p.year, "number")),
-      h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Artist"), h("th", {}, "Title"), h("th", {}, "from"), h("th", {}, ""))), h("tbody", {}, rows)),
+      h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Artist"), h("th", {}, "Title"), h("th", { title: "cut the front / play until — for label idents and previews" }, "trim"), h("th", {}, "from"), h("th", {}, ""))), h("tbody", {}, rows)),
       skipped.length ? h("details", {}, h("summary", { class: "muted" }, `${skipped.length} skipped`), h("ul", {}, skipped)) : null,
       h("div", { class: "actions" },
-        h("button", { type: "submit" }, "Save changes (rename + retag)"),
+        h("button", { type: "submit" }, "Save changes (rename + retag + trim)"),
         h("button", { class: "quiet", type: "button", onclick: (e) => submit("fetch", { urls: [p.source_url] }, e.currentTarget) }, "Re-check source"),
         gone.length ? h("button", { class: "danger", type: "button", onclick: (e) => pruneAlbum(p, gone, e.currentTarget) }, `Remove ${gone.length} track${gone.length > 1 ? "s" : ""} no longer in the playlist`) : null,
         h("a", { href: p.source_url, target: "_blank", rel: "noopener" }, "open on YouTube"))));
@@ -241,13 +246,29 @@ function pruneAlbum(p, gone, button) {
   if (confirm(`Delete these files? They are no longer in the YouTube playlist:\n\n${list}`)) submit("prune", { id: p.source_id }, button);
 }
 
+const asTime = (seconds) => (seconds == null ? "" : `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`);
+
+function trimChannel(track, button) {
+  const row = button.closest("tr");
+  const start = row.querySelector("[name=trim_start]").value;
+  const end = row.querySelector("[name=trim_end]").value;
+  const what = start || end ? `cut ${start || "0:00"}–${end || "end"}` : "remove the trim";
+  if (confirm(`Apply to every track from “${track.channel}” in the library: ${what}?`)) {
+    submit("trim_channel", { channel: track.channel, start, end }, button);
+  }
+}
+
 function saveAlbum(ev) {
   ev.preventDefault();
   const form = ev.target;
   const edits = {
     album: form.album.value, albumartist: form.albumartist.value, year: form.year.value,
     tracks: [...form.querySelectorAll("tbody tr")].map((tr) => ({
-      video_id: tr.dataset.id, artist: tr.querySelector("[name=artist]").value, title: tr.querySelector("[name=title]").value,
+      video_id: tr.dataset.id,
+      artist: tr.querySelector("[name=artist]").value,
+      title: tr.querySelector("[name=title]").value,
+      trim_start: tr.querySelector("[name=trim_start]").value,
+      trim_end: tr.querySelector("[name=trim_end]").value,
     })),
   };
   submit("edit", { id: currentAlbum.source_id, edits }, ev.submitter);

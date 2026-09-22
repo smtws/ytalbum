@@ -14,7 +14,7 @@ uv run ytalbum fetch  <url> --dry-run             # just show what would be writ
 uv run ytalbum plan   <url>                       # write .ytalbum.json into the album folder, edit it …
 uv run ytalbum download <album-folder>            # … then download from the edited plan
 uv run ytalbum serve                              # web UI on http://localhost:8765 (--host 0.0.0.0 for the LAN, no login!)
-uv run ytalbum service install                    # web UI on demand: systemd user socket on :8765, stops after 15 idle min
+uv run ytalbum service install|status|restart|uninstall                    # web UI on demand: systemd user socket on :8765, stops after 15 idle min
 uv run pytest                                     # offline tests (fixtures in design-fixtures/)
 ```
 

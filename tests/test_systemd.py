@@ -36,3 +36,27 @@ def test_server_on_an_inherited_socket_and_idle_accounting(tmp_path):
     assert app.idle_for() < 1
     srv.shutdown()
     srv.server_close()
+
+
+def test_restart_refuses_while_a_job_runs(monkeypatch):
+    import subprocess
+
+    import ytalbum.systemd as sd
+
+    monkeypatch.setattr(sd, "busy", lambda port=None: True)
+    calls = []
+    monkeypatch.setattr(sd, "systemctl", lambda *a: calls.append(a) or subprocess.CompletedProcess(a, 0, "", ""))
+    with pytest.raises(RuntimeError, match="job is running"):
+        sd.restart()
+    assert calls == []
+    sd.restart(force=True)  # only on purpose
+    assert calls == [("restart", "ytalbum.service")]
+
+
+def test_installed_port_is_read_from_the_unit(tmp_path, monkeypatch):
+    import ytalbum.systemd as sd
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    (tmp_path / "systemd" / "user").mkdir(parents=True)
+    (tmp_path / "systemd" / "user" / "ytalbum.socket").write_text("[Socket]\nListenStream=127.0.0.1:9123\n")
+    assert sd.installed_port() == 9123

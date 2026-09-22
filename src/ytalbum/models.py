@@ -112,6 +112,10 @@ class PlanTrack:
     in_source: bool = True  # False once the video has left the source playlist
     tagged: str | None = None  # signature of the tags last written to the file
     mbid: str | None = None  # MusicBrainz recording id
+    channel: str | None = None  # who uploaded it (for "trim everything from this channel")
+    trim_start: float | None = None  # seconds cut from the front (label idents …)
+    trim_end: float | None = None  # play only up to here (previews, outros)
+    trimmed: str | None = None  # the trim actually applied to the file on disk
 
 
 @dataclass

@@ -7,9 +7,12 @@ stops itself when idle and is started again by the next request. User level only
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+import httpx
 
 from .config import Config
 
@@ -83,6 +86,31 @@ def uninstall() -> list[str]:
             done.append(f"removed {path}")
     systemctl("daemon-reload")
     return done
+
+
+def installed_port(default: int = 8765) -> int:
+    path = unit_dir() / f"{UNIT}.socket"
+    match = re.search(r"ListenStream=.*?:(\d+)", path.read_text()) if path.exists() else None
+    return int(match[1]) if match else default
+
+
+def busy(port: int | None = None) -> bool:
+    """True if the running web UI has a queued or running job (nothing to interrupt if not)."""
+    try:
+        r = httpx.get(f"http://127.0.0.1:{port or installed_port()}/api/state", timeout=2)
+        return bool(r.json().get("busy"))
+    except (httpx.HTTPError, ValueError):
+        return False
+
+
+def restart(force: bool = False) -> list[str]:
+    """Restart the service, but never while it is working (that would kill the job)."""
+    if not force and busy():
+        raise RuntimeError("a job is running — wait for it, cancel it in the web UI, or use --force")
+    r = systemctl("restart", f"{UNIT}.service")
+    if r.returncode:
+        raise RuntimeError(f"systemctl --user restart: {r.stderr.strip()}")
+    return [f"systemctl --user restart {UNIT}.service"]
 
 
 def status() -> str:

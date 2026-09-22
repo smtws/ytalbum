@@ -29,6 +29,22 @@ EDITABLE_ALBUM = ("album", "albumartist", "year")
 EDITABLE_TRACK = ("artist", "title")
 
 
+def parse_time(value: object) -> float | None:
+    """'8', '0:08', '1:02.5' -> seconds; empty -> None. Raises ValueError on nonsense."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    parts = text.split(":")
+    if len(parts) > 3 or not all(p.strip() for p in parts):
+        raise ValueError(f"not a time: {text!r}")
+    seconds = 0.0
+    for part in parts:
+        seconds = seconds * 60 + float(part)
+    if seconds < 0:
+        raise ValueError("times cannot be negative")
+    return seconds
+
+
 @dataclass
 class Outcome:
     status: str  # ok | failed | blocked | incomplete | planned | reported | dry
@@ -233,6 +249,22 @@ class Service:
 
     # -- edits (web UI) ----------------------------------------------------------------
 
+    def trim_channel(self, channel: str, start: float | None, end: float | None) -> list[Outcome]:
+        """Same trim for every track from one uploader, across the whole library."""
+        outcomes = []
+        for album_dir, plan in iter_plans(self.library) if self.library and self.library.exists() else []:
+            hits = [t for t in plan.tracks if (t.channel or "") == channel]
+            if not hits:
+                continue
+            for t in hits:
+                t.trim_start, t.trim_end = start, end
+            save_plan(plan, album_dir)
+            self.log(f"{plan.album}: {len(hits)} track(s) from {channel}")
+            outcomes.append(self._guarded(lambda: self.execute(plan, album_dir)))
+        if not outcomes:
+            self.log(f"no tracks from {channel} in the library")
+        return outcomes
+
     def find_album(self, source_id: str) -> tuple[Path, AlbumPlan] | None:
         return find_plan(self.library, source_id) if self.library and self.library.exists() else None
 
@@ -272,6 +304,11 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
         t = by_id.get(te.get("video_id"))
         if not t:
             continue
+        if "trim_start" in te or "trim_end" in te:
+            start, end = parse_time(te.get("trim_start")), parse_time(te.get("trim_end"))
+            if start is not None and end is not None and end <= start:
+                raise ValueError(f"{t.title}: the end must come after the start")
+            t.trim_start, t.trim_end = start, end
         for name in EDITABLE_TRACK:
             value = te.get(name)
             if isinstance(value, str) and value.strip() and value.strip() != getattr(t, name):
