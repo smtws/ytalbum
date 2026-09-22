@@ -32,7 +32,7 @@ from . import config as config_mod
 from .config import Config
 from .download import COVER_STEM, iter_plans
 from .models import AlbumPlan
-from .service import Outcome, Service, channel_base_url
+from .service import Outcome, Service, _inside, channel_base_url
 from .tag import image_mime
 
 log = logging.getLogger(__name__)
@@ -172,6 +172,16 @@ class App:
             if mime := image_mime(data):
                 return data, mime
         return None
+
+    def audio_path(self, source_id: str, video_id: str) -> Path | None:
+        """The finished track's file — looked up in the plan, never taken from the request."""
+        found = self.album(source_id)
+        if not found:
+            return None
+        album_dir, plan = found
+        track = next((t for t in plan.tracks if t.video_id == video_id and t.state == "done"), None)
+        path = _inside(album_dir, track.filename) if track else None
+        return path if path and path.is_file() else None
 
     def settings(self) -> dict[str, Any]:
         return {"cookies_from_browser": self.cfg.cookies_from_browser, "cookies_file": str(self.cfg.cookies_file or ""), "browsers": config_mod.detect_browsers()}
@@ -323,6 +333,9 @@ class _Handler(BaseHTTPRequestHandler):
             case "/api/cover":
                 cover = self.app.cover(q.get("id", ""))
                 return self._send(HTTPStatus.OK, cover[0], cover[1]) if cover else self._error(HTTPStatus.NOT_FOUND, "no cover")
+            case "/api/audio":
+                path = self.app.audio_path(q.get("id", ""), q.get("v", ""))
+                return self._file(path, "audio/ogg") if path else self._error(HTTPStatus.NOT_FOUND, "no such track")
             case "/api/job":
                 job = self.app.jobs.get(int(q.get("id", "0") or 0)) if q.get("id", "").isdigit() else None
                 return self._json(job.summary(full=True)) if job else self._error(HTTPStatus.NOT_FOUND, "no such job")
@@ -354,6 +367,44 @@ class _Handler(BaseHTTPRequestHandler):
 
     # responses
 
+    def _file(self, path: Path, ctype: str) -> None:
+        """Stream a file, honouring a single `Range: bytes=a-b` so players can seek."""
+        size = path.stat().st_size
+        start, end = 0, size - 1
+        rng = self.headers.get("Range", "")
+        partial = rng.startswith("bytes=") and "," not in rng
+        if partial:
+            a, _, b = rng.removeprefix("bytes=").partition("-")
+            try:
+                if a:
+                    start, end = int(a), min(int(b), size - 1) if b else size - 1
+                else:  # suffix range: the last N bytes
+                    start = max(size - int(b), 0)
+            except ValueError:
+                partial = False
+            if partial and (start > end or start >= size):
+                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+        self.send_response(HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        with open(path, "rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            try:
+                while remaining > 0 and (chunk := f.read(min(remaining, 1 << 16))):
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # the player skipped or seeked away
+
     def _json(self, data: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         self._send(status, json.dumps(data, ensure_ascii=False).encode(), "application/json; charset=utf-8")
 
@@ -366,7 +417,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache" if cache else "no-store")  # static: always revalidate, so updates show up
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'")
         self.end_headers()
         self.wfile.write(body)
 

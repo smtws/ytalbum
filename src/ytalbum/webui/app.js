@@ -142,8 +142,11 @@ function card(a) {
     : h("div", { class: "cover none" }, "♪");
   const status = a.failed ? h("span", { class: "badge bad" }, `${a.failed} failed`)
     : a.done < a.tracks ? h("span", { class: "badge" }, `${a.done}/${a.tracks}`) : h("span", { class: "badge ok" }, `${a.tracks} tracks`);
+  const play = a.done ? h("span", { class: "card-play", role: "button", tabindex: "0", title: "Play album", "aria-label": `Play ${a.album}`,
+    onclick: (e) => { e.stopPropagation(); playAlbum(a.id, 0); },
+    onkeydown: (e) => { if (e.key === "Enter") { e.stopPropagation(); e.preventDefault(); playAlbum(a.id, 0); } } }, "▶") : null;
   return h("button", { class: "card", type: "button", onclick: () => openAlbum(a.id), title: `${a.albumartist} — ${a.album}` },
-    cover,
+    h("div", { class: "cover-wrap" }, cover, play),
     h("div", { class: "meta" },
       h("div", { class: "title" }, a.album),
       h("div", { class: "artist" }, a.albumartist),
@@ -189,8 +192,11 @@ function renderAlbum() {
   const field = (label, name, value, type = "text") =>
     h("label", {}, h("span", {}, label, " ", provBadge(p.provenance[name])), h("input", { type, name, value: value ?? "" }));
   const rows = p.tracks.map((t) =>
-    h("tr", { "data-id": t.video_id },
-      h("td", { class: "num" }, t.disc > 1 ? `${t.disc}-${t.number}` : t.number),
+    h("tr", { "data-id": t.video_id, class: isPlaying(p.source_id, t.video_id) ? "playing" : "" },
+      h("td", { class: "num" },
+        t.state === "done" ? h("button", { class: "row-play", type: "button", title: "Play from here", "aria-label": `Play ${t.title}`,
+          onclick: () => playAlbum(p.source_id, p.tracks.filter((x) => x.state === "done").findIndex((x) => x.video_id === t.video_id)) }, "▶") : null,
+        h("span", { class: "n" }, t.disc > 1 ? `${t.disc}-${t.number}` : t.number)),
       h("td", {}, h("input", { type: "text", name: "artist", value: t.artist, "aria-label": "artist" })),
       h("td", {}, h("input", { type: "text", name: "title", value: t.title, "aria-label": "title" })),
       h("td", { class: "src" }, provBadge(t.provenance.title)),
@@ -323,6 +329,63 @@ $("#browser").addEventListener("change", async (ev) => {
   }
   renderSettings();
 });
+
+// -- player ----------------------------------------------------------------------------
+
+const audio = $("#audio");
+let queue = []; // [{ album, video_id, title, artist }]
+let qi = -1;
+
+const fmt = (sec) => (Number.isFinite(sec) ? `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}` : "0:00");
+const isPlaying = (albumId, videoId) => qi >= 0 && queue[qi].album === albumId && queue[qi].video_id === videoId;
+
+async function playAlbum(albumId, start = 0) {
+  let plan;
+  try {
+    plan = currentAlbum?.source_id === albumId ? currentAlbum : await api(`/api/album?id=${encodeURIComponent(albumId)}`);
+  } catch (e) {
+    return toast(e.message, "failed");
+  }
+  queue = plan.tracks.filter((t) => t.state === "done").map((t) => ({ album: albumId, video_id: t.video_id, title: t.title, artist: t.artist, albumName: plan.album }));
+  if (!queue.length) return toast("Nothing downloaded yet in this album", "blocked");
+  playIndex(Math.max(0, start));
+}
+
+function playIndex(i) {
+  if (i < 0 || i >= queue.length) return;
+  qi = i;
+  const t = queue[i];
+  audio.src = `/api/audio?id=${encodeURIComponent(t.album)}&v=${encodeURIComponent(t.video_id)}`;
+  audio.play().catch((e) => toast(`Cannot play: ${e.message}`, "failed"));
+  $("#player").hidden = false;
+  document.body.classList.add("has-player");
+  $("#p-cover").src = `/api/cover?id=${encodeURIComponent(t.album)}`;
+  $("#p-title").textContent = t.title;
+  $("#p-artist").textContent = `${t.artist} · ${t.albumName}`;
+  document.querySelectorAll("#album tbody tr").forEach((tr) => tr.classList.toggle("playing", isPlaying(currentAlbum?.source_id, tr.dataset.id)));
+  if ("mediaSession" in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.albumName,
+      artwork: [{ src: `/api/cover?id=${encodeURIComponent(t.album)}` }] });
+  }
+}
+
+audio.addEventListener("play", () => { $("#p-play").textContent = "⏸"; });
+audio.addEventListener("pause", () => { $("#p-play").textContent = "▶"; });
+audio.addEventListener("ended", () => (qi + 1 < queue.length ? playIndex(qi + 1) : null));
+audio.addEventListener("timeupdate", () => {
+  $("#p-time").textContent = fmt(audio.currentTime);
+  $("#p-dur").textContent = fmt(audio.duration);
+  if (document.activeElement !== $("#p-pos") && audio.duration) $("#p-pos").value = Math.round((audio.currentTime / audio.duration) * 1000);
+});
+audio.addEventListener("error", () => { if (audio.src) toast("This track cannot be played (moved or deleted?)", "failed"); });
+$("#p-pos").addEventListener("change", (e) => { if (audio.duration) audio.currentTime = (e.target.value / 1000) * audio.duration; });
+$("#p-play").addEventListener("click", () => (audio.paused ? audio.play() : audio.pause()));
+$("#p-prev").addEventListener("click", () => (audio.currentTime > 3 ? (audio.currentTime = 0) : playIndex(qi - 1)));
+$("#p-next").addEventListener("click", () => playIndex(qi + 1));
+if ("mediaSession" in navigator) {
+  navigator.mediaSession.setActionHandler("previoustrack", () => playIndex(qi - 1));
+  navigator.mediaSession.setActionHandler("nexttrack", () => playIndex(qi + 1));
+}
 
 // -- theme: auto (follow the system) → dark → light, remembered in this browser ---------------
 

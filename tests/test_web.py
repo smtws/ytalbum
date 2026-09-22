@@ -134,3 +134,18 @@ def test_browser_setting(server, monkeypatch, tmp_path):
     assert r.json()["cookies_from_browser"] == "firefox" and app.cfg.cookies_from_browser == "firefox"
     assert 'cookies_from_browser = "firefox"' in (tmp_path / "cfg" / "ytalbum" / "config.toml").read_text()
     assert c.post("/api/settings", json={"cookies_from_browser": "firefox"}).status_code == 403  # header still required
+
+
+def test_audio_streams_with_ranges_and_only_known_tracks(server):
+    _, c = server
+    plan = c.get(f"/api/album?id={c.get('/api/state').json()['albums'][0]['id']}").json()
+    url = f"/api/audio?id={plan['source_id']}&v={plan['tracks'][0]['video_id']}"
+    full = c.get(url)
+    assert full.status_code == 200 and full.headers["content-type"] == "audio/ogg" and full.headers["accept-ranges"] == "bytes"
+    part = c.get(url, headers={"Range": "bytes=10-19"})
+    assert part.status_code == 206 and part.content == full.content[10:20]
+    assert part.headers["content-range"] == f"bytes 10-19/{len(full.content)}"
+    assert c.get(url, headers={"Range": "bytes=-5"}).content == full.content[-5:]
+    assert c.get(url, headers={"Range": f"bytes={len(full.content) + 10}-"}).status_code == 416
+    assert c.get(f"/api/audio?id={plan['source_id']}&v=../../etc/passwd").status_code == 404
+    assert c.get("/api/audio?id=nope&v=x").status_code == 404
