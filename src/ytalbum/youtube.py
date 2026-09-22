@@ -231,8 +231,12 @@ class YouTube:
             noplaylist=True,
             overwrites=True,
         )
-        with YoutubeDL(params) as ydl:
-            ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+        try:
+            with YoutubeDL(params) as ydl:
+                ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+        except DownloadError as e:
+            short = _short_error(e)
+            raise DownloadError(short) if short.startswith("no audio-only") else e
         path = dest_dir / f"{video_id}.opus"
         if not path.exists():
             raise RuntimeError(f"download produced no {path.name}")
@@ -330,4 +334,7 @@ def _short_error(e: DownloadError | str) -> str:
         return "age-restricted: needs cookies (ytalbum config --cookies-from-browser/--cookies-file)"
     if "not a bot" in msg:
         return BOT_CHECK
+    if "Requested format is not available" in msg:
+        return ("no audio-only stream offered: YouTube withholds them for age-restricted videos "
+                "unless the logged-in account is age-verified")
     return msg.split(". ")[0].strip().rstrip(".")

@@ -103,6 +103,7 @@ def test_short_error_messages():
 
     assert _short_error("ERROR: [youtube] abc: Sign in to confirm your age. Use --cookies…").startswith("age-restricted")
     assert _short_error("ERROR: [youtube] abc: Video unavailable. This video is private") == "Video unavailable"
+    assert _short_error("ERROR: [youtube] ZXWqDAwx9EU: Requested format is not available. Use --list-formats").startswith("no audio-only stream")
 
 
 def test_best_thumbnail_prefers_preference_then_size():

@@ -83,6 +83,15 @@ These are the facts v1/v2 got wrong or never knew. Fixtures in `design-fixtures/
    age-restricted); a skipped video is still *in* the source; any transient failure means
    "incomplete — change nothing"; the first bot check stops all further requests
    (fetch, download, `update`, multi-picks). Defaults: 2 parallel requests, 0.5 s apart.
+   **A logged-in browser session helps:** with Firefox cookies
+   (`cookies_from_browser = "firefox"`) the same day's full `update` ran without a single
+   bot check. (Chrome cookies stopped working for the owner earlier — Chrome changed its
+   cookie storage.)
+9. **Age-restricted videos** become *readable* with a login, but an account that is not
+   age-verified gets only format 18 (360p video, low-bitrate AAC); all audio-only streams
+   are withheld or need a PO token. v3 does not transcode that into Opus; the track stays
+   failed with a clear reason. Options if it matters: an age-verified account, or a
+   PO-token provider plugin for yt-dlp (not tried).
 
 ## 4. Pipeline
 
