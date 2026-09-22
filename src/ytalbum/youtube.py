@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import unicodedata
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +30,23 @@ log = logging.getLogger(__name__)
 
 class NotSupported(Exception):
     """The URL is valid but its kind is not handled yet."""
+
+
+BOT_CHECK = "YouTube wants a sign-in (bot check): wait a while, or configure cookies"
+_TRANSIENT = re.compile(
+    r"not a bot|HTTP Error (403|429|5\d\d)|timed out|timeout|temporarily|Connection (reset|refused|aborted)|"
+    r"Unable to download (webpage|API page)|Remote end closed|Name or service not known",
+    re.I,
+)
+
+
+def is_bot_check(message: str) -> bool:
+    return "not a bot" in message or message == BOT_CHECK
+
+
+def is_transient(message: str) -> bool:
+    """Failures that say nothing about the video itself and may be gone on the next run."""
+    return bool(_TRANSIENT.search(message)) or message == BOT_CHECK
 
 
 _CHANNEL_URL = re.compile(
@@ -73,6 +92,7 @@ class YouTube:
             "retries": 3,
             "fragment_retries": 3,
             "extractor_retries": 2,
+            "sleep_interval_requests": 0.5,  # be gentle; YouTube answers bursts with a bot check
         }
         if self.cfg.cookies_file:
             params["cookiefile"] = str(self.cfg.cookies_file)
@@ -107,6 +127,31 @@ class YouTube:
                     refs.append(ref)
         return refs
 
+    def search_albums(self, query: str, limit: int = 12) -> list[SourceRef]:
+        """YouTube Music's album search, each hit resolved to its official OLAK5uy_ playlist."""
+        url = f"https://music.youtube.com/search?q={urllib.parse.quote_plus(query)}#albums"
+        with YoutubeDL(self._params(extract_flat="in_playlist", playlistend=limit)) as ydl:
+            info = ydl.extract_info(url, download=False)
+        browse_ids = [e["id"] for e in info.get("entries") or [] if str(e.get("id", "")).startswith("MPREb_")]
+        with ThreadPoolExecutor(max_workers=max(1, self.cfg.concurrency)) as pool:
+            refs = list(pool.map(self._resolve_album, browse_ids))
+        return [r for r in refs if r]
+
+    def _resolve_album(self, browse_id: str) -> SourceRef | None:
+        try:
+            with YoutubeDL(self._params(extract_flat="in_playlist", playlistend=1)) as ydl:
+                return ref_from_ytm_album(ydl.extract_info(f"https://music.youtube.com/browse/{browse_id}", download=False))
+        except DownloadError as e:
+            log.info("album %s: %s", browse_id, _short_error(e))
+            return None
+
+    def search_playlists(self, query: str, limit: int = 10) -> list[SourceRef]:
+        """YouTube search restricted to playlists (lyric-video albums, fan compilations)."""
+        url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}&sp=EgIQAw%253D%253D"
+        with YoutubeDL(self._params(extract_flat="in_playlist", playlistend=limit)) as ydl:
+            info = ydl.extract_info(url, download=False)
+        return refs_from_tab(info, "search")
+
     # -- stage 1+2: resolve and inspect ------------------------------------------
 
     def fetch(self, url: str) -> Collection:
@@ -131,8 +176,9 @@ class YouTube:
             raise NotSupported("this is a channel, not a playlist — use list_channel()")
 
         flat = list(info.get("entries") or [])
+        blocked = threading.Event()  # after the first bot check, stop asking
         with ThreadPoolExecutor(max_workers=max(1, self.cfg.concurrency)) as pool:
-            entries = list(pool.map(self._inspect, range(1, len(flat) + 1), flat))
+            entries = list(pool.map(lambda pos, f: self._inspect(pos, f, blocked), range(1, len(flat) + 1), flat))
 
         return Collection(
             source_url=url,
@@ -145,20 +191,29 @@ class YouTube:
             entries=entries,
         )
 
-    def _inspect(self, position: int, flat: dict[str, Any]) -> Entry:
+    def _inspect(self, position: int, flat: dict[str, Any], blocked: threading.Event | None = None) -> Entry:
         video_id = flat.get("id") or ""
+
+        def failed(reason: str, raw: str) -> Entry:
+            return Entry(
+                video_id=video_id,
+                position=position,
+                title=nfc(flat.get("title")) or video_id,
+                channel=_channel(flat),
+                duration=flat.get("duration"),
+                skipped=reason,
+                transient=is_transient(raw),
+            )
+
+        if blocked is not None and blocked.is_set():
+            return failed(BOT_CHECK, BOT_CHECK)
         try:
             with YoutubeDL(self._params(noplaylist=True)) as ydl:
                 info = ydl.extract_info(flat.get("url") or video_id, download=False)
         except DownloadError as e:
-            return Entry(
-                video_id=video_id,
-                position=position,
-                title=flat.get("title") or video_id,
-                channel=_channel(flat),
-                duration=flat.get("duration"),
-                skipped=_short_error(e),
-            )
+            if blocked is not None and is_bot_check(str(e)):
+                blocked.set()
+            return failed(_short_error(e), str(e))
         return entry_from_info(info, position)
 
     # -- stage 6: download -------------------------------------------------------
@@ -225,10 +280,29 @@ def refs_from_tab(info: dict[str, Any], tab: str) -> list[SourceRef]:
             source_id=e["id"],
             title=nfc(e.get("title")) or e["id"],
             tab=tab,
+            artist=_channel(e) if tab == "search" else None,
+            channel_url=e.get("channel_url") if tab == "search" else None,
         )
         for e in info.get("entries") or []
         if e.get("id") and (e.get("ie_key") == "YoutubeTab" or e.get("_type") == "playlist")
     ]
+
+
+def ref_from_ytm_album(info: dict[str, Any]) -> SourceRef | None:
+    """A resolved music.youtube.com/browse/MPREb_… album -> its OLAK5uy_ playlist."""
+    if not str(info.get("id", "")).startswith("OLAK5uy_"):
+        return None
+    first = (info.get("entries") or [{}])[0]
+    creators = [nfc(c) for c in first.get("creators") or []]
+    return SourceRef(
+        url=info.get("webpage_url") or f"https://www.youtube.com/playlist?list={info['id']}",
+        source_id=info["id"],
+        title=(nfc(info.get("title")) or info["id"]).removeprefix("Album - ").removeprefix("EP - ").removeprefix("Single - "),
+        tab="ytmusic",
+        artist=", ".join(creators) or _channel(first),
+        channel_url=first.get("channel_url"),
+        count=info.get("playlist_count"),
+    )
 
 
 def best_thumbnail(info: dict[str, Any]) -> str | None:
@@ -255,5 +329,5 @@ def _short_error(e: DownloadError | str) -> str:
     if "confirm your age" in msg or "age-restricted" in msg.lower():
         return "age-restricted: needs cookies (ytalbum config --cookies-from-browser/--cookies-file)"
     if "not a bot" in msg:
-        return "YouTube wants a sign-in (bot check): try cookies or wait"
+        return BOT_CHECK
     return msg.split(". ")[0].strip().rstrip(".")

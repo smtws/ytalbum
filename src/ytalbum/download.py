@@ -21,7 +21,7 @@ from yt_dlp.utils import DownloadError
 from .models import AlbumPlan, PlanTrack
 from .plan import refresh_derived, wanted_filename, wanted_folder
 from .tag import image_mime, signature, tag_file
-from .youtube import YouTube
+from .youtube import BOT_CHECK, YouTube, is_bot_check
 
 log = logging.getLogger(__name__)
 
@@ -127,12 +127,18 @@ def run(
                 track.state, track.error = "done", None
                 break
             except (DownloadError, RuntimeError, OSError) as e:
-                track.state, track.error = "failed", str(e).removeprefix("ERROR: ").strip()
+                message = str(e).removeprefix("ERROR: ").strip()
+                track.state, track.error = "failed", BOT_CHECK if is_bot_check(message) else message
                 log.debug("track %s attempt %d failed", track.video_id, attempt, exc_info=True)
+                if track.error == BOT_CHECK:
+                    break  # retrying only makes it worse
                 if attempt < ATTEMPTS:
                     time.sleep(RETRY_DELAY)
         save_plan(plan, album_dir)
         on_track(track, "downloaded" if track.state == "done" else "failed")
+        if track.error == BOT_CHECK:
+            log.warning("YouTube is blocking requests (bot check) - stopping this album")
+            break
 
     if all(t.state == "done" or not t.in_source for t in plan.tracks) and parts.exists():
         shutil.rmtree(parts)  # only our own scratch dir, and only when nothing is left to resume

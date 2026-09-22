@@ -23,7 +23,7 @@ class Config:
     # yt-dlp needs a JS runtime for YouTube (DESIGN.md §3.5). None = autodetect.
     js_runtime: str | None = None
     js_runtime_path: str | None = None
-    concurrency: int = 4
+    concurrency: int = 2  # parallel YouTube requests; more trips YouTube's bot check sooner
     musicbrainz: bool = True
     # opt-in, only needed for age-restricted videos (DESIGN.md §7). yt-dlp writes
     # refreshed cookies back into cookies_file.
@@ -48,7 +48,7 @@ def load(path: Path | None = None) -> Config:
     cfg = Config(
         js_runtime=data.get("js_runtime"),
         js_runtime_path=data.get("js_runtime_path"),
-        concurrency=int(data.get("concurrency", 4)),
+        concurrency=int(data.get("concurrency", 2)),
         musicbrainz=bool(data.get("musicbrainz", True)),
     )
     if root := data.get("library_root"):

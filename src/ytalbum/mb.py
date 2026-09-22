@@ -17,6 +17,8 @@ from typing import Any, Protocol
 
 import httpx
 
+from .titles import key as text_key
+
 log = logging.getLogger(__name__)
 
 BASE = "https://musicbrainz.org/ws/2"
@@ -33,6 +35,7 @@ class MusicBrainzAPI(Protocol):
     def search_recordings(self, artist: str, title: str) -> list[dict[str, Any]]: ...
     def search_releases(self, artist: str, album: str) -> list[dict[str, Any]]: ...
     def release(self, mbid: str) -> dict[str, Any] | None: ...
+    def artist_albums(self, artist: str) -> list[dict[str, Any]]: ...
 
 
 def default_cache_path() -> Path:
@@ -81,6 +84,15 @@ class MusicBrainz:
     def release(self, mbid: str) -> dict[str, Any] | None:
         return self._get(f"release/{mbid}", {"inc": "recordings+artist-credits+release-groups"})
 
+    def artist_albums(self, artist: str) -> list[dict[str, Any]]:
+        """Studio albums (release groups: primary type Album, no secondary type) of the best-matching artist."""
+        found = self._get("artist", {"query": f"artist:{phrase(artist)}", "limit": "5"})
+        match = next((a for a in (found or {}).get("artists", []) if text_key(a.get("name", "")) == text_key(artist)), None)
+        if not match:
+            return []
+        groups = self._get("release-group", {"artist": match["id"], "type": "album", "limit": "100"})
+        return [g for g in (groups or {}).get("release-groups", []) if not g.get("secondary-types")]
+
     # -- transport -----------------------------------------------------------------------
 
     def _get(self, path: str, params: dict[str, str]) -> dict[str, Any] | None:
@@ -109,7 +121,7 @@ class MusicBrainz:
             if r.status_code >= 400:
                 raise MusicBrainzError(f"{path}: HTTP {r.status_code}")
             body = r.json()
-            empty = not any(body.get(k) for k in ("recordings", "releases", "media", "id"))
+            empty = not any(body.get(k) for k in ("recordings", "releases", "media", "id", "artists", "release-groups"))
             self._cache_put(key, body, MISS_TTL if empty else HIT_TTL)
             return body
         return None

@@ -103,7 +103,7 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         )
 
     skipped = [
-        {"video_id": e.video_id, "title": e.title, "reason": reason}
+        {"video_id": e.video_id, "title": e.title, "reason": reason} | ({"transient": True} if e.transient else {})
         for e in collection.entries
         if (reason := skip_reason(e, collection))
     ]
@@ -138,8 +138,8 @@ def wanted_filename(plan: AlbumPlan, t: PlanTrack) -> str:
 def refresh_derived(plan: AlbumPlan) -> AlbumPlan:
     """Update names of things not on disk yet. `folder` and the filenames of finished tracks
     describe what IS on disk; only the executor moves those (download.relocate / download.run)."""
-    if not plan.folder:
-        plan.folder = wanted_folder(plan)
+    if not any(t.state == "done" for t in plan.tracks):
+        plan.folder = wanted_folder(plan)  # nothing on disk yet: follow the (enriched) names
     for t in plan.tracks:
         if t.state != "done":
             t.filename = wanted_filename(plan, t)
@@ -166,14 +166,16 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
     merged.skipped = fresh.skipped
 
     fresh_by_id = {t.video_id: t for t in fresh.tracks}
+    listed = set(fresh_by_id) | {s["video_id"] for s in fresh.skipped}  # skipped videos are still in the source
     known = set()
     for t in merged.tracks:
         known.add(t.video_id)
         f = fresh_by_id.get(t.video_id)
-        t.in_source = f is not None
+        t.in_source = t.video_id in listed
         if f:
             _merge_fields(t, f, TRACK_FIELDS)
-            t.mbid = f.mbid or t.mbid
+            if t.provenance.get("title") != Provenance.USER:
+                t.mbid = f.mbid or t.mbid
 
     next_number = max((t.number for t in merged.tracks), default=0) + 1
     for f in fresh.tracks:
@@ -185,10 +187,16 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
     return refresh_derived(merged)
 
 
+# how much a value is trusted; a merge never replaces a value by a less trusted one
+TRUST = {Provenance.PLAYLIST: 1, Provenance.YT_TITLE: 1, Provenance.YT_MUSIC: 2, Provenance.MB: 3, Provenance.USER: 4}
+
+
 def _merge_fields(target: AlbumPlan | PlanTrack, fresh: AlbumPlan | PlanTrack, fields: tuple[str, ...]) -> None:
     for name in fields:
         if _edited(target, name):
             target.provenance[name] = Provenance.USER
+        elif TRUST.get(fresh.provenance.get(name), 0) < TRUST.get(target.provenance.get(name), 0):
+            continue  # e.g. MusicBrainz was skipped or down this time: keep what it said before
         else:
             setattr(target, name, getattr(fresh, name))
             if name in fresh.provenance:

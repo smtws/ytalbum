@@ -71,7 +71,18 @@ These are the facts v1/v2 got wrong or never knew. Fixtures in `design-fixtures/
    `js_runtimes` config. Must be solved in setup, or formats (incl. Opus 251) may vanish.
 6. Opus 251 (~148 kbps) exists for normal videos; download it and remux, never transcode.
 7. Channel `/releases` tab exists only for official artist channels; a curator channel
-   (MyDarkLullabies) has only `/playlists`.
+   (MyDarkLullabies) has only `/playlists`. "Artist - Topic" channels have neither tab
+   any more; YouTube Music's album search (`music.youtube.com/search?q=…#albums`) returns
+   `MPREb_` ids that resolve to the `OLAK5uy_` playlists, whose tracks name the real
+   uploading channel (Faun → "fauntube").
+8. **YouTube's bot check.** After a few hundred requests in a day, every video answers
+   "Sign in to confirm you're not a bot" while playlist listings still work. A run then
+   sees a playlist whose entries all failed — and v3 briefly reclassified Vol. 1 from that
+   partial view and moved it to `Erben der Schöpfung/…`. Rules since: failures are
+   *transient* (bot check, 403/429/5xx, timeouts) or permanent (private, deleted,
+   age-restricted); a skipped video is still *in* the source; any transient failure means
+   "incomplete — change nothing"; the first bot check stops all further requests
+   (fetch, download, `update`, multi-picks). Defaults: 2 parallel requests, 0.5 s apart.
 
 ## 4. Pipeline
 
@@ -208,7 +219,16 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    confirms the artist but gets no recording id; MB answers 503 even to the first
    request, so retry/backoff is mandatory; our own saved cover is upgraded when a better
    source appears, a user's cover never is. Cache: `~/.cache/ytalbum/musicbrainz.sqlite3`.
-6. Artist search (channel releases/playlists tab, Topic channel, YT playlist search).
+6. ✅ Artist search (channel releases/playlists tab, Topic channel, YT playlist search).
+   *Done 2026-09-22:* `ytalbum search "Faun"` → YouTube Music album search → dominant
+   uploading channel whose name contains the artist → its Releases tab; grouped as Albums
+   (MusicBrainz studio albums or ≥5 tracks) / Singles, EPs / channel playlists / other
+   playlists; duplicates of one album merged; MB albums not found are listed. Curators
+   (no YT Music albums) are found through their own playlists. Verified live: Faun →
+   13 albums, HEX downloaded with MB release match (guest credits) in one command.
+   Also fixed here: a new album's folder follows the enriched names; a merge never
+   replaces a value by a less trusted one (user > MB > YT Music > title/playlist), so an
+   `update --no-mb` or an MB outage cannot undo MusicBrainz corrections.
 7. Web UI / PWA on the library.
 8. Intro/outro trimming — **wanted, but only once slices 1–5 are stable(ish).** Must be
    non-destructive (keep the original, or store trim points in the plan) and never on

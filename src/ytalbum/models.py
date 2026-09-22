@@ -36,7 +36,10 @@ class SourceRef:
     url: str
     source_id: str
     title: str
-    tab: str  # "releases" (official albums) or "playlists"
+    tab: str  # "releases" (official albums), "playlists", "ytmusic" or "search"
+    artist: str | None = None  # who YouTube says made it (search hits only)
+    channel_url: str | None = None  # the channel that uploaded its tracks
+    count: int | None = None  # entries, when YouTube told us
 
 
 @dataclass
@@ -60,6 +63,7 @@ class Entry:
     chapters: list[dict[str, Any]] = field(default_factory=list)
     music: Music = field(default_factory=Music)
     skipped: str | None = None  # reason, if this entry is unusable
+    transient: bool = False  # the reason may go away (bot check, network): the entry is still in the source
 
     @property
     def url(self) -> str:
@@ -84,6 +88,11 @@ class Collection:
     def from_dict(cls, d: dict[str, Any]) -> Collection:
         entries = [Entry(**{**e, "music": Music(**e.get("music", {}))}) for e in d["entries"]]
         return cls(**{**d, "entries": entries})
+
+    @property
+    def unreadable(self) -> list[Entry]:
+        """Entries that failed for a temporary reason: the collection is incomplete right now."""
+        return [e for e in self.entries if e.transient]
 
 
 @dataclass

@@ -243,3 +243,23 @@ def test_missing_cover_art_falls_back(tmp_path, yt):
     album_dir = tmp_path / plan.folder
     run(plan, album_dir, yt)
     assert (album_dir / "cover.jpg").read_bytes() == JPEG
+
+
+def test_new_album_folder_follows_enriched_names():
+    plan = build_plan(vol1())
+    plan.albumartist = "Someone Else"
+    from ytalbum.plan import refresh_derived
+
+    assert refresh_derived(plan).folder == "Someone Else/Vol. 1 - Heavy Sleeping"
+
+
+def test_merge_never_downgrades_to_a_weaker_source():
+    existing = build_plan(vol1())
+    t = existing.tracks[10]
+    t.artist = t.auto["artist"] = "Ashley Serena"  # what MusicBrainz said last time
+    t.title = t.auto["title"] = "Lullaby of Woe"
+    t.provenance = {"artist": Provenance.MB, "title": Provenance.MB}
+
+    merged = merge_plans(existing, build_plan(vol1()))  # this time without MusicBrainz
+    assert (merged.tracks[10].artist, merged.tracks[10].title) == ("Ashley Serena", "Lullaby of Woe")
+    assert merged.tracks[10].provenance["artist"] == Provenance.MB
