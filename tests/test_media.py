@@ -110,3 +110,16 @@ def test_best_thumbnail_prefers_preference_then_size():
     info = {"thumbnails": [{"url": "a", "width": 1280, "height": 720}, {"url": "b", "preference": 1, "width": 120, "height": 90}]}
     assert best_thumbnail(info) == "b"
     assert best_thumbnail({"thumbnail": "c"}) == "c"
+
+
+def test_pot_provider_is_only_used_when_built(tmp_path):
+    from ytalbum.config import Config
+    from ytalbum.youtube import YouTube
+
+    home = tmp_path / "server"
+    cfg = Config(pot_provider_home=home, js_runtime="node")
+    assert cfg.resolved_pot_provider() is None
+    assert "extractor_args" not in YouTube(cfg)._params()
+    (home / "build").mkdir(parents=True)
+    (home / "build" / "generate_once.js").write_text("")
+    assert YouTube(cfg)._params()["extractor_args"] == {"youtubepot-bgutilscript": {"server_home": [str(home)]}}

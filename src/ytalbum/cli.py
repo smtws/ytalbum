@@ -119,6 +119,8 @@ def _config(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     print(f"library_root: {cfg.library_root or '(not set)'}")
     print(f"cookies:      {cfg.cookies_file or cfg.cookies_from_browser or '(none — age-restricted videos are skipped)'}")
     print(f"musicbrainz:  {'on' if cfg.musicbrainz else 'off'}")
+    pot = cfg.resolved_pot_provider()
+    print(f"po tokens:    {pot or '(no generator — some streams may be withheld; see README)'}")
     print(f"js runtime:   {' '.join(filter(None, runtime)) if runtime else 'NONE FOUND — install deno or node'}")
     return 0
 

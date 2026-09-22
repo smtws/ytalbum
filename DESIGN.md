@@ -89,9 +89,15 @@ These are the facts v1/v2 got wrong or never knew. Fixtures in `design-fixtures/
    cookie storage.)
 9. **Age-restricted videos** become *readable* with a login, but an account that is not
    age-verified gets only format 18 (360p video, low-bitrate AAC); all audio-only streams
-   are withheld or need a PO token. v3 does not transcode that into Opus; the track stays
-   failed with a clear reason. Options if it matters: an age-verified account, or a
-   PO-token provider plugin for yt-dlp (not tried).
+   are withheld or need a PO token. It is *not* the account: the same video plays in high
+   resolution in that very Firefox, because the browser presents a proof-of-origin token.
+   No yt-dlp client (tv, web_safari, mweb, web_embedded) gets audio without one.
+   **Fix (2026-09-22):** the bgutil PO-token generator in script mode —
+   `bgutil-ytdlp-pot-provider` (plugin, in the venv) + its generator built in
+   `.pot-provider/server` (v2.0.0, Node, gitignored). ytalbum detects it and passes
+   `youtubepot-bgutilscript:server_home`. Result: Opus 251 offered, Feuerschwanz track
+   downloaded at 121 kbps. Cost: a Node process per request (a full 4-album update took
+   2.5 min). v3 never transcodes the 360p fallback into Opus.
 
 ## 4. Pipeline
 

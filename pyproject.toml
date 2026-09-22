@@ -7,6 +7,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "bgutil-ytdlp-pot-provider>=2.0.0",
     "httpx>=0.28.1",
     "mutagen>=1.48.1",
     "yt-dlp[default]>=2026.8.19",

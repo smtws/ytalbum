@@ -102,6 +102,9 @@ class YouTube:
         if runtime := self.cfg.resolved_js_runtime():
             name, path = runtime
             params["js_runtimes"] = {name: {"path": path} if path else {}}
+        if pot := self.cfg.resolved_pot_provider():
+            # proof-of-origin tokens like a browser: unlocks streams YouTube otherwise withholds
+            params["extractor_args"] = {"youtubepot-bgutilscript": {"server_home": [str(pot)]}}
         params.update(extra)
         return params
 

@@ -27,4 +27,13 @@ ytalbum then stops, changes nothing, and asks you to run it again later (exit co
 Age-restricted videos are skipped unless cookies are configured:
 `ytalbum config --cookies-from-browser firefox` (or `--cookies-file cookies.txt`).
 
+Some streams (e.g. age-restricted videos, even with a login) need a proof-of-origin token
+like a browser has. Set up the token generator once (Node ≥ 20, versions must match the
+installed plugin, currently 2.0.0); `ytalbum config` shows it as "po tokens":
+
+```sh
+git clone --single-branch --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git .pot-provider
+(cd .pot-provider/server && npm ci && npx tsc)
+```
+
 Needs `ffmpeg` and a JavaScript runtime for yt-dlp (deno or node; `ytalbum config` shows which one is used).

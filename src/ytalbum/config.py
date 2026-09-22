@@ -8,6 +8,9 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+# `uv` installs this project editable, so the repo checkout is two levels above the package
+PROJECT_POT_HOME = Path(__file__).resolve().parents[2] / ".pot-provider" / "server"
+
 # yt-dlp's order of preference (see `yt-dlp --help`, --js-runtimes)
 JS_RUNTIMES = ("deno", "node", "bun", "quickjs")
 
@@ -46,6 +49,13 @@ class Config:
     # refreshed cookies back into cookies_file.
     cookies_file: Path | None = None
     cookies_from_browser: str | None = None  # "firefox", "chrome", "chrome:Profile 1", …
+    # bgutil PO-token generator (script mode), needed for some streams (DESIGN.md §3.9)
+    pot_provider_home: Path | None = None
+
+    def resolved_pot_provider(self) -> Path | None:
+        """The bgutil `server` dir with a built generate_once.js: configured, or inside the project."""
+        candidates = [self.pot_provider_home] if self.pot_provider_home else [PROJECT_POT_HOME]
+        return next((c for c in candidates if c and (c / "build" / "generate_once.js").is_file()), None)
 
     def resolved_js_runtime(self) -> tuple[str, str | None] | None:
         """(name, path) of the runtime to hand to yt-dlp, or None if none is available."""
@@ -73,6 +83,8 @@ def load(path: Path | None = None) -> Config:
     if cookies := data.get("cookies_file"):
         cfg.cookies_file = Path(cookies).expanduser()
     cfg.cookies_from_browser = data.get("cookies_from_browser") or None
+    if pot := data.get("pot_provider_home"):
+        cfg.pot_provider_home = Path(pot).expanduser()
     return cfg
 
 

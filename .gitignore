@@ -3,3 +3,4 @@ __pycache__/
 .vite/
 node_modules/
 .venv/
+.pot-provider/
