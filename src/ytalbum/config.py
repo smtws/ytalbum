@@ -49,8 +49,19 @@ class Config:
     # refreshed cookies back into cookies_file.
     cookies_file: Path | None = None
     cookies_from_browser: str | None = None  # "firefox", "chrome", "chrome:Profile 1", …
-    # bgutil PO-token generator (script mode), needed for some streams (DESIGN.md §3.9)
+    # bgutil PO-token generator, needed for some streams (DESIGN.md §3.9).
+    # "server": local HTTP server started on demand, stops after pot_idle seconds idle
+    # (script mode stays configured as fallback); "script": a Node process per request; "off".
     pot_provider_home: Path | None = None
+    pot_mode: str = "server"
+    pot_port: int = 4416
+    pot_idle: int = 300
+
+    def resolved_node(self) -> str | None:
+        runtime = self.resolved_js_runtime()
+        if runtime and runtime[0] == "node" and runtime[1]:
+            return runtime[1]
+        return shutil.which("node")
 
     def resolved_pot_provider(self) -> Path | None:
         """The bgutil `server` dir with a built generate_once.js: configured, or inside the project."""
@@ -85,6 +96,9 @@ def load(path: Path | None = None) -> Config:
     cfg.cookies_from_browser = data.get("cookies_from_browser") or None
     if pot := data.get("pot_provider_home"):
         cfg.pot_provider_home = Path(pot).expanduser()
+    cfg.pot_mode = str(data.get("pot_mode", "server"))
+    cfg.pot_port = int(data.get("pot_port", 4416))
+    cfg.pot_idle = int(data.get("pot_idle", 300))
     return cfg
 
 

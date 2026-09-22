@@ -117,9 +117,17 @@ def test_pot_provider_is_only_used_when_built(tmp_path):
     from ytalbum.youtube import YouTube
 
     home = tmp_path / "server"
-    cfg = Config(pot_provider_home=home, js_runtime="node")
+    cfg = Config(pot_provider_home=home, js_runtime="node", pot_mode="script")
     assert cfg.resolved_pot_provider() is None
     assert "extractor_args" not in YouTube(cfg)._params()
     (home / "build").mkdir(parents=True)
     (home / "build" / "generate_once.js").write_text("")
     assert YouTube(cfg)._params()["extractor_args"] == {"youtubepot-bgutilscript": {"server_home": [str(home)]}}
+
+    cfg.pot_mode = "server"  # server preferred, script kept as the plugin's fallback
+    args = YouTube(cfg)._params()["extractor_args"]
+    assert args["youtubepot-bgutilhttp"] == {"base_url": ["http://127.0.0.1:4416"]}
+    assert args["youtubepot-bgutilscript"] == {"server_home": [str(home)]}
+
+    cfg.pot_mode = "off"
+    assert "extractor_args" not in YouTube(cfg)._params()

@@ -29,7 +29,10 @@ Age-restricted videos are skipped unless cookies are configured:
 
 Some streams (e.g. age-restricted videos, even with a login) need a proof-of-origin token
 like a browser has. Set up the token generator once (Node ≥ 20, versions must match the
-installed plugin, currently 2.0.0); `ytalbum config` shows it as "po tokens":
+installed plugin, currently 2.0.0); `ytalbum config` shows it as "po tokens". ytalbum then
+starts a local token server (127.0.0.1:4416) whenever it reads or downloads, and the server
+stops itself after 5 idle minutes (`pot_mode = "script"` or `"off"` in the config to change;
+log in `~/.cache/ytalbum/pot-server.log`):
 
 ```sh
 git clone --single-branch --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git .pot-provider

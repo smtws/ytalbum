@@ -52,7 +52,10 @@ def wait(client, job_id, timeout=10):
 
 def test_static_and_state(server):
     _, c = server
-    assert "ytalbum" in c.get("/").text
+    page = c.get("/")
+    assert "ytalbum" in page.text and page.headers["cache-control"] == "no-store"
+    assert '"/app.js?v=' in page.text and '"/style.css?v=' in page.text  # content-hashed: never stale
+    assert "renderSettings" in c.get("/app.js?v=whatever").text
     assert c.get("/manifest.webmanifest").headers["content-type"] == "application/manifest+json"
     state = c.get("/api/state").json()
     assert [(a["albumartist"], a["album"], a["done"]) for a in state["albums"]] == [("My Dark Lullabies", "Vol. 1 - Heavy Sleeping", 13)]

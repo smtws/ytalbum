@@ -1,6 +1,6 @@
 // App shell cache: the UI works offline-ish; /api/* always goes to the network.
-const CACHE = "ytalbum-v1";
-const SHELL = ["/", "/app.js", "/style.css", "/manifest.webmanifest", "/icon.svg"];
+const CACHE = "ytalbum-v2";
+const SHELL = ["/manifest.webmanifest", "/icon.svg"]; // app.js/style.css are content-hashed by the page
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))));
 self.addEventListener("activate", (e) =>
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))))

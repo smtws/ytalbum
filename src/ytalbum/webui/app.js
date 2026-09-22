@@ -256,6 +256,30 @@ $("#browser").addEventListener("change", async (ev) => {
   renderSettings();
 });
 
+// -- theme: auto (follow the system) → dark → light, remembered in this browser ---------------
+
+const THEMES = { auto: ["◐", "automatic"], dark: ["☾", "dark"], light: ["☀", "light"] };
+
+function applyTheme(theme) {
+  if (theme === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  $("#theme").textContent = THEMES[theme][0];
+  $("#theme").title = `Theme: ${THEMES[theme][1]} (click to change)`;
+}
+
+function savedTheme() {
+  try { return THEMES[localStorage.getItem("ytalbum-theme")] ? localStorage.getItem("ytalbum-theme") : "auto"; } catch { return "auto"; }
+}
+
+let theme = savedTheme();
+$("#theme").addEventListener("click", () => {
+  const order = ["auto", "dark", "light"];
+  theme = order[(order.indexOf(theme) + 1) % order.length];
+  try { localStorage.setItem("ytalbum-theme", theme); } catch { /* private mode: just this session */ }
+  applyTheme(theme);
+});
+applyTheme(theme);
+
 // -- wiring ------------------------------------------------------------------------------
 
 $("#open").addEventListener("submit", async (ev) => {

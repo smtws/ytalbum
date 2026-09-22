@@ -120,7 +120,15 @@ def _config(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     print(f"cookies:      {cfg.cookies_file or cfg.cookies_from_browser or '(none — age-restricted videos are skipped)'}")
     print(f"musicbrainz:  {'on' if cfg.musicbrainz else 'off'}")
     pot = cfg.resolved_pot_provider()
-    print(f"po tokens:    {pot or '(no generator — some streams may be withheld; see README)'}")
+    if not pot or cfg.pot_mode == "off":
+        print(f"po tokens:    {'off' if cfg.pot_mode == 'off' else '(no generator — some streams may be withheld; see README)'}")
+    else:
+        from .pot import ping
+
+        running = ping(cfg.pot_port)
+        mode = f"server on 127.0.0.1:{cfg.pot_port}, stops after {cfg.pot_idle}s idle" if cfg.pot_mode == "server" else "script"
+        state = f" — running (v{running['version']})" if running else (" — started on demand" if cfg.pot_mode == "server" else "")
+        print(f"po tokens:    {mode}{state}\n              {pot}")
     print(f"js runtime:   {' '.join(filter(None, runtime)) if runtime else 'NONE FOUND — install deno or node'}")
     return 0
 

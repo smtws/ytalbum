@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 import unicodedata
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -22,6 +23,7 @@ from typing import Any
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
+from . import pot as pot_server
 from .config import Config
 from .models import Collection, Entry, Music, SourceRef
 
@@ -82,6 +84,29 @@ class _YdlLogger:
 class YouTube:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
+        self._pot_checked = False
+        self._pot_lock = threading.Lock()
+        self._last_beat = 0.0
+
+    def _pot_home(self) -> Path | None:
+        return self.cfg.resolved_pot_provider() if self.cfg.pot_mode in ("server", "script") else None
+
+    def ensure_pot_server(self) -> None:
+        """Server mode: make sure the token server runs before reading/downloading (once per instance)."""
+        with self._pot_lock:
+            if self._pot_checked or self.cfg.pot_mode != "server":
+                return
+            self._pot_checked = True
+            home, node = self._pot_home(), self.cfg.resolved_node()
+            if home and node:
+                pot_server.ensure_server(home, node, self.cfg.pot_port, self.cfg.pot_idle)
+
+    def _beat(self, *_: Any) -> None:
+        """Keep the token server alive while we work (throttled)."""
+        now = time.monotonic()
+        if self.cfg.pot_mode == "server" and now - self._last_beat > 30:
+            self._last_beat = now
+            pot_server.touch_heartbeat()
 
     def _params(self, **extra: Any) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -102,9 +127,14 @@ class YouTube:
         if runtime := self.cfg.resolved_js_runtime():
             name, path = runtime
             params["js_runtimes"] = {name: {"path": path} if path else {}}
-        if pot := self.cfg.resolved_pot_provider():
+        if pot := self._pot_home():
             # proof-of-origin tokens like a browser: unlocks streams YouTube otherwise withholds
-            params["extractor_args"] = {"youtubepot-bgutilscript": {"server_home": [str(pot)]}}
+            args: dict[str, dict[str, list[str]]] = {"youtubepot-bgutilscript": {"server_home": [str(pot)]}}
+            if self.cfg.pot_mode == "server":  # the plugin prefers the server, falls back to the script
+                args["youtubepot-bgutilhttp"] = {"base_url": [pot_server.base_url(self.cfg.pot_port)]}
+                params["progress_hooks"] = [self._beat]
+                self._beat()
+            params["extractor_args"] = args
         params.update(extra)
         return params
 
@@ -159,6 +189,7 @@ class YouTube:
 
     def fetch(self, url: str) -> Collection:
         """Resolve a playlist or video URL into a Collection with fully inspected entries."""
+        self.ensure_pot_server()
         with YoutubeDL(self._params(extract_flat="in_playlist")) as ydl:
             info = ydl.extract_info(url, download=False)
         fetched_at = datetime.now(UTC).isoformat(timespec="seconds")
@@ -227,6 +258,7 @@ class YouTube:
         Prefers YouTube's native Opus stream; ffmpeg then only remuxes (no re-encode).
         """
         dest_dir.mkdir(parents=True, exist_ok=True)
+        self.ensure_pot_server()
         params = self._params(
             format="bestaudio[acodec=opus]/bestaudio",
             outtmpl=str(dest_dir / "%(id)s.%(ext)s"),

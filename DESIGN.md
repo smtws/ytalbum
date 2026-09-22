@@ -96,8 +96,15 @@ These are the facts v1/v2 got wrong or never knew. Fixtures in `design-fixtures/
    `bgutil-ytdlp-pot-provider` (plugin, in the venv) + its generator built in
    `.pot-provider/server` (v2.0.0, Node, gitignored). ytalbum detects it and passes
    `youtubepot-bgutilscript:server_home`. Result: Opus 251 offered, Feuerschwanz track
-   downloaded at 121 kbps. Cost: a Node process per request (a full 4-album update took
-   2.5 min). v3 never transcodes the 360p fallback into Opus.
+   downloaded at 121 kbps. Script mode costs a Node process per request (a full 4-album
+   update took 2.5 min), so the default is now **server mode** (`pot.py`): before reading
+   or downloading, ytalbum pings `127.0.0.1:4416/ping` and, if nothing answers, starts a
+   detached watchdog (`python -m ytalbum.pot`) running `node build/main.js` on localhost
+   only; every YouTube request and download progress touches
+   `~/.cache/ytalbum/pot-server.heartbeat`, and after `pot_idle` (300 s) without a beat the
+   watchdog stops Node and exits. Script mode stays configured as the plugin's fallback.
+   `pot_mode = "script" | "off"` in the config switches. v3 never transcodes the 360p
+   fallback into Opus.
 
 ## 4. Pipeline
 
@@ -199,8 +206,10 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    Vol. 1 downloads 13/13 (Opus 251 copied, 147 kbps), tags + 1280×720 cover embedded,
    resume and per-track retry (YouTube sporadically answers 403) verified live.
    Known gaps, left for their slices: raw video titles for 8 of 13 Vol. 1 tracks
-   (slice 2), YouTube covers are 16:9 not square, a single video is filed as a
-   1-track "album" under its YT Music album name.
+   (slice 2), YouTube covers are 16:9 not square (fixed later: `cover.py` crops
+   pillarboxed thumbnails to the square art — only when everything cut away is uniform
+   background, centred unless content forces a shift, never user covers), a single
+   video is filed as a 1-track "album" under its YT Music album name.
 2. ✅ Compilation parsing (§5) + intro skipping; Vol. 1 comes out right. *Done 2026-09-22:*
    11 of 13 Vol. 1 tracks exact; the two left (reversed "Song - Artist" on a lyrics
    channel, `@xxHANDLExx` feat. credit) are by design for the lookup in slice 5.
@@ -255,6 +264,9 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    as text. Installable as an app when opened via localhost (service workers need a
    secure context; over plain http on the LAN it works as a web page only).
    Verified in a browser: grid, album view, update job ending "blocked" cleanly.
+   Later: theme switch (auto/dark/light, remembered per browser); the page references
+   `app.js`/`style.css` by content hash — a one-hour cache had kept the old script (no
+   browser dropdown) alive after an update.
 8. Intro/outro trimming — **wanted, but only once slices 1–5 are stable(ish).** Must be
    non-destructive (keep the original, or store trim points in the plan) and never on
    by default for a track until it has been shown to work on real fixtures.

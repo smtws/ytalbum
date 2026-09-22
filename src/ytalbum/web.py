@@ -11,6 +11,7 @@ by album id, never by a path from the request.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import logging
@@ -252,6 +253,15 @@ class App:
         return ThreadingHTTPServer((self.host, self.port), Handler)
 
 
+def _asset(name: str) -> bytes:
+    return resources.files("ytalbum").joinpath("webui", name).read_bytes()
+
+
+def _asset_hash(name: str) -> str:
+    """Changes with the file, so a new version is never served from a browser cache."""
+    return hashlib.sha1(_asset(name)).hexdigest()[:10]
+
+
 def _append(job: Job, line: str) -> None:
     job.log.append(line)
     if len(job.log) > MAX_LOG:
@@ -286,7 +296,11 @@ class _Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         if url.path in STATIC:
             name, ctype = STATIC[url.path]
-            return self._send(HTTPStatus.OK, resources.files("ytalbum").joinpath("webui", name).read_bytes(), ctype, cache=url.path != "/")
+            body = _asset(name)
+            if url.path == "/":  # never cached itself; points at content-hashed assets
+                for asset in ("app.js", "style.css"):
+                    body = body.replace(f'"/{asset}"'.encode(), f'"/{asset}?v={_asset_hash(asset)}"'.encode())
+            return self._send(HTTPStatus.OK, body, ctype, cache=url.path != "/")
         match url.path:
             case "/api/state":
                 return self._json(self.app.state())
@@ -337,7 +351,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "max-age=3600" if cache else "no-store")
+        self.send_header("Cache-Control", "no-cache" if cache else "no-store")  # static: always revalidate, so updates show up
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'")
         self.end_headers()

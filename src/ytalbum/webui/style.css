@@ -3,10 +3,18 @@
   --accent: #6b4fd8; --accent-ink: #ffffff; --ok: #2f8a4c; --warn: #b7791f; --bad: #c0392b;
   --radius: 10px; color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #151419; --panel: #1f1d25; --ink: #ecebf0; --muted: #9a96a6; --line: #2e2b36;
-          --accent: #9b85ff; --accent-ink: #151419; --ok: #5cc27d; --warn: #e0a84a; --bad: #ef6f5f; color-scheme: dark; }
+/* dark: when chosen explicitly, or on "auto" when the system/browser prefers it */
+:root[data-theme="dark"] {
+  --bg: #151419; --panel: #1f1d25; --ink: #ecebf0; --muted: #9a96a6; --line: #2e2b36;
+  --accent: #9b85ff; --accent-ink: #151419; --ok: #5cc27d; --warn: #e0a84a; --bad: #ef6f5f; color-scheme: dark;
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151419; --panel: #1f1d25; --ink: #ecebf0; --muted: #9a96a6; --line: #2e2b36;
+    --accent: #9b85ff; --accent-ink: #151419; --ok: #5cc27d; --warn: #e0a84a; --bad: #ef6f5f; color-scheme: dark;
+  }
+}
+.theme { padding: .4rem .55rem; line-height: 1; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, sans-serif; }
 button, input { font: inherit; color: inherit; }

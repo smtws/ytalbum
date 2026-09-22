@@ -18,6 +18,7 @@ from pathlib import Path
 
 from yt_dlp.utils import DownloadError
 
+from .cover import square_if_padded
 from .models import AlbumPlan, PlanTrack
 from .plan import refresh_derived, wanted_filename, wanted_folder
 from .tag import image_mime, signature, tag_file
@@ -165,6 +166,10 @@ def _cover(plan: AlbumPlan, album_dir: Path, yt: YouTube) -> bytes | None:
     if existing:
         data = existing.read_bytes()
         ours = plan.cover_fetched.get("sha1") == _sha1(data)
+        if ours and (square := square_if_padded(data)):  # saved before covers were squared
+            existing.unlink()
+            data = _save_cover(plan, album_dir, plan.cover_fetched.get("url", ""), square)
+            existing = next(album_dir.glob(f"{COVER_STEM}.*"))
         if not ours or not plan.cover_url or plan.cover_url in (plan.cover_fetched.get("url"), plan.cover_fetched.get("tried")):
             return data
         new = _download_cover(plan.cover_url, yt)
@@ -195,6 +200,7 @@ def _download_cover(url: str, yt: YouTube) -> tuple[str, bytes] | None:
 
 
 def _save_cover(plan: AlbumPlan, album_dir: Path, url: str, data: bytes) -> bytes:
+    data = square_if_padded(data) or data  # pillarboxed YouTube thumbnails -> the square art
     ext = image_mime(data).split("/")[1].replace("jpeg", "jpg")
     album_dir.mkdir(parents=True, exist_ok=True)
     (album_dir / f"{COVER_STEM}.{ext}").write_bytes(data)
