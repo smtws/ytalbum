@@ -550,6 +550,9 @@ function playIndex(i) {
   }
 }
 
+// the length often arrives only with the file (older albums have none in the plan)
+audio.addEventListener("loadedmetadata", renderTrim);
+audio.addEventListener("durationchange", renderTrim);
 audio.addEventListener("play", () => { $("#p-play").textContent = "⏸"; });
 audio.addEventListener("pause", () => { $("#p-play").textContent = "▶"; });
 audio.addEventListener("ended", () => (qi + 1 < queue.length ? playIndex(qi + 1) : null));
@@ -579,7 +582,8 @@ let dragging = null;
 
 function trimLimit() {
   const t = queue[qi];
-  return (t && (t.duration || audio.duration)) || audio.duration || 0;
+  const total = t?.duration || audio.duration;
+  return Number.isFinite(total) && total > 0 ? total : 0;
 }
 
 function renderTrim() {
