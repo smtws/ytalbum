@@ -24,6 +24,10 @@ class Config:
     js_runtime: str | None = None
     js_runtime_path: str | None = None
     concurrency: int = 4
+    # opt-in, only needed for age-restricted videos (DESIGN.md §7). yt-dlp writes
+    # refreshed cookies back into cookies_file.
+    cookies_file: Path | None = None
+    cookies_from_browser: str | None = None  # "firefox", "chrome", "chrome:Profile 1", …
 
     def resolved_js_runtime(self) -> tuple[str, str | None] | None:
         """(name, path) of the runtime to hand to yt-dlp, or None if none is available."""
@@ -47,16 +51,24 @@ def load(path: Path | None = None) -> Config:
     )
     if root := data.get("library_root"):
         cfg.library_root = Path(root).expanduser()
+    if cookies := data.get("cookies_file"):
+        cfg.cookies_file = Path(cookies).expanduser()
+    cfg.cookies_from_browser = data.get("cookies_from_browser") or None
     return cfg
 
 
-def save_library_root(root: Path, path: Path | None = None) -> Path:
-    """Set library_root in the config file, keeping any other lines."""
+def save_setting(name: str, value: str | None, path: Path | None = None) -> Path:
+    """Set (or with None: remove) one top-level string setting, keeping all other lines."""
     path = path or config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = path.read_text().splitlines() if path.exists() else []
-    lines = [l for l in lines if not l.strip().startswith("library_root")]
-    escaped = str(root).replace("\\", "\\\\").replace('"', '\\"')
-    lines.insert(0, f'library_root = "{escaped}"')
+    lines = [l for l in lines if l.split("=")[0].strip() != name]
+    if value is not None:
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        lines.insert(0, f'{name} = "{escaped}"')
     path.write_text("\n".join(lines) + "\n")
     return path
+
+
+def save_library_root(root: Path, path: Path | None = None) -> Path:
+    return save_setting("library_root", str(root), path)

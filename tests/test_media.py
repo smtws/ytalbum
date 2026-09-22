@@ -98,6 +98,13 @@ def test_entry_from_info_joins_multiple_artists():
     assert e.position == 2
 
 
+def test_short_error_messages():
+    from ytalbum.youtube import _short_error
+
+    assert _short_error("ERROR: [youtube] abc: Sign in to confirm your age. Use --cookies…").startswith("age-restricted")
+    assert _short_error("ERROR: [youtube] abc: Video unavailable. This video is private") == "Video unavailable"
+
+
 def test_best_thumbnail_prefers_preference_then_size():
     info = {"thumbnails": [{"url": "a", "width": 1280, "height": 720}, {"url": "b", "preference": 1, "width": 120, "height": 90}]}
     assert best_thumbnail(info) == "b"

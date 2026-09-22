@@ -189,7 +189,15 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    replace it). Albums are found by source id, so renamed folders are still updated.
    Verified live: re-running Vol. 1 renamed 8 files to their slice-2 names, retagged
    13, downloaded 0.
-4. Channel URL → pick which collections to fetch.
+4. ✅ Channel URL → pick which collections to fetch. *Done 2026-09-22:* Releases tab
+   (official `OLAK5uy_` albums + singles) listed before Playlists; `--pick`/`--all` or
+   an interactive prompt; "✓ in library" markers; `ytalbum update` re-checks every album.
+   Found on the way (Vol. 20): age-restricted videos → opt-in cookies
+   (`config --cookies-from-browser/--cookies-file`), skipped until then and picked up by
+   a later `update`; YouTube titles can be Unicode-decomposed (NFD) → normalised to NFC
+   at the mapping boundary; German/360°/unbracketed video labels; partial labels keep
+   their meaning ("(Official Live Video)" → "(Live)"), and brackets are only treated as
+   labels if they contain a marker word ("(Music of the Night)" stays).
 5. MusicBrainz enrichment (album + recording level) with provenance and cover art.
 6. Artist search (channel releases/playlists tab, Topic channel, YT playlist search).
 7. Web UI / PWA on the library.

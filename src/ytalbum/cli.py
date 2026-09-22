@@ -1,4 +1,4 @@
-"""Command line: `ytalbum fetch|plan|download|config`."""
+"""Command line: `ytalbum fetch|plan|download|update|config`."""
 
 from __future__ import annotations
 
@@ -9,23 +9,25 @@ import sys
 from pathlib import Path
 
 from . import config as config_mod
-from .download import find_plan, load_plan, relocate, run, save_plan
-from .models import AlbumPlan, PlanTrack
+from .download import find_plan, iter_plans, load_plan, relocate, run, save_plan
+from .models import AlbumPlan, PlanTrack, SourceRef
 from .plan import build_plan, merge_plans
-from .youtube import NotSupported, YouTube
+from .youtube import NotSupported, YouTube, channel_base_url
 
 PROV_MARK = {"mb": "MB", "yt_music": "YTM", "yt_title": "title", "playlist": "playlist", "user": "user"}
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="ytalbum", description="Turn a YouTube playlist into a tagged album.")
+    p = argparse.ArgumentParser(prog="ytalbum", description="Turn YouTube playlists into tagged albums.")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    f = sub.add_parser("fetch", help="plan and download a playlist or video URL")
+    f = sub.add_parser("fetch", help="plan and download a playlist, video or channel URL")
     f.add_argument("url")
     f.add_argument("--library", type=Path, help="library root (overrides the config file)")
     f.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
+    f.add_argument("--all", action="store_true", help="channel: take every release and playlist")
+    f.add_argument("--pick", metavar="SPEC", help="channel: which ones, e.g. 1,3-5 (default: ask)")
     f.add_argument("--dump-collection", type=Path, metavar="FILE", help="also save what YouTube returned (for test fixtures)")
 
     pl = sub.add_parser("plan", help="write the plan into the album folder for editing, download nothing")
@@ -35,10 +37,17 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("download", help="download from an (edited) plan in an album folder")
     d.add_argument("album_dir", type=Path)
 
+    u = sub.add_parser("update", help="re-check every album in the library against its source")
+    u.add_argument("--library", type=Path)
+    u.add_argument("--dry-run", action="store_true", help="only report what changed")
+
     c = sub.add_parser("config", help="show or set configuration")
     c.add_argument("--library", type=Path, help="set the library root")
+    c.add_argument("--cookies-from-browser", metavar="BROWSER[:PROFILE]", help="use a browser's YouTube login (for age-restricted videos); 'none' to unset")
+    c.add_argument("--cookies-file", type=Path, metavar="FILE", help="use an exported cookies.txt instead; 'none' to unset")
 
     args = p.parse_args(argv)
+    sys.stdout.reconfigure(line_buffering=True)  # keep progress in order with stderr when piped
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     cfg = config_mod.load()
 
@@ -50,8 +59,10 @@ def main(argv: list[str] | None = None) -> int:
                 return _fetch(args, cfg)
             case "download":
                 return _download(args.album_dir, cfg)
+            case "update":
+                return _update(args, cfg)
     except NotSupported as e:
-        print(f"not supported yet: {e}", file=sys.stderr)
+        print(f"not supported: {e}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print("\ninterrupted — run the same command again to resume", file=sys.stderr)
@@ -59,54 +70,55 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+# -- commands ----------------------------------------------------------------------------
+
+
 def _config(args: argparse.Namespace, cfg: config_mod.Config) -> int:
+    changes = {}
     if args.library:
-        path = config_mod.save_library_root(args.library.expanduser().resolve())
-        print(f"library_root set in {path}")
+        changes["library_root"] = str(args.library.expanduser().resolve())
+    if args.cookies_from_browser:
+        changes["cookies_from_browser"] = None if args.cookies_from_browser == "none" else args.cookies_from_browser
+    if args.cookies_file:
+        changes["cookies_file"] = None if str(args.cookies_file) == "none" else str(args.cookies_file.expanduser().resolve())
+    for name, value in changes.items():
+        config_mod.save_setting(name, value)
+    if changes:
         cfg = config_mod.load()
     runtime = cfg.resolved_js_runtime()
     print(f"config file:  {config_mod.config_path()}")
     print(f"library_root: {cfg.library_root or '(not set)'}")
+    print(f"cookies:      {cfg.cookies_file or cfg.cookies_from_browser or '(none — age-restricted videos are skipped)'}")
     print(f"js runtime:   {' '.join(filter(None, runtime)) if runtime else 'NONE FOUND — install deno or node'}")
     return 0
 
 
 def _fetch(args: argparse.Namespace, cfg: config_mod.Config) -> int:
-    library = args.library.expanduser() if args.library else cfg.library_root
     dry = getattr(args, "dry_run", False)
-    if not library and not dry:
-        print("no library root: run `ytalbum config --library PATH` or pass --library", file=sys.stderr)
+    library = _library(args, cfg, required=not dry)
+    if library is None and not dry:
         return 2
     _warn_js_runtime(cfg)
-
     yt = YouTube(cfg)
-    print(f"reading {args.url} …", file=sys.stderr)
-    collection = yt.fetch(args.url)
-    if getattr(args, "dump_collection", None):
-        args.dump_collection.write_text(json.dumps(collection.to_dict(), indent=2, ensure_ascii=False) + "\n")
-    plan = build_plan(collection)
 
-    if dry:
-        _print_plan(plan)
-        return 0
-
-    library = library.expanduser()
-    if found := find_plan(library, plan.source_id):
-        old_dir, existing = found
-        new = [t.video_id for t in plan.tracks if t.video_id not in {x.video_id for x in existing.tracks}]
-        plan = merge_plans(existing, plan)
-        album_dir = relocate(old_dir, plan, library)
-        gone = sum(not t.in_source for t in plan.tracks)
-        print(f"updating {album_dir}: {len(new)} new, {gone} no longer in the source (your edits are kept)", file=sys.stderr)
-    else:
-        album_dir = library / plan.folder
-    _print_plan(plan)
+    if not channel_base_url(args.url):
+        return _fetch_one(args.url, library, yt, args.cmd, dry, getattr(args, "dump_collection", None))
 
     if args.cmd == "plan":
-        path = save_plan(plan, album_dir)
-        print(f"\nplan written to {path}\nedit it, then run: ytalbum download {album_dir}")
-        return 0
-    return _execute(plan, album_dir, yt)
+        print("`plan` takes one playlist; for a channel use `fetch --pick N --dry-run` first", file=sys.stderr)
+        return 2
+    print(f"reading channel {args.url} …", file=sys.stderr)
+    refs = yt.list_channel(args.url)
+    if not refs:
+        print("this channel has no releases or playlists", file=sys.stderr)
+        return 1
+    _print_refs(refs, library)
+    chosen = _choose(refs, args)
+    worst = 0
+    for i, ref in enumerate(chosen, 1):
+        print(f"\n=== [{i}/{len(chosen)}] {ref.title}", file=sys.stderr)
+        worst = max(worst, _fetch_one(ref.url, library, yt, args.cmd, dry))
+    return worst
 
 
 def _download(album_dir: Path, cfg: config_mod.Config) -> int:
@@ -121,6 +133,73 @@ def _download(album_dir: Path, cfg: config_mod.Config) -> int:
     return _execute(plan, album_dir, YouTube(cfg))
 
 
+def _update(args: argparse.Namespace, cfg: config_mod.Config) -> int:
+    library = _library(args, cfg, required=True)
+    if library is None:
+        return 2
+    _warn_js_runtime(cfg)
+    albums = list(iter_plans(library))
+    if not albums:
+        print(f"no albums in {library}", file=sys.stderr)
+        return 0
+    yt = YouTube(cfg)
+    worst = 0
+    for i, (_, plan) in enumerate(albums, 1):
+        print(f"\n=== [{i}/{len(albums)}] {plan.albumartist} — {plan.album}", file=sys.stderr)
+        try:
+            worst = max(worst, _fetch_one(plan.source_url, library, yt, "fetch", False, report_only=args.dry_run))
+        except Exception as e:  # one broken source must not stop the others
+            print(f"  could not update: {e}", file=sys.stderr)
+            worst = max(worst, 1)
+    return worst
+
+
+# -- the shared path -----------------------------------------------------------------------
+
+
+def _fetch_one(
+    url: str,
+    library: Path | None,
+    yt: YouTube,
+    cmd: str,
+    dry: bool,
+    dump: Path | None = None,
+    report_only: bool = False,
+) -> int:
+    print(f"reading {url} …", file=sys.stderr)
+    collection = yt.fetch(url)
+    if dump:
+        dump.write_text(json.dumps(collection.to_dict(), indent=2, ensure_ascii=False) + "\n")
+    plan = build_plan(collection)
+
+    if dry or library is None:
+        _print_plan(plan)
+        return 0
+
+    if found := find_plan(library, plan.source_id):
+        old_dir, existing = found
+        known = {t.video_id for t in existing.tracks}
+        new = sum(t.video_id not in known for t in plan.tracks)
+        plan = merge_plans(existing, plan)
+        gone = sum(not t.in_source for t in plan.tracks)
+        print(f"existing album {old_dir.relative_to(library)}: {new} new, {gone} no longer in the source", file=sys.stderr)
+        if report_only:
+            return 0
+        album_dir = relocate(old_dir, plan, library)
+    else:
+        if report_only:
+            print(f"not in the library yet: {plan.folder}", file=sys.stderr)
+            return 0
+        album_dir = library / plan.folder
+    _print_plan(plan)
+
+    if cmd == "plan":
+        path = save_plan(plan, album_dir)
+        print(f"\nplan written to {path}\nedit it, then run: ytalbum download '{album_dir}'")
+        return 0
+    return _execute(plan, album_dir, yt)
+
+
 def _execute(plan: AlbumPlan, album_dir: Path, yt: YouTube) -> int:
     todo = sum(t.state != "done" and t.in_source for t in plan.tracks)
     print(f"\ndownloading {todo} of {len(plan.tracks)} tracks into {album_dir}")
@@ -131,8 +210,59 @@ def _execute(plan: AlbumPlan, album_dir: Path, yt: YouTube) -> int:
 
     run(plan, album_dir, yt, on_track=report)
     failed = [t for t in plan.tracks if t.state != "done" and t.in_source]
-    print(f"\n{len(plan.tracks) - len(failed)}/{len(plan.tracks)} tracks done" + (f", {len(failed)} failed — run again to retry" if failed else ""))
+    print(f"{len(plan.tracks) - len(failed)}/{len(plan.tracks)} tracks done" + (f", {len(failed)} failed — run again to retry" if failed else ""))
     return 1 if failed else 0
+
+
+# -- helpers -------------------------------------------------------------------------------
+
+
+def _library(args: argparse.Namespace, cfg: config_mod.Config, required: bool) -> Path | None:
+    library = args.library or cfg.library_root
+    if library is None and required:
+        print("no library root: run `ytalbum config --library PATH` or pass --library", file=sys.stderr)
+    return library.expanduser() if library else None
+
+
+def parse_pick(spec: str, count: int) -> list[int]:
+    """'1,3-5' -> [0, 2, 3, 4] (0-based, in order, no duplicates). Raises ValueError."""
+    if spec.strip().lower() == "all":
+        return list(range(count))
+    picked: list[int] = []
+    for part in spec.replace(" ", "").split(","):
+        if not part:
+            continue
+        lo, _, hi = part.partition("-")
+        for n in range(int(lo), int(hi or lo) + 1):
+            if not 1 <= n <= count:
+                raise ValueError(f"{n} is not between 1 and {count}")
+            if n - 1 not in picked:
+                picked.append(n - 1)
+    return picked
+
+
+def _choose(refs: list[SourceRef], args: argparse.Namespace) -> list[SourceRef]:
+    spec = "all" if args.all else args.pick
+    if spec is None:
+        if not sys.stdin.isatty():
+            print("\nchoose with --pick 1,3-5 or --all", file=sys.stderr)
+            return []
+        spec = input("\nwhich ones? (e.g. 1,3-5 / all / empty = none): ")
+    try:
+        return [refs[i] for i in parse_pick(spec, len(refs))]
+    except ValueError as e:
+        print(f"invalid choice: {e}", file=sys.stderr)
+        return []
+
+
+def _print_refs(refs: list[SourceRef], library: Path | None) -> None:
+    have = {p.source_id for _, p in iter_plans(library)} if library and library.exists() else set()
+    for tab in ("releases", "playlists"):
+        group = [(i, r) for i, r in enumerate(refs, 1) if r.tab == tab]
+        if group:
+            print(f"\n{'Releases (official albums and singles)' if tab == 'releases' else 'Playlists'}:")
+        for i, r in group:
+            print(f"  {i:3d}  {r.title}" + ("   ✓ in library" if r.source_id in have else ""))
 
 
 def _warn_js_runtime(cfg: config_mod.Config) -> None:

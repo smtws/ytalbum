@@ -30,6 +30,16 @@ class Provenance(StrEnum):
 
 
 @dataclass
+class SourceRef:
+    """A collection found on a channel, not fetched yet."""
+
+    url: str
+    source_id: str
+    title: str
+    tab: str  # "releases" (official albums) or "playlists"
+
+
+@dataclass
 class Music:
     """yt-dlp's music metadata for one video. Only filled by full extraction."""
 
