@@ -132,7 +132,15 @@ tr.playing td.num .n { color: var(--accent); font-weight: 700; }
 button.icon { padding: .35rem .6rem; line-height: 1; }
 button.big { width: 2.6rem; height: 2.6rem; border-radius: 50%; padding: 0; font-size: 1rem; }
 .p-seek { display: flex; gap: .6rem; align-items: center; font-size: .8rem; }
-.p-seek input { flex: 1; accent-color: var(--accent); }
+.p-bar { flex: 1; display: grid; gap: .15rem; }
+.p-seek input[type=range] { width: 100%; accent-color: var(--accent); }
+.p-trim { position: relative; height: .55rem; border-radius: 4px; background: color-mix(in srgb, var(--ink) 18%, transparent); }
+.p-keep { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--accent); opacity: .55; }
+.p-handle { position: absolute; top: 50%; width: .8rem; height: 1.1rem; margin: -.55rem 0 0 -.4rem; padding: 0; border-radius: 3px;
+  background: var(--accent); border: 1px solid var(--panel); cursor: ew-resize; touch-action: none; }
+.p-handle:focus-visible { outline: 2px solid var(--ink); }
+.p-trim-actions { display: flex; gap: .3rem; align-items: center; }
+@media (max-width: 40rem) { .p-trim-actions { flex-wrap: wrap; } }
 body.has-player .jobs { bottom: 5.5rem; }
 body.has-player .toasts { bottom: 6rem; }
 body.has-player main { padding-bottom: 16rem; }

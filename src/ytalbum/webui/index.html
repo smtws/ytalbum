@@ -45,7 +45,24 @@
       <button id="p-play" class="icon big" type="button" title="Play/pause" aria-label="Play/pause">⏸</button>
       <button id="p-next" class="quiet icon" type="button" title="Next" aria-label="Next">⏭</button>
     </div>
-    <div class="p-seek"><span id="p-time" class="muted">0:00</span><input id="p-pos" type="range" min="0" max="1000" value="0" aria-label="Position"><span id="p-dur" class="muted">0:00</span></div>
+    <div class="p-seek">
+      <span id="p-time" class="muted">0:00</span>
+      <div class="p-bar">
+        <div id="p-trim" class="p-trim" hidden>
+          <div id="p-keep" class="p-keep"></div>
+          <button id="p-h-start" class="p-handle" type="button" title="Drag: where the song starts" aria-label="Trim start"></button>
+          <button id="p-h-end" class="p-handle end" type="button" title="Drag: where the song ends" aria-label="Trim end"></button>
+        </div>
+        <input id="p-pos" type="range" min="0" max="1000" value="0" aria-label="Position">
+      </div>
+      <span id="p-dur" class="muted">0:00</span>
+      <span id="p-trim-actions" class="p-trim-actions" hidden>
+        <button id="p-set-start" class="quiet small" type="button" title="Cut everything before the current position">start here</button>
+        <button id="p-set-end" class="quiet small" type="button" title="Stop at the current position">end here</button>
+        <button id="p-trim-clear" class="quiet small" type="button" title="Remove the trim">reset</button>
+        <button id="p-trim-save" class="small" type="button" title="Save the trim for this track">save trim</button>
+      </span>
+    </div>
     <audio id="audio" preload="auto"></audio>
   </footer>
   <aside id="jobs" class="jobs"></aside>

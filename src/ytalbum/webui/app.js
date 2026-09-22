@@ -252,7 +252,13 @@ function pruneAlbum(p, gone, button) {
   if (confirm(`Delete these files? They are no longer in the YouTube playlist:\n\n${list}`)) submit("prune", { id: p.source_id }, button);
 }
 
-const asTime = (seconds) => (seconds == null ? "" : `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`);
+// keeps tenths when there are any, so a value set on the player survives a save from the field
+const asTime = (seconds) => {
+  if (seconds == null) return "";
+  const rest = seconds % 60;
+  const shown = Number.isInteger(rest) ? String(rest).padStart(2, "0") : rest.toFixed(1).padStart(4, "0");
+  return `${Math.floor(seconds / 60)}:${shown}`;
+};
 
 const fromTime = (text) => {
   const parts = String(text).trim().split(":");
@@ -517,7 +523,10 @@ async function playAlbum(albumId, start = 0) {
   } catch (e) {
     return toast(e.message, "failed");
   }
-  queue = plan.tracks.filter((t) => t.state === "done").map((t) => ({ album: albumId, video_id: t.video_id, title: t.title, artist: t.artist, albumName: plan.album }));
+  queue = plan.tracks.filter((t) => t.state === "done").map((t) => ({
+    album: albumId, video_id: t.video_id, title: t.title, artist: t.artist, albumName: plan.album,
+    start: t.trim_start, end: t.trim_end, duration: t.duration, mb_length: t.mb_length,
+  }));
   if (!queue.length) return toast("Nothing downloaded yet in this album", "blocked");
   playIndex(Math.max(0, start));
 }
@@ -534,6 +543,7 @@ function playIndex(i) {
   $("#p-title").textContent = t.title;
   $("#p-artist").textContent = `${t.artist} · ${t.albumName}`;
   document.querySelectorAll("#album tbody tr").forEach((tr) => tr.classList.toggle("playing", isPlaying(currentAlbum?.source_id, tr.dataset.id)));
+  renderTrim();
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.albumName,
       artwork: [{ src: `/api/cover?id=${encodeURIComponent(t.album)}` }] });
@@ -544,6 +554,11 @@ audio.addEventListener("play", () => { $("#p-play").textContent = "⏸"; });
 audio.addEventListener("pause", () => { $("#p-play").textContent = "▶"; });
 audio.addEventListener("ended", () => (qi + 1 < queue.length ? playIndex(qi + 1) : null));
 audio.addEventListener("timeupdate", () => {
+  const t = queue[qi];
+  if (t) {  // preview the trim while listening: skip the head, stop at the end
+    if (t.start && audio.currentTime < t.start - 0.4 && !dragging) audio.currentTime = t.start;
+    if (t.end && audio.currentTime > t.end) (qi + 1 < queue.length ? playIndex(qi + 1) : audio.pause());
+  }
   $("#p-time").textContent = fmt(audio.currentTime);
   $("#p-dur").textContent = fmt(audio.duration);
   if (document.activeElement !== $("#p-pos") && audio.duration) $("#p-pos").value = Math.round((audio.currentTime / audio.duration) * 1000);
@@ -557,6 +572,93 @@ if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("previoustrack", () => playIndex(qi - 1));
   navigator.mediaSession.setActionHandler("nexttrack", () => playIndex(qi + 1));
 }
+
+// -- trim handles on the player ----------------------------------------------------------
+
+let dragging = null;
+
+function trimLimit() {
+  const t = queue[qi];
+  return (t && (t.duration || audio.duration)) || audio.duration || 0;
+}
+
+function renderTrim() {
+  const t = queue[qi];
+  const total = trimLimit();
+  const show = Boolean(t && total);
+  $("#p-trim").hidden = !show;
+  $("#p-trim-actions").hidden = !show;
+  if (!show) return;
+  const start = t.start || 0;
+  const end = t.end == null ? total : t.end;
+  $("#p-keep").style.left = `${(start / total) * 100}%`;
+  $("#p-keep").style.right = `${100 - (end / total) * 100}%`;
+  $("#p-h-start").style.left = `${(start / total) * 100}%`;
+  $("#p-h-end").style.left = `${(end / total) * 100}%`;
+  $("#p-h-start").title = `Song starts at ${fmt(start)}`;
+  $("#p-h-end").title = `Song ends at ${fmt(end)}`;
+  syncTrimInputs(t);
+}
+
+// the text fields in the album view are the same value: keep them in step
+function syncTrimInputs(t) {
+  if (currentAlbum?.source_id !== t.album) return;
+  const row = document.querySelector(`#album tr[data-id="${CSS.escape(t.video_id)}"]`);
+  if (!row) return;
+  row.querySelector("[name=trim_start]").value = t.start == null ? "" : asTime(t.start);
+  row.querySelector("[name=trim_end]").value = t.end == null ? "" : asTime(t.end);
+}
+
+function setTrim(which, seconds) {
+  const t = queue[qi];
+  if (!t) return;
+  const total = trimLimit();
+  const value = Math.min(Math.max(seconds, 0), total);
+  if (which === "start") t.start = value >= (t.end ?? total) ? t.start : value || null;
+  else t.end = value <= (t.start || 0) ? t.end : value >= total ? null : value;
+  renderTrim();
+}
+
+for (const [id, which] of [["#p-h-start", "start"], ["#p-h-end", "end"]]) {
+  $(id).addEventListener("pointerdown", (e) => {
+    dragging = which;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  $(id).addEventListener("pointermove", (e) => {
+    if (dragging !== which) return;
+    const rect = $("#p-trim").getBoundingClientRect();
+    setTrim(which, ((e.clientX - rect.left) / rect.width) * trimLimit());
+  });
+  $(id).addEventListener("pointerup", (e) => {
+    dragging = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    const t = queue[qi];
+    if (t) audio.currentTime = Math.max((which === "start" ? t.start || 0 : (t.end || trimLimit()) - 3), 0);
+  });
+  $(id).addEventListener("keydown", (e) => {  // arrows for fine adjustment
+    const step = e.shiftKey ? 1 : 0.1;
+    const t = queue[qi];
+    if (!t || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    const current = which === "start" ? t.start || 0 : t.end ?? trimLimit();
+    setTrim(which, current + (e.key === "ArrowRight" ? step : -step));
+    e.preventDefault();
+  });
+}
+
+$("#p-set-start").addEventListener("click", () => setTrim("start", audio.currentTime));
+$("#p-set-end").addEventListener("click", () => setTrim("end", audio.currentTime));
+$("#p-trim-clear").addEventListener("click", () => {
+  const t = queue[qi];
+  if (!t) return;
+  t.start = t.end = null;
+  renderTrim();
+});
+$("#p-trim-save").addEventListener("click", (e) => {
+  const t = queue[qi];
+  if (!t) return;
+  submit("edit", { id: t.album, edits: { tracks: [{ video_id: t.video_id, trim_start: t.start == null ? "" : String(t.start), trim_end: t.end == null ? "" : String(t.end) }] } }, e.currentTarget);
+});
 
 // -- theme: auto (follow the system) → dark → light, remembered in this browser ---------------
 
