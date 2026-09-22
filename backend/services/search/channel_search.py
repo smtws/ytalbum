@@ -177,11 +177,8 @@ class ChannelSearchService:
                             elif 'thumbnails' in playlist_data and playlist_data['thumbnails']:
                                 thumbnail_url = playlist_data['thumbnails'][-1].get('url')  # Last is usually best quality
 
-                            # Extract track count (playlist_count for playlists, 1 for single videos >10min)
-                            track_count = playlist_data.get('playlist_count')
-                            if track_count is None:
-                                # Single video that passed duration filter (>10min) - assume 1 track
-                                track_count = 1
+                            # Extract track count (will be fixed centrally by StateManager if needed)
+                            track_count = playlist_data.get('playlist_count', 1)
 
                             result = YouTubeDeduplicator.prepare_result(
                                 url=playlist_data.get('webpage_url', ''),
@@ -252,11 +249,8 @@ class ChannelSearchService:
                         elif 'thumbnails' in track_data and track_data['thumbnails']:
                             thumbnail_url = track_data['thumbnails'][-1].get('url')  # Last is usually best quality
 
-                        # Extract track count (playlist_count for playlists, 1 for single videos >10min)
-                        track_count = track_data.get('playlist_count')
-                        if track_count is None:
-                            # Single video that passed duration filter (>10min) - assume 1 track
-                            track_count = 1
+                        # Extract track count (will be fixed centrally by StateManager if needed)  
+                        track_count = track_data.get('playlist_count', 1)
 
                         result = YouTubeDeduplicator.prepare_result(
                             url=track_data.get('webpage_url', ''),
@@ -278,6 +272,7 @@ class ChannelSearchService:
             print(f"ChannelSearchService: Playlist track extraction failed: {e}")
         
         return results
+    
     
     def _is_likely_artist_channel(self, channel_name: str, artist: str) -> bool:
         """

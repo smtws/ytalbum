@@ -5,6 +5,7 @@ THE ONLY component that modifies AppState. Single source of truth coordinator.
 """
 
 import asyncio
+import copy
 import json
 import os
 from datetime import datetime
@@ -205,7 +206,9 @@ class StateManager:
                 dedup_result = YouTubeDeduplicator.should_add_result(result, self.state.results)
                 
                 if dedup_result == "merge":
-                    # Better quality duplicate found - merge metadata with existing
+                    # TEMPORARILY DISABLED - YouTube deduplicator no longer returns "merge"
+                    # This prevents track count contamination during result merging
+                    # TODO: Re-implement with safer merging logic that preserves track counts
                     existing = YouTubeDeduplicator.find_duplicate(result, self.state.results)
                     if existing:
                         # Merge better metadata into existing result (no availability check needed)
@@ -225,7 +228,10 @@ class StateManager:
                         await self._trigger_normalization_if_needed(merged_result)
                 
                 elif dedup_result == True:
-                    # Unique result - add normally
+                    # Unique result - fix track count for all playlists before adding
+                    if result.youtube_id and result.youtube_id.startswith('playlist:'):
+                        await YouTubeDeduplicator.fix_playlist_track_count(result, self.execute_ytdlp_command)
+                    
                     is_available = await self._check_availability_before_adding(result, cookie_options)
                     
                     if is_available:
@@ -614,7 +620,7 @@ class StateManager:
                         pass
                     if duplicate_result.metadata:
                         # Transfer metadata from duplicate
-                        current_result.metadata = duplicate_result.metadata.copy()
+                        current_result.metadata = copy.deepcopy(duplicate_result.metadata)
                     
                     # Remove the lower quality duplicate from state
                     self._remove_result_from_state(duplicate_result, "after_normalization")
@@ -630,7 +636,7 @@ class StateManager:
                     print(f"StateManager: Existing result has better content quality - removing current")
                     # Transfer normalization metadata to existing result if it doesn't have it
                     if not duplicate_result.normalized:
-                        duplicate_result.normalized = current_result.normalized.copy()
+                        duplicate_result.normalized = copy.deepcopy(current_result.normalized)
                         self.state.update_timestamp()
                     
                     # Remove current result from state (lower quality)
@@ -671,8 +677,8 @@ class StateManager:
         merged = existing_result.model_copy(deep=True)
         
         # Update with better raw metadata from new result
-        if new_result.track_count and (not existing_result.track_count or new_result.track_count > existing_result.track_count):
-            merged.track_count = new_result.track_count
+        # Note: Don't overwrite track_count - higher count doesn't mean better quality
+        # Official albums are often smaller than compilations/remixes
             
         if new_result.thumbnail_url and not existing_result.thumbnail_url:
             merged.thumbnail_url = new_result.thumbnail_url
@@ -841,7 +847,7 @@ class StateManager:
             
             # Store metadata in new format
             if metadata:
-                current_result.metadata = metadata.copy()
+                current_result.metadata = copy.deepcopy(metadata)
                 
                 # ALSO populate structured metadata field
                 if not current_result.metadata:
@@ -852,6 +858,9 @@ class StateManager:
                 # Removed verification stats  # Update the statistics after marking as verified
                 
                 print(f"StateManager: Added MusicBrainz metadata for {youtube_id} - ID: {metadata.get('id')}")
+                
+                # Propagate canonical artist name to other results with same normalized artist
+                await self._propagate_canonical_artist_name(current_result)
                 
                 # Send state update after metadata retrieval
                 await self.send_state()
@@ -1195,3 +1204,47 @@ class StateManager:
         
         except Exception as e:
             print(f"StateManager: Single track cleanup failed: {e}")
+    
+    async def _propagate_canonical_artist_name(self, verified_result: Result):
+        """
+        Propagate canonical artist name from verified result to all results 
+        with the same normalized artist name
+        
+        Args:
+            verified_result: Result that just received MusicBrainz metadata
+        """
+        try:
+            # Get the canonical artist name from MusicBrainz metadata
+            canonical_artist = verified_result.metadata.get('normalized', {}).get('artist')
+            if not canonical_artist:
+                return
+            
+            # Get the normalized artist name to match against
+            normalized_artist = verified_result.normalized.get('artist')
+            if not normalized_artist:
+                return
+            
+            propagated_count = 0
+            
+            # Find all results with the same normalized artist
+            for result in self.state.results:
+                if result == verified_result:
+                    continue  # Skip the result we just verified
+                
+                if result.normalized and result.normalized.get('artist') == normalized_artist:
+                    # This result has the same normalized artist, propagate the canonical name
+                    if not result.metadata:
+                        result.metadata = {}
+                    if not result.metadata.get('normalized'):
+                        result.metadata['normalized'] = {}
+                    
+                    # Set the canonical artist name
+                    result.metadata['normalized']['artist'] = canonical_artist
+                    propagated_count += 1
+            
+            if propagated_count > 0:
+                print(f"StateManager: Propagated canonical artist name '{canonical_artist}' to {propagated_count} other results")
+                self.state.update_timestamp()
+                
+        except Exception as e:
+            print(f"StateManager: Artist name propagation failed: {e}")

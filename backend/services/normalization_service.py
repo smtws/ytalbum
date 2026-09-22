@@ -4,6 +4,7 @@ YouTube Music Downloader - Normalization Service
 Normalizes titles and artist names for optimal metadata matching
 """
 
+import copy
 import re
 from typing import Dict, Tuple, Optional, List
 from difflib import SequenceMatcher
@@ -390,7 +391,7 @@ class NormalizationService:
             return new_metadata
         
         # Start with existing metadata
-        merged = existing_metadata.copy()
+        merged = copy.deepcopy(existing_metadata)
         
         # Only update normalization fields, preserve enrichment data
         normalization_fields = [

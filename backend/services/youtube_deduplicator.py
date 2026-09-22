@@ -4,6 +4,7 @@ YouTube Music Downloader - YouTube ID Deduplicator
 Filters out YouTube ID duplicates BEFORE verification and BEFORE adding to AppState
 """
 
+import copy
 import re
 from typing import List, Optional
 from urllib.parse import urlparse, parse_qs
@@ -123,17 +124,68 @@ class YouTubeDeduplicator:
         return Result(**result_data)
     
     @staticmethod
+    async def fix_playlist_track_count(result: Result, ytdlp_executor) -> Result:
+        """
+        Fix track count for playlist results that have incorrect counts
+        Only called when needed to avoid unnecessary API calls
+        """
+        if not result.youtube_id or not result.youtube_id.startswith('playlist:'):
+            return result
+        
+        # Always verify playlist track counts since they can be contaminated
+        # For single videos, only fix if track count seems unreasonably high (likely contamination)  
+        # For playlist URLs, always verify since they're more prone to contamination
+        print(f"YouTubeDeduplicator: Checking track count for {result.title} ({result.track_count} tracks)")
+        print(f"YouTubeDeduplicator: URL: {result.youtube_url}")
+        
+        if 'playlist?list=' not in result.youtube_url:
+            # Single video - only fix if track count seems wrong (>20 is very suspicious for a single video)
+            if result.track_count <= 20:
+                print(f"YouTubeDeduplicator: Skipping single video with reasonable track count: {result.track_count}")
+                return result  # Reasonable track count for single video with chapters
+            else:
+                print(f"YouTubeDeduplicator: Single video with suspicious track count {result.track_count}, will verify")
+        else:
+            print(f"YouTubeDeduplicator: Playlist URL, will verify track count")
+        
+        try:
+            cmd = [
+                "yt-dlp",
+                "--flat-playlist", 
+                "--print", "%(playlist_count)s",
+                result.youtube_url
+            ]
+            
+            stdout, stderr, returncode = await ytdlp_executor(cmd)
+            if returncode == 0 and stdout:
+                lines = stdout.strip().split('\n')
+                # Take the first valid number from the output
+                for line in lines:
+                    if line.strip().isdigit():
+                        actual_count = int(line.strip())
+                        if actual_count != result.track_count:
+                            print(f"YouTubeDeduplicator: Fixed track count from {result.track_count} to {actual_count} for {result.youtube_url}")
+                        else:
+                            print(f"YouTubeDeduplicator: Verified track count {actual_count} for {result.youtube_url}")
+                        result.track_count = actual_count
+                        break
+        except Exception as e:
+            print(f"YouTubeDeduplicator: Failed to fix track count for {result.youtube_url}: {e}")
+        
+        return result
+    
+    @staticmethod
     def should_add_result(new_result: Result, existing_results: List[Result]) -> bool:
         """
         Determine if new result should be added (not a duplicate)
-        Prioritizes results with better metadata (higher track count, thumbnails)
+        Uses simple insert/replace logic - no merging to prevent data contamination
         
         Args:
             new_result: New result to check
             existing_results: List of existing results
             
         Returns:
-            True if should add, False if duplicate, "merge" if should merge with existing
+            True if should add/replace, False if should reject
         """
         if not new_result.youtube_id:
             print(f"YouTubeDeduplicator: Rejecting result without YouTube ID: {new_result.title}")
@@ -143,16 +195,13 @@ class YouTubeDeduplicator:
         existing_duplicate = YouTubeDeduplicator.find_duplicate(new_result, existing_results)
         
         if existing_duplicate:
-            # Compare metadata quality to decide which to keep
-            new_is_better = YouTubeDeduplicator._is_better_quality(new_result, existing_duplicate)
-            
-            if new_is_better:
-                print(f"YouTubeDeduplicator: Found duplicate {new_result.youtube_id} - {new_result.title}")
-                print(f"YouTubeDeduplicator: New result has better metadata - SHOULD MERGE with existing")
-                return "merge"  # Merge better metadata into existing result
-            else:
-                print(f"YouTubeDeduplicator: Rejecting duplicate {new_result.youtube_id} - existing has better metadata")
-                return False
+            # Simple insert/replace logic - no merging to prevent contamination
+            # For now, just keep the first result found (existing wins)
+            # TODO: Later we can implement smarter replacement based on quality metrics
+            print(f"YouTubeDeduplicator: Found duplicate {new_result.youtube_id} - keeping existing result")
+            print(f"YouTubeDeduplicator: Existing: {existing_duplicate.title}")
+            print(f"YouTubeDeduplicator: Rejecting: {new_result.title}")
+            return False  # Keep existing, reject new
         
         print(f"YouTubeDeduplicator: Accepting unique result {new_result.youtube_id} - {new_result.title}")
         return True
@@ -177,14 +226,9 @@ class YouTubeDeduplicator:
         new_score = 0
         existing_score = 0
         
-        # Track count comparison (higher is better)
-        new_tracks = new_result.track_count or 0
-        existing_tracks = existing_result.track_count or 0
-        
-        if new_tracks > existing_tracks:
-            new_score += 3
-        elif existing_tracks > new_tracks:
-            existing_score += 3
+        # Track count comparison removed - higher count doesn't mean better quality
+        # Official albums are often smaller than compilations/remixes
+        # Let other factors (quality_score, thumbnails, etc.) determine priority
         
         # Thumbnail availability (having thumbnail is better)
         if new_result.thumbnail_url and not existing_result.thumbnail_url:
@@ -215,15 +259,15 @@ class YouTubeDeduplicator:
         """
         # Preserve ANY existing metadata fields (agnostic to format)
         if existing_result.verification_metadata:
-            new_result.verification_metadata = existing_result.verification_metadata.copy()
+            new_result.verification_metadata = copy.deepcopy(existing_result.verification_metadata)
             print(f"YouTubeDeduplicator: Preserved verification_metadata for {new_result.youtube_id}")
         
         if existing_result.normalized:
-            new_result.normalized = existing_result.normalized.copy()
+            new_result.normalized = copy.deepcopy(existing_result.normalized)
             print(f"YouTubeDeduplicator: Preserved normalized metadata for {new_result.youtube_id}")
         
         if existing_result.metadata:
-            new_result.metadata = existing_result.metadata.copy()
+            new_result.metadata = copy.deepcopy(existing_result.metadata)
             print(f"YouTubeDeduplicator: Preserved metadata for {new_result.youtube_id}")
         
         # Preserve verification status if already verified

@@ -81,7 +81,7 @@ start_backend() {
 case "${1:-start}" in
     start)
         if is_process_running; then
-            local pid=$(cat "$PID_FILE")
+            pid=$(cat "$PID_FILE")
             echo "$PROCESS_NAME is already running (PID: $pid)"
             echo "Use './start-backend.sh restart' to restart"
             exit 1
@@ -103,7 +103,7 @@ case "${1:-start}" in
         ;;
     status)
         if is_process_running; then
-            local pid=$(cat "$PID_FILE")
+            pid=$(cat "$PID_FILE")
             echo "$PROCESS_NAME is running (PID: $pid)"
         else
             echo "$PROCESS_NAME is not running"

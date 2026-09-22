@@ -214,6 +214,9 @@ class YouTubeMusicSearchService:
                         # Extract artist from query (first word usually)
                         artist = query.split()[0]
                         
+                        # Extract track count (will be fixed by deduplicator if needed)
+                        track_count = data.get('playlist_count', 1)
+                        
                         result = YouTubeDeduplicator.prepare_result(
                             url=data.get('webpage_url', ''),
                             title=data.get('title', ''),
@@ -221,7 +224,8 @@ class YouTubeMusicSearchService:
                             channel=data.get('uploader', 'Unknown'),
                             discovered_by=self.service_name,
                             view_count=data.get('view_count'),
-                            duration=data.get('duration')
+                            duration=data.get('duration'),
+                            track_count=track_count
                         )
                         
                         if result:

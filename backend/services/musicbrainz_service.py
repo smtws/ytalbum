@@ -6,6 +6,7 @@ Retrieves album metadata from MusicBrainz database for normalized titles
 
 import asyncio
 import aiohttp
+import copy
 import json
 from typing import Dict, Optional, List, Tuple, Any
 from datetime import datetime
@@ -83,42 +84,45 @@ class MusicBrainzService:
             await self._rate_limit()
             session = await self._get_session()
             
-            # Construct MusicBrainz query
-            # Use exact artist and album matching for best results
-            query = f'artist:"{artist}" AND release:"{album}"'
-            encoded_query = quote(query)
+            # Try multiple search strategies for better matching
+            search_queries = self._generate_search_queries(artist, album)
             
             url = f"{self.base_url}/release/"
-            params = {
-                'query': query,
-                'fmt': 'json',
-                'limit': 5,  # Get top 5 matches for quality comparison
-                'inc': 'artist-credits+release-groups+recordings'  # Include detailed info
-            }
             
-            print(f"MusicBrainzService: Searching for artist:'{artist}' release:'{album}'")
+            for i, query in enumerate(search_queries):
+                params = {
+                    'query': query,
+                    'fmt': 'json',
+                    'limit': 10,  # Get more matches for better quality comparison
+                    'inc': 'artist-credits+release-groups+recordings'  # Include detailed info
+                }
+                
+                print(f"MusicBrainzService: Searching for artist:'{artist}' release:'{album}' (attempt {i+1})")
+                
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        releases = data.get('releases', [])
+                        
+                        if releases:
+                            # Find best match based on score, metadata quality, and track count
+                            best_release = self._select_best_release(releases, artist, album, track_count)
+                            if best_release:
+                                return await self._enrich_release_metadata(best_release)
+                        
+                        # Try next search query if this one didn't work
+                        continue
+                        
+                    elif response.status == 429:
+                        print("MusicBrainzService: Rate limited, waiting...")
+                        await asyncio.sleep(2)
+                        return await self.search_release(artist, album)  # Retry once
+                    else:
+                        print(f"MusicBrainzService: HTTP {response.status} for query {i+1}")
+                        continue
             
-            async with session.get(url, params=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    releases = data.get('releases', [])
-                    
-                    if releases:
-                        # Find best match based on score, metadata quality, and track count
-                        best_release = self._select_best_release(releases, artist, album, track_count)
-                        if best_release:
-                            return await self._enrich_release_metadata(best_release)
-                    
-                    print(f"MusicBrainzService: No releases found for '{artist} - {album}'")
-                    return None
-                    
-                elif response.status == 429:
-                    print("MusicBrainzService: Rate limited, waiting...")
-                    await asyncio.sleep(2)
-                    return await self.search_release(artist, album)  # Retry once
-                else:
-                    print(f"MusicBrainzService: HTTP {response.status} for '{artist} - {album}'")
-                    return None
+            print(f"MusicBrainzService: No releases found for '{artist} - {album}' after {len(search_queries)} attempts")
+            return None
                     
         except asyncio.TimeoutError:
             print(f"MusicBrainzService: Timeout searching for '{artist} - {album}'")
@@ -126,6 +130,51 @@ class MusicBrainzService:
         except Exception as e:
             print(f"MusicBrainzService: Error searching for '{artist} - {album}': {e}")
             return None
+    
+    def _generate_search_queries(self, artist: str, album: str) -> List[str]:
+        """
+        Generate multiple search query variations for better MusicBrainz matching
+        
+        Args:
+            artist: Normalized artist name
+            album: Normalized album title
+            
+        Returns:
+            List of search query strings in order of preference
+        """
+        import re
+        
+        queries = []
+        
+        # 1. Exact match (current behavior)
+        queries.append(f'artist:"{artist}" AND release:"{album}"')
+        
+        # 2. Handle common YouTube patterns
+        album_lower = album.lower()
+        
+        # Pattern: "Album Name album: Artist History episodes" -> "Album Name (history edition)"
+        if "history episodes" in album_lower:
+            clean_album = re.sub(r'\s*album:\s*.*?\s*history episodes.*?$', '', album, flags=re.IGNORECASE)
+            if clean_album and clean_album != album:
+                # Try with "(history edition)" suffix
+                history_album = f"{clean_album} (history edition)"
+                queries.append(f'artist:"{artist}" AND release:"{history_album}"')
+                
+                # Also try the clean album without suffix in case MB has different naming
+                queries.append(f'artist:"{artist}" AND release:"{clean_album}"')
+        
+        # 3. General cleanup for other cases (only if no pattern match above)
+        elif len(queries) == 1:
+            # Remove common YouTube suffixes
+            clean_album = re.sub(r'\s*(full\s*album|official|lyric\s*videos?).*$', '', album, flags=re.IGNORECASE)
+            clean_album = re.sub(r'\s*album:.*$', '', clean_album, flags=re.IGNORECASE)
+            clean_album = clean_album.strip()
+            
+            if clean_album and clean_album != album:
+                queries.append(f'artist:"{artist}" AND release:"{clean_album}"')
+        
+        # Limit to maximum 3 queries for cost control
+        return queries[:3]
     
     def _select_best_release(self, releases: List[Dict], target_artist: str, target_album: str, target_track_count: Optional[int] = None) -> Optional[Dict]:
         """
@@ -217,7 +266,7 @@ class MusicBrainzService:
             Raw MusicBrainz data with service annotations and normalized frontend interface
         """
         # Start with complete raw MusicBrainz data
-        metadata = release.copy()
+        metadata = copy.deepcopy(release)
         
         # Add essential service annotations for deduplication and tracking
         metadata.update({
@@ -288,7 +337,7 @@ class MusicBrainzService:
                 'available': bool(cover_art_urls),
                 'front_cover': cover_art_urls.get('front') if cover_art_urls else None,
                 'thumbnail': cover_art_urls.get('front_250') if cover_art_urls else None,
-                'urls': cover_art_urls.copy() if cover_art_urls else {}
+                'urls': copy.deepcopy(cover_art_urls) if cover_art_urls else {}
             },
             
             # Service-specific extensions (allows services to add unique data)
