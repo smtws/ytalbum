@@ -54,7 +54,7 @@ def yt(opus_template) -> FakeYouTube:
 # -- merge (pure) ----------------------------------------------------------------------
 
 
-def test_new_videos_are_appended_and_numbers_stay_stable():
+def test_new_videos_at_the_end_of_the_playlist_are_appended():
     old_coll = vol1()
     old_coll.entries = old_coll.entries[:-1]  # the playlist before TUNGSTEN was added
     existing = build_plan(old_coll)
@@ -62,6 +62,31 @@ def test_new_videos_are_appended_and_numbers_stay_stable():
     assert [t.number for t in merged.tracks] == list(range(1, 14))
     assert merged.tracks[-1].title == "Lullaby"
     assert merged.tracks[-1].state == "pending"
+
+
+def test_a_video_that_becomes_available_later_lands_at_its_playlist_position():
+    # Vol. 20 live: Feuerschwanz (12th in the playlist) was age-restricted at first,
+    # became readable later and was appended as 13 - the curator's order is the content
+    first = vol1()
+    first.entries[5].skipped = "age-restricted: needs cookies"  # Subway to Sally, 5th song
+    existing = build_plan(first)
+    assert [t.number for t in existing.tracks] == list(range(1, 13))
+
+    merged = merge_plans(existing, build_plan(vol1()))
+    assert [t.video_id for t in merged.tracks] == [t.video_id for t in build_plan(vol1()).tracks]
+    assert [t.number for t in merged.tracks] == list(range(1, 14))
+    assert merged.tracks[4].title == "Eisblumen"
+
+
+def test_reordered_playlist_renumbers_and_gone_tracks_go_last():
+    existing = build_plan(vol1())
+    fresh_coll = vol1()
+    fresh_coll.entries[1], fresh_coll.entries[2] = fresh_coll.entries[2], fresh_coll.entries[1]  # curator swapped 1 and 2
+    del fresh_coll.entries[5]  # and removed Subway to Sally
+    merged = merge_plans(existing, build_plan(fresh_coll))
+    assert [t.title for t in merged.tracks[:2]] == ["The Dead Don't Die (feat. xxFEUERSCHWANZxx)", "Lullaby"]
+    assert merged.tracks[-1].title == "Eisblumen" and not merged.tracks[-1].in_source
+    assert [t.number for t in merged.tracks] == list(range(1, 14))
 
 
 def test_removed_videos_are_kept_and_flagged():

@@ -155,8 +155,10 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
 
     - user edits (value differs from the recorded auto value) always win;
       untouched fields take the fresh auto value
-    - existing tracks keep their numbers; new videos are appended
-    - tracks that left the source are kept (their files stay) and flagged
+    - track order and numbers follow the source (for a curated playlist the order is the
+      content; for a matched release, MusicBrainz' numbering), so a video that shows up
+      later lands where it belongs, not at the end
+    - tracks that left the source are kept (their files stay), flagged and put last
     """
     merged = copy.deepcopy(existing)
     _merge_fields(merged, fresh, ALBUM_FIELDS)
@@ -177,13 +179,20 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
             if t.provenance.get("title") != Provenance.USER:
                 t.mbid = f.mbid or t.mbid
 
-    next_number = max((t.number for t in merged.tracks), default=0) + 1
     for f in fresh.tracks:
         if f.video_id not in known:
-            new = copy.deepcopy(f)
-            new.number = next_number
-            next_number += 1
-            merged.tracks.append(new)
+            merged.tracks.append(copy.deepcopy(f))
+
+    # numbering: the fresh plan's, then everything no longer in it, in its previous order
+    by_id = {t.video_id: t for t in merged.tracks}
+    ordered = [by_id[f.video_id] for f in fresh.tracks]
+    rest = sorted((t for t in merged.tracks if t.video_id not in fresh_by_id), key=lambda t: (t.disc, t.number))
+    for t, f in zip(ordered, fresh.tracks):
+        t.number, t.disc = f.number, f.disc
+    last = max((f.number for f in fresh.tracks), default=0)
+    for i, t in enumerate(rest, 1):
+        t.number, t.disc = last + i, max((f.disc for f in fresh.tracks), default=1)
+    merged.tracks = ordered + rest
     return refresh_derived(merged)
 
 

@@ -223,7 +223,11 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    on change (e.g. tracktotal grows). `cover.*` in the album folder is used (user can
    replace it). Albums are found by source id, so renamed folders are still updated.
    Verified live: re-running Vol. 1 renamed 8 files to their slice-2 names, retagged
-   13, downloaded 0.
+   13, downloaded 0. **Corrected later:** "existing numbers stay, new tracks are appended"
+   was wrong for curated playlists — Feuerschwanz (12th in Vol. 20, readable only later)
+   became track 13. Numbers now always follow the source order (MusicBrainz' numbering
+   for matched releases); tracks gone from the source go last. Re-sorting the playlist on
+   YouTube → the next fetch renames and retags, downloads nothing.
 4. ✅ Channel URL → pick which collections to fetch. *Done 2026-09-22:* Releases tab
    (official `OLAK5uy_` albums + singles) listed before Playlists; `--pick`/`--all` or
    an interactive prompt; "✓ in library" markers; `ytalbum update` re-checks every album.
