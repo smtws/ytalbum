@@ -6,6 +6,7 @@ import re
 from collections import Counter
 
 from .models import AlbumPlan, Collection, Entry, Kind, PlanTrack, Provenance
+from .titles import NOISE_WORDS, channel_artist, key, parse_video_title
 
 MIN_TRACK_SECONDS = 30  # shorter entries are intro cards, not songs (DESIGN.md §3.4)
 
@@ -29,16 +30,17 @@ def usable_entries(collection: Collection) -> list[Entry]:
 
 
 def track_artist(entry: Entry) -> tuple[str, Provenance]:
+    """YouTube Music's field, else the artist named in the title, else the channel."""
     if entry.music.artist:
         return entry.music.artist, Provenance.YT_MUSIC
-    channel = entry.channel or "Unknown Artist"
-    return channel.removesuffix(" - Topic"), Provenance.YT_TITLE
+    parsed, _ = parse_video_title(entry.title, entry.channel)
+    return parsed or channel_artist(entry.channel) or "Unknown Artist", Provenance.YT_TITLE
 
 
 def track_title(entry: Entry) -> tuple[str, Provenance]:
     if entry.music.track:
         return entry.music.track, Provenance.YT_MUSIC
-    return entry.title, Provenance.YT_TITLE
+    return parse_video_title(entry.title, entry.channel)[1], Provenance.YT_TITLE
 
 
 # -- stage 3: classify ---------------------------------------------------------------
@@ -78,7 +80,8 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         else:
             album = _playlist_album_title(collection.title, albumartist)
             album_prov["album"] = Provenance.PLAYLIST
-        year = _most_common_value([e.music.year for e in entries if e.music.year])
+        # release_year also exists on plain videos (upload year) - only trust it with an album
+        year = _most_common_value([e.music.year for e in entries if e.music.year and e.music.album])
         if year:
             album_prov["year"] = Provenance.YT_MUSIC
 
@@ -129,13 +132,23 @@ def compilation_album_title(playlist_title: str, curator: str) -> str:
     return title or playlist_title.strip()
 
 
+ALBUM_NOISE = NOISE_WORDS | {"full", "album", "complete", "playlist", "stream"}
+
+
 def _playlist_album_title(playlist_title: str, artist: str) -> str:
+    """'SABATON - Legends (Full Album)' -> 'Legends'; 'Album - Chronik' -> 'Chronik'."""
     title = playlist_title.strip().removeprefix("Album - ")
     for sep in (" - ", " – ", ": "):
         head, found, rest = title.partition(sep)
         if found and _key(head) == _key(artist):
-            return rest.strip()
-    return title
+            title = rest.strip()
+            break
+    cleaned = re.sub(
+        r"\s*[(\[]([^()\[\]]*)[)\]]",
+        lambda m: "" if set(re.findall(r"\w+", m[1].casefold())) <= ALBUM_NOISE else m[0],
+        title,
+    ).strip()
+    return cleaned or title
 
 
 # -- filenames -----------------------------------------------------------------------
@@ -162,8 +175,7 @@ def track_filename(albumartist: str, album: str, number: int, artist: str | None
 # -- small helpers -------------------------------------------------------------------
 
 
-def _key(s: str) -> str:
-    return re.sub(r"\W+", "", s.casefold())
+_key = key
 
 
 def _most_common(pairs: list[tuple[str, Provenance]]) -> tuple[str, Provenance] | None:

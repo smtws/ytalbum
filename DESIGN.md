@@ -175,7 +175,11 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    Known gaps, left for their slices: raw video titles for 8 of 13 Vol. 1 tracks
    (slice 2), YouTube covers are 16:9 not square, a single video is filed as a
    1-track "album" under its YT Music album name.
-2. Compilation parsing (§5) + intro skipping; Vol. 1 comes out right.
+2. ✅ Compilation parsing (§5) + intro skipping; Vol. 1 comes out right. *Done 2026-09-22:*
+   11 of 13 Vol. 1 tracks exact; the two left (reversed "Song - Artist" on a lyrics
+   channel, `@xxHANDLExx` feat. credit) are by design for the lookup in slice 5.
+   Also: `release_year` exists on plain videos too (upload year) — only trusted together
+   with an `album` field.
 3. Incremental re-run from `.ytalbum.json` (Vol. 20 grows → only new tracks).
 4. Channel URL → pick which collections to fetch.
 5. MusicBrainz enrichment (album + recording level) with provenance and cover art.

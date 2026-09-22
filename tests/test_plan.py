@@ -92,7 +92,7 @@ def test_artist_full_album_playlist_is_not_an_official_album():
     assert classify(legends) == Kind.ARTIST_PLAYLIST
     plan = build_plan(legends)
     assert plan.albumartist == "Sabaton"
-    assert plan.album == "Legends (Full Album)"  # "SABATON - " prefix stripped
+    assert plan.album == "Legends"  # "SABATON - " prefix and "(Full Album)" stripped
     # the 17-entry playlist is kept as-is for now; recognising the 11 real songs is MB's job (slice 5)
     assert len(plan.tracks) == 17
 
