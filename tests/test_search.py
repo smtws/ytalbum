@@ -85,14 +85,16 @@ def test_no_channel_without_a_name_match():
     assert main_channel(hits, "Faun") is None
 
 
-def test_dedupe_by_title_keeps_first():
-    refs = [ref("HEX", "releases", "a"), ref("Hex", "ytmusic", "b", count=12), ref("Pagan", "releases", "c")]
-    out = dedupe_by_title(refs)
-    assert [(r.source_id, r.count) for r in out] == [("a", 12), ("c", None)]
+def test_dedupe_by_title_keeps_first_and_fills_gaps():
+    hex_ytm = ref("Hex", "ytmusic", "b", count=12, channel_url=FAUNTUBE)
+    hex_ytm.thumbnail = "https://i.ytimg.com/hex.jpg"
+    out = dedupe_by_title([ref("HEX", "releases", "a"), hex_ytm, ref("Pagan", "releases", "c")])
+    assert [(r.source_id, r.count, r.thumbnail) for r in out] == [("a", 12, "https://i.ytimg.com/hex.jpg"), ("c", None, None)]
 
 
 def test_youtube_music_album_resolves_to_its_olak_playlist():
     r = ref_from_ytm_album(json.loads((FIXTURES / "ytm_album_faun_xv.json").read_text()))
+    assert r.thumbnail and "/s_p/" not in r.thumbnail  # those 404 for many albums
     assert r.source_id.startswith("OLAK5uy_")
     assert r.title == "XV - Best Of (Deluxe Edition)"  # "Album - " prefix removed
     assert r.channel_url == FAUNTUBE

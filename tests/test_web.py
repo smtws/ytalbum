@@ -166,3 +166,21 @@ def test_settings_validate_then_apply(server, monkeypatch, tmp_path):
     assert new_lib.is_dir() and app.library == new_lib and c.get("/api/state").json()["albums"] == []
     text = (tmp_path / "cfg" / "ytalbum" / "config.toml").read_text()
     assert "concurrency = 1" in text and "musicbrainz = false" in text and f'library_root = "{new_lib}"' in text
+
+
+def test_thumbnails_are_proxied_only_from_allowed_hosts(server, monkeypatch):
+    app, c = server
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, content=JPEG, headers={"content-type": "image/jpeg"})
+
+    app.http = httpx.Client(transport=httpx.MockTransport(handler))
+    ok = "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+    r = c.get("/api/thumb", params={"u": ok})
+    assert r.status_code == 200 and r.content == JPEG and r.headers["content-type"] == "image/jpeg"
+    assert c.get("/api/thumb", params={"u": ok}).status_code == 200 and len(calls) == 1  # cached
+    for bad in ("https://evil.example/x.jpg", "http://i.ytimg.com/x.jpg", "file:///etc/passwd", "https://notytimg.com/x.jpg", ""):
+        assert c.get("/api/thumb", params={"u": bad}).status_code == 404
+    assert len(calls) == 1  # never fetched anything outside the allowlist

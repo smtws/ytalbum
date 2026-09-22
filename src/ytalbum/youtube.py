@@ -339,6 +339,7 @@ def refs_from_tab(info: dict[str, Any], tab: str) -> list[SourceRef]:
             tab=tab,
             artist=_channel(e) if tab == "search" else None,
             channel_url=e.get("channel_url") if tab == "search" else None,
+            thumbnail=best_thumbnail(e),
         )
         for e in info.get("entries") or []
         if e.get("id") and (e.get("ie_key") == "YoutubeTab" or e.get("_type") == "playlist")
@@ -359,6 +360,8 @@ def ref_from_ytm_album(info: dict[str, Any]) -> SourceRef | None:
         artist=", ".join(creators) or _channel(first),
         channel_url=first.get("channel_url"),
         count=info.get("playlist_count"),
+        # the playlist's own s_p/OLAK… thumbnail is often reported but 404s; a track's always works
+        thumbnail=best_thumbnail(first) or best_thumbnail(info),
     )
 
 

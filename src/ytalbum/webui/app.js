@@ -8,6 +8,10 @@ let waitingFor = null; // job id whose result the results panel is waiting for
 let openLog = null; // job id whose full log is expanded
 let pollTimer = null;
 
+// DOM's replaceChildren turns null into the text "null"; drop empty children first
+const kids = (...children) => children.flat(Infinity).filter((c) => c != null && c !== false && c !== "");
+const fill = (el, ...children) => el.replaceChildren(...kids(...children));
+
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -90,7 +94,7 @@ function renderActivity() {
   el.hidden = !state.busy || !running;
   if (!el.hidden) {
     const queued = state.jobs.filter((j) => j.state === "queued").length;
-    el.replaceChildren(h("span", { class: "dot" }), h("strong", {}, running.label),
+    fill(el, h("span", { class: "dot" }), h("strong", {}, running.label),
       h("span", { class: "muted" }, " ", (running.log || []).at(-1) || "starting…"),
       queued > (running.state === "queued" ? 1 : 0) ? h("span", { class: "badge" }, `+${queued - (running.state === "queued" ? 1 : 0)} queued`) : null,
       cancelButton(running));
@@ -143,7 +147,7 @@ function schedulePoll(ms) {
 function renderLibrary() {
   $("#libpath").textContent = state.library || "";
   const grid = $("#grid");
-  grid.replaceChildren(...state.albums.map(card));
+  fill(grid, state.albums.map(card));
   $("#empty").hidden = state.albums.length > 0;
 }
 
@@ -216,7 +220,7 @@ function renderAlbum() {
         t.in_source ? null : h("span", { class: "badge", title: "no longer in the source playlist" }, "gone"))));
   const skipped = (p.skipped || []).map((s) => h("li", { class: "muted" }, `${s.title} — ${s.reason}`));
   const gone = p.tracks.filter((t) => !t.in_source);
-  panel.replaceChildren(
+  fill(panel,
     h("div", { class: "panel-head" },
       h("div", {}, h("h2", {}, `${p.albumartist} — ${p.album}`), h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.folder}`)),
       h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; currentAlbum = null; } }, "Close")),
@@ -256,12 +260,12 @@ function showResult(job) {
   const close = h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; } }, "Close");
   const r = job.result;
   if (job.state !== "done" || !r) {
-    panel.replaceChildren(h("div", { class: "panel-head" }, h("h2", {}, "That did not work"), close),
+    fill(panel, h("div", { class: "panel-head" }, h("h2", {}, "That did not work"), close),
       h("pre", {}, (job.log || []).slice(-8).join("\n")));
   } else if (job.kind === "preview") {
-    panel.replaceChildren(...previewView(r.plan, close));
+    fill(panel, previewView(r.plan, close));
   } else {
-    panel.replaceChildren(...pickView(r, close));
+    fill(panel, pickView(r, close));
   }
   panel.hidden = false;
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -282,25 +286,54 @@ function previewView(p, close) {
 
 function pickView(r, close) {
   const have = new Set(state.albums.map((a) => a.id));
-  const groups = (r.groups || []).map((g) =>
-    h("div", { class: "group" }, h("h3", {}, g.label),
-      g.refs.map((ref) => h("label", { class: "pick" },
-        h("input", { type: "checkbox", value: ref.url }),
-        h("span", {}, ref.title),
-        ref.tab === "search" && ref.artist ? h("span", { class: "muted" }, `by ${ref.artist}`) : null,
-        ref.count ? h("span", { class: "badge" }, `${ref.count} tracks`) : null,
-        have.has(ref.id) ? h("span", { class: "badge ok" }, "in library") : null))));
-  const download = (e) => {
-    const urls = [...$("#results").querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value);
-    if (!urls.length) return toast("Tick at least one entry first", "blocked");
-    submit("fetch", { urls }, e.currentTarget).then(() => setTimeout(() => { $("#results").hidden = true; }, 1200));
-  };
+  const groups = (r.groups || []).map((g) => {
+    const cards = g.refs.map((ref) => pickCard(ref, have.has(ref.id)));
+    const all = h("button", { class: "quiet small", type: "button", onclick: () => {
+      const boxes = cards.map((c) => c.querySelector("input"));
+      const turnOn = boxes.some((b) => !b.checked);
+      boxes.forEach((b) => { b.checked = turnOn; b.closest(".pick").classList.toggle("on", turnOn); });
+      updatePickCount();
+    } }, "select all");
+    return h("div", { class: "group" }, h("h3", {}, g.label, h("span", { class: "badge" }, g.refs.length), all), h("div", { class: "picks" }, cards));
+  });
   return [
-    h("div", { class: "panel-head" }, h("h2", {}, r.groups?.length ? "Found" : "Nothing found"), close),
-    r.missing?.length ? h("p", { class: "muted" }, `MusicBrainz lists studio albums not found on YouTube: ${r.missing.join("; ")}`) : null,
+    h("div", { class: "panel-head" },
+      h("div", {}, h("h2", {}, r.groups?.length ? "Found" : "Nothing found"),
+        r.channel ? h("a", { class: "muted", href: r.channel, target: "_blank", rel: "noopener" }, "artist channel on YouTube") : null),
+      close),
+    r.missing?.length ? h("p", { class: "muted missing" }, `Not found on YouTube: ${r.missing.join(" · ")}`) : null,
     ...groups,
-    r.groups?.length ? h("div", { class: "actions" }, h("button", { type: "button", onclick: download }, "Download selected")) : null,
+    r.groups?.length ? h("div", { class: "actions sticky" },
+      h("button", { type: "button", id: "pick-download", disabled: true, onclick: downloadPicked }, "Download selected"),
+      h("span", { id: "pick-count", class: "muted" }, "nothing selected")) : null,
   ];
+}
+
+function pickCard(ref, inLibrary) {
+  const box = h("input", { type: "checkbox", value: ref.url, onclick: (e) => e.stopPropagation() });
+  const meta = [ref.count ? `${ref.count} tracks` : null, ref.tab === "search" && ref.artist ? `by ${ref.artist}` : null].filter(Boolean).join(" · ");
+  const label = h("label", { class: `pick${inLibrary ? " have" : ""}`, onclick: () => setTimeout(updatePickCount) },
+    h("div", { class: "pick-cover" },
+      ref.thumbnail ? h("img", { src: `/api/thumb?u=${encodeURIComponent(ref.thumbnail)}`, alt: "", loading: "lazy" }) : h("div", { class: "cover none" }, "♪"),
+      box),
+    h("div", { class: "pick-title" }, ref.title),
+    h("div", { class: "muted pick-meta" }, meta || "\u00a0", inLibrary ? h("span", { class: "badge ok" }, "in library") : null));
+  box.addEventListener("change", () => label.classList.toggle("on", box.checked));
+  return label;
+}
+
+function updatePickCount() {
+  const n = $("#results").querySelectorAll("input[type=checkbox]:checked").length;
+  const button = $("#pick-download");
+  if (!button) return;
+  button.disabled = n === 0;
+  $("#pick-count").textContent = n ? `${n} selected` : "nothing selected";
+}
+
+function downloadPicked(e) {
+  const urls = [...$("#results").querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value);
+  if (!urls.length) return;
+  submit("fetch", { urls }, e.currentTarget).then(() => setTimeout(() => { $("#results").hidden = true; }, 1200));
 }
 
 // -- jobs ------------------------------------------------------------------------------
@@ -318,7 +351,7 @@ function cancelButton(job) {
 
 function renderJobs() {
   const recent = state.jobs.filter((j) => ["queued", "running"].includes(j.state) || Date.now() / 1000 - (j.finished || 0) < 120).slice(0, 4);
-  $("#jobs").replaceChildren(...recent.map((j) =>
+  fill($("#jobs"), recent.map((j) =>
     h("div", { class: `job ${j.state}`, "data-id": j.id },
       h("div", {}, h("strong", {}, j.label), " ", h("span", { class: "badge" }, j.state), " ", cancelButton(j), " ",
         h("button", { class: "quiet", type: "button", onclick: () => { openLog = openLog === j.id ? null : j.id; poll(); } }, openLog === j.id ? "hide log" : "log")),
@@ -344,7 +377,7 @@ function openSettings() {
   const browsers = ["", ...st.browsers];
   if (st.cookies_from_browser && !browsers.includes(st.cookies_from_browser)) browsers.push(st.cookies_from_browser);
   const row = (label, help, input) => h("label", { class: "setting" }, h("span", {}, h("strong", {}, label), h("small", { class: "muted" }, help)), input);
-  panel.replaceChildren(
+  fill(panel,
     h("div", { class: "panel-head" }, h("h2", {}, "Settings"), h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; } }, "Close")),
     h("form", { id: "settingsform", onsubmit: saveSettings },
       row("Library folder", "where albums are stored (created if missing); existing albums are not moved",
@@ -477,7 +510,7 @@ $("#open").addEventListener("submit", async (ev) => {
   const id = await submit("open", { q }, ev.submitter || $("#open button"));
   if (id) {
     waitingFor = id;
-    $("#results").replaceChildren(h("p", { class: "muted" }, /^https?:/.test(q) ? "Reading from YouTube…" : `Searching for “${q}”…`));
+    fill($("#results"), h("p", { class: "muted" }, /^https?:/.test(q) ? "Reading from YouTube…" : `Searching for “${q}”…`));
     $("#results").hidden = false;
   }
 });

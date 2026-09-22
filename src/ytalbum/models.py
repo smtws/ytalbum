@@ -40,6 +40,7 @@ class SourceRef:
     artist: str | None = None  # who YouTube says made it (search hits only)
     channel_url: str | None = None  # the channel that uploaded its tracks
     count: int | None = None  # entries, when YouTube told us
+    thumbnail: str | None = None
 
 
 @dataclass

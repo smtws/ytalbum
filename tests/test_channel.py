@@ -55,3 +55,8 @@ def test_parse_pick(spec, picked):
 def test_parse_pick_rejects(spec):
     with pytest.raises(ValueError):
         parse_pick(spec, 6)
+
+
+def test_refs_carry_a_thumbnail():
+    refs = refs_from_tab(json.loads((FIXTURES / "tab_playlists.json").read_text()), "playlists")
+    assert all(r.thumbnail and r.thumbnail.startswith("http") for r in refs)

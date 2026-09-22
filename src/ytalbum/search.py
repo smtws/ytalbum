@@ -95,12 +95,17 @@ def search_artist(yt, artist: str, mb: MusicBrainzAPI | None = None) -> SearchRe
 
 
 def dedupe_by_title(refs: list[SourceRef]) -> list[SourceRef]:
-    """YouTube often keeps several playlists of one album; keep the first, remember a known count."""
+    """YouTube often keeps several playlists of one album; keep the first, fill in what it lacks.
+
+    The Releases tab gives no cover and no track count, YouTube Music's album search does.
+    """
     out: dict[str, SourceRef] = {}
     for r in refs:
         k = key(core(r.title))
         if k not in out:
             out[k] = r
-        elif r.count and not out[k].count:
-            out[k].count = r.count
+            continue
+        for field in ("count", "thumbnail", "artist", "channel_url"):
+            if getattr(r, field) and not getattr(out[k], field):
+                setattr(out[k], field, getattr(r, field))
     return list(out.values())

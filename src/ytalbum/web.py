@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
+
 from . import config as config_mod
 from .config import Config
 from .download import COVER_STEM, iter_plans
@@ -50,6 +52,9 @@ STATIC = {
 }
 MAX_LOG = 400
 MAX_BODY = 1 << 20
+# thumbnails are fetched by us, so the page never talks to Google and the CSP stays strict
+THUMB_HOSTS = ("ytimg.com", "ggpht.com", "googleusercontent.com", "coverartarchive.org", "archive.org")
+THUMB_CACHE = 300
 
 
 # -- jobs ------------------------------------------------------------------------------------
@@ -156,6 +161,8 @@ class App:
     def __init__(self, cfg: Config, library: Path, host: str = "127.0.0.1", port: int = 8765, service_factory=None) -> None:
         self.cfg, self.library, self.host, self.port = cfg, library.expanduser(), host, port
         self.last_request = time.monotonic()
+        self.http = httpx.Client(timeout=10, follow_redirects=True, headers={"User-Agent": "ytalbum"})
+        self._thumbs: dict[str, tuple[bytes, str]] = {}
         self._service_factory = service_factory or (lambda job: Service(cfg, self.library, log=lambda s: _append(job, s), on_track=lambda t, what: _append(job, f"{what}: {t.number:02d} {t.artist} - {t.title}"), cancel=job.cancel))
         self.jobs = Jobs(self._service_factory)
 
@@ -202,6 +209,25 @@ class App:
         track = next((t for t in plan.tracks if t.video_id == video_id and t.state == "done"), None)
         path = _inside(album_dir, track.filename) if track else None
         return path if path and path.is_file() else None
+
+    def thumbnail(self, url: str) -> tuple[bytes, str] | None:
+        """Fetch a thumbnail for the page (allowlisted hosts only), with a small memory cache."""
+        host = urlsplit(url).hostname or ""
+        if urlsplit(url).scheme != "https" or not any(host == h or host.endswith("." + h) for h in THUMB_HOSTS):
+            return None
+        if hit := self._thumbs.get(url):
+            return hit
+        try:
+            r = self.http.get(url)
+        except httpx.HTTPError as e:
+            log.debug("thumbnail %s: %s", url, e)
+            return None
+        if r.status_code != 200 or not (mime := image_mime(r.content)):
+            return None
+        if len(self._thumbs) >= THUMB_CACHE:
+            self._thumbs.pop(next(iter(self._thumbs)))
+        self._thumbs[url] = (r.content, mime)
+        return self._thumbs[url]
 
     def settings(self) -> dict[str, Any]:
         runtime = self.cfg.resolved_js_runtime()
@@ -377,7 +403,7 @@ def _append(job: Job, line: str) -> None:
 
 
 def _ref(r) -> dict[str, Any]:
-    return {"url": r.url, "id": r.source_id, "title": r.title, "tab": r.tab, "artist": r.artist, "count": r.count}
+    return {"url": r.url, "id": r.source_id, "title": r.title, "tab": r.tab, "artist": r.artist, "count": r.count, "thumbnail": r.thumbnail}
 
 
 def _groups(groups) -> list[dict[str, Any]]:
@@ -419,6 +445,9 @@ class _Handler(BaseHTTPRequestHandler):
             case "/api/cover":
                 cover = self.app.cover(q.get("id", ""))
                 return self._send(HTTPStatus.OK, cover[0], cover[1]) if cover else self._error(HTTPStatus.NOT_FOUND, "no cover")
+            case "/api/thumb":
+                thumb = self.app.thumbnail(q.get("u", ""))
+                return self._send(HTTPStatus.OK, thumb[0], thumb[1], cache=True) if thumb else self._error(HTTPStatus.NOT_FOUND, "no thumbnail")
             case "/api/audio":
                 path = self.app.audio_path(q.get("id", ""), q.get("v", ""))
                 return self._file(path, "audio/ogg") if path else self._error(HTTPStatus.NOT_FOUND, "no such track")
