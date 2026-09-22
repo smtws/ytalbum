@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 
 from . import config as config_mod
+from .enrich import enrich
+from .mb import MusicBrainz, default_cache_path
 from .download import find_plan, iter_plans, load_plan, relocate, run, save_plan
 from .models import AlbumPlan, PlanTrack, SourceRef
 from .plan import build_plan, merge_plans
@@ -28,11 +30,13 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
     f.add_argument("--all", action="store_true", help="channel: take every release and playlist")
     f.add_argument("--pick", metavar="SPEC", help="channel: which ones, e.g. 1,3-5 (default: ask)")
+    f.add_argument("--no-mb", action="store_true", help="skip the MusicBrainz lookup")
     f.add_argument("--dump-collection", type=Path, metavar="FILE", help="also save what YouTube returned (for test fixtures)")
 
     pl = sub.add_parser("plan", help="write the plan into the album folder for editing, download nothing")
     pl.add_argument("url")
     pl.add_argument("--library", type=Path)
+    pl.add_argument("--no-mb", action="store_true", help="skip the MusicBrainz lookup")
 
     d = sub.add_parser("download", help="download from an (edited) plan in an album folder")
     d.add_argument("album_dir", type=Path)
@@ -40,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     u = sub.add_parser("update", help="re-check every album in the library against its source")
     u.add_argument("--library", type=Path)
     u.add_argument("--dry-run", action="store_true", help="only report what changed")
+    u.add_argument("--no-mb", action="store_true", help="skip the MusicBrainz lookup")
 
     c = sub.add_parser("config", help="show or set configuration")
     c.add_argument("--library", type=Path, help="set the library root")
@@ -49,7 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     sys.stdout.reconfigure(line_buffering=True)  # keep progress in order with stderr when piped
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     cfg = config_mod.load()
+    if getattr(args, "no_mb", False):
+        cfg.musicbrainz = False
 
     try:
         match args.cmd:
@@ -157,6 +165,16 @@ def _update(args: argparse.Namespace, cfg: config_mod.Config) -> int:
 # -- the shared path -----------------------------------------------------------------------
 
 
+_mb: MusicBrainz | None = None
+
+
+def _musicbrainz() -> MusicBrainz:
+    global _mb
+    if _mb is None:
+        _mb = MusicBrainz(default_cache_path())
+    return _mb
+
+
 def _fetch_one(
     url: str,
     library: Path | None,
@@ -171,6 +189,10 @@ def _fetch_one(
     if dump:
         dump.write_text(json.dumps(collection.to_dict(), indent=2, ensure_ascii=False) + "\n")
     plan = build_plan(collection)
+    if yt.cfg.musicbrainz:
+        stats = enrich(plan, _musicbrainz(), progress=lambda msg: print(f"  {msg}", file=sys.stderr))
+        found = "release matched" if stats["release"] else f"{stats['tracks']}/{stats['looked_up']} tracks matched"
+        print(f"MusicBrainz: {found}", file=sys.stderr)
 
     if dry or library is None:
         _print_plan(plan)

@@ -101,6 +101,7 @@ class PlanTrack:
     auto: dict[str, str] = field(default_factory=dict)
     in_source: bool = True  # False once the video has left the source playlist
     tagged: str | None = None  # signature of the tags last written to the file
+    mbid: str | None = None  # MusicBrainz recording id
 
 
 @dataclass
@@ -117,6 +118,9 @@ class AlbumPlan:
     skipped: list[dict[str, str]] = field(default_factory=list)  # {video_id, title, reason}
     provenance: dict[str, str] = field(default_factory=dict)
     auto: dict[str, object] = field(default_factory=dict)  # album-level twin of PlanTrack.auto
+    mbid: str | None = None  # MusicBrainz release id
+    cover_fallback_url: str | None = None  # tried when cover_url fails (e.g. no Cover Art Archive image)
+    cover_fetched: dict[str, str] = field(default_factory=dict)  # {url, sha1} of the cover.* we saved
     schema: int = PLAN_SCHEMA
 
     @property

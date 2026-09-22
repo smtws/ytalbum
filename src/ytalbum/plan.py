@@ -131,7 +131,8 @@ def wanted_folder(plan: AlbumPlan) -> str:
 
 def wanted_filename(plan: AlbumPlan, t: PlanTrack) -> str:
     show_artist = plan.kind == Kind.COMPILATION or _key(t.artist) != _key(plan.albumartist)
-    return track_filename(plan.albumartist, plan.album, t.number, t.artist if show_artist else None, t.title)
+    disc = t.disc if max(x.disc for x in plan.tracks) > 1 else None
+    return track_filename(plan.albumartist, plan.album, t.number, t.artist if show_artist else None, t.title, disc)
 
 
 def refresh_derived(plan: AlbumPlan) -> AlbumPlan:
@@ -160,6 +161,8 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
     merged = copy.deepcopy(existing)
     _merge_fields(merged, fresh, ALBUM_FIELDS)
     merged.cover_url = fresh.cover_url or merged.cover_url
+    merged.cover_fallback_url = fresh.cover_fallback_url or merged.cover_fallback_url
+    merged.mbid = fresh.mbid or merged.mbid
     merged.skipped = fresh.skipped
 
     fresh_by_id = {t.video_id: t for t in fresh.tracks}
@@ -170,6 +173,7 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
         t.in_source = f is not None
         if f:
             _merge_fields(t, f, TRACK_FIELDS)
+            t.mbid = f.mbid or t.mbid
 
     next_number = max((t.number for t in merged.tracks), default=0) + 1
     for f in fresh.tracks:
@@ -242,10 +246,13 @@ def safe_name(name: str) -> str:
     return name or "_"
 
 
-def track_filename(albumartist: str, album: str, number: int, artist: str | None, title: str) -> str:
-    """v1's convention: 'AlbumArtist - Album - NN - [TrackArtist - ]Title.opus'."""
+def track_filename(
+    albumartist: str, album: str, number: int, artist: str | None, title: str, disc: int | None = None
+) -> str:
+    """v1's convention: 'AlbumArtist - Album - [D-]NN - [TrackArtist - ]Title.opus'."""
     middle = f"{artist} - {title}" if artist else title
-    stem = safe_name(f"{albumartist} - {album} - {number:02d} - {middle}")
+    num = f"{disc}-{number:02d}" if disc else f"{number:02d}"
+    stem = safe_name(f"{albumartist} - {album} - {num} - {middle}")
     return f"{stem}.opus"
 
 

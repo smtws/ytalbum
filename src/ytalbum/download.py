@@ -6,6 +6,7 @@ changed, missing ones are downloaded, and the plan is saved after every track.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -149,21 +150,51 @@ def cover_candidates(url: str) -> list[str]:
 
 
 def _cover(plan: AlbumPlan, album_dir: Path, yt: YouTube) -> bytes | None:
-    """The album's cover: cover.* in the folder if present (the user may replace it), else fetched."""
-    for existing in sorted(album_dir.glob(f"{COVER_STEM}.*")):
+    """The album cover, kept as cover.* in the album folder.
+
+    A cover the user put there is always used. One we saved ourselves is replaced once a
+    better source is known (e.g. the Cover Art Archive after MusicBrainz matched).
+    """
+    existing = next((p for p in sorted(album_dir.glob(f"{COVER_STEM}.*")) if image_mime(p.read_bytes())), None)
+    if existing:
         data = existing.read_bytes()
-        if image_mime(data):
+        ours = plan.cover_fetched.get("sha1") == _sha1(data)
+        if not ours or not plan.cover_url or plan.cover_url in (plan.cover_fetched.get("url"), plan.cover_fetched.get("tried")):
             return data
-    if not plan.cover_url:
-        return None
-    for url in cover_candidates(plan.cover_url):
-        try:
-            data = yt.fetch_bytes(url)
-        except Exception as e:  # a missing cover must never stop the album
-            log.debug("cover %s not available: %s", url, e)
-            continue
-        if mime := image_mime(data):
-            (album_dir / f"{COVER_STEM}.{mime.split('/')[1].replace('jpeg', 'jpg')}").write_bytes(data)
+        new = _download_cover(plan.cover_url, yt)
+        plan.cover_fetched["tried"] = plan.cover_url
+        if not new:
             return data
-    log.warning("could not fetch any cover for %s", plan.cover_url)
+        existing.unlink()
+        return _save_cover(plan, album_dir, *new)
+
+    for url in filter(None, (plan.cover_url, plan.cover_fallback_url)):
+        if found := _download_cover(url, yt):
+            return _save_cover(plan, album_dir, *found)
+    if plan.cover_url:
+        log.warning("could not fetch any cover for %s", plan.cover_url)
     return None
+
+
+def _download_cover(url: str, yt: YouTube) -> tuple[str, bytes] | None:
+    for candidate in cover_candidates(url):
+        try:
+            data = yt.fetch_bytes(candidate)
+        except Exception as e:  # a missing cover must never stop the album
+            log.debug("cover %s not available: %s", candidate, e)
+            continue
+        if image_mime(data):
+            return url, data
+    return None
+
+
+def _save_cover(plan: AlbumPlan, album_dir: Path, url: str, data: bytes) -> bytes:
+    ext = image_mime(data).split("/")[1].replace("jpeg", "jpg")
+    album_dir.mkdir(parents=True, exist_ok=True)
+    (album_dir / f"{COVER_STEM}.{ext}").write_bytes(data)
+    plan.cover_fetched = {"url": url, "sha1": _sha1(data)}
+    return data
+
+
+def _sha1(data: bytes) -> str:
+    return hashlib.sha1(data).hexdigest()

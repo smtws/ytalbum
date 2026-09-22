@@ -200,3 +200,46 @@ def test_user_supplied_cover_wins(tmp_path, yt):
     events = []
     run(load_plan(album_dir), album_dir, yt, on_track=lambda t, what: events.append(what))
     assert events.count("retagged") == 13
+
+
+def test_our_cover_is_upgraded_when_a_better_source_appears(tmp_path, yt):
+    plan = build_plan(vol1())
+    album_dir = tmp_path / plan.folder
+    run(plan, album_dir, yt)
+    assert load_plan(album_dir).cover_fetched["url"] == plan.cover_url
+
+    square = b"\xff\xd8\xff\xe0" + b"\2" * 64
+    yt.fetch_bytes = lambda url: square if "coverartarchive" in url else JPEG
+    plan = load_plan(album_dir)
+    plan.cover_fallback_url, plan.cover_url = plan.cover_url, "https://coverartarchive.org/release-group/x/front-500"
+    events = []
+    run(plan, album_dir, yt, on_track=lambda t, what: events.append(what))
+    assert (album_dir / "cover.jpg").read_bytes() == square
+    assert events.count("retagged") == 13
+    assert load_plan(album_dir).cover_fetched["url"].startswith("https://coverartarchive.org/")
+
+
+def test_user_cover_is_never_upgraded(tmp_path, yt):
+    plan = build_plan(vol1())
+    album_dir = tmp_path / plan.folder
+    run(plan, album_dir, yt)
+    mine = b"\xff\xd8\xff\xe0" + b"\3" * 64
+    (album_dir / "cover.jpg").write_bytes(mine)
+    plan = load_plan(album_dir)
+    plan.cover_url = "https://coverartarchive.org/release-group/x/front-500"
+    run(plan, album_dir, yt)
+    assert (album_dir / "cover.jpg").read_bytes() == mine
+
+
+def test_missing_cover_art_falls_back(tmp_path, yt):
+    def fetch(url):
+        if "coverartarchive" in url:
+            raise OSError("404")
+        return JPEG
+
+    yt.fetch_bytes = fetch
+    plan = build_plan(vol1())
+    plan.cover_fallback_url, plan.cover_url = plan.cover_url, "https://coverartarchive.org/release-group/x/front-500"
+    album_dir = tmp_path / plan.folder
+    run(plan, album_dir, yt)
+    assert (album_dir / "cover.jpg").read_bytes() == JPEG

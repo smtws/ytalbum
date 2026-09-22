@@ -43,6 +43,10 @@ def build_tags(plan: AlbumPlan, track: PlanTrack) -> dict[str, str]:
         tags["compilation"] = "1"
     if max(t.disc for t in plan.tracks) > 1:
         tags["discnumber"] = str(track.disc)
+    if plan.mbid:
+        tags["musicbrainz_albumid"] = plan.mbid
+    if track.mbid:
+        tags["musicbrainz_trackid"] = track.mbid
     return tags
 
 

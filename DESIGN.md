@@ -198,7 +198,16 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    at the mapping boundary; German/360°/unbracketed video labels; partial labels keep
    their meaning ("(Official Live Video)" → "(Live)"), and brackets are only treated as
    labels if they contain a marker word ("(Music of the Night)" stays).
-5. MusicBrainz enrichment (album + recording level) with provenance and cover art.
+5. ✅ MusicBrainz enrichment (album + recording level) with provenance and cover art.
+   *Done 2026-09-22:* Vol. 1 13/13 recordings (incl. the reversed "Lullaby of Woe" via a
+   swapped query, "DOMINUM feat. Feuerschwanz" picked because the `@xxFEUERSCHWANZxx`
+   handle contains the guest's name), Vol. 20 9/12, official Legends matched as a release
+   (year, tracklist, 500×500 Cover Art Archive front, `musicbrainz_*id` tags). The fan
+   "Full Album" playlist is correctly *not* accepted as the release. Rules found on the
+   way: a title with extra info MB lacks ("(Live)", "(Behind The Scenes Documentary)")
+   confirms the artist but gets no recording id; MB answers 503 even to the first
+   request, so retry/backoff is mandatory; our own saved cover is upgraded when a better
+   source appears, a user's cover never is. Cache: `~/.cache/ytalbum/musicbrainz.sqlite3`.
 6. Artist search (channel releases/playlists tab, Topic channel, YT playlist search).
 7. Web UI / PWA on the library.
 8. Intro/outro trimming — **wanted, but only once slices 1–5 are stable(ish).** Must be

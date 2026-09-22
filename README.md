@@ -14,6 +14,10 @@ uv run ytalbum download <album-folder>            # … then download from the e
 uv run pytest                                     # offline tests (fixtures in design-fixtures/)
 ```
 
+MusicBrainz is used to correct names, years, covers and tracklists when it knows the
+music (`--no-mb` or `musicbrainz = false` in the config to skip); nothing is dropped when
+it does not. Responses are cached in `~/.cache/ytalbum/`.
+
 Re-running `fetch` or `download` resumes: finished tracks are skipped, failed ones retried.
 Age-restricted videos are skipped unless cookies are configured:
 `ytalbum config --cookies-from-browser firefox` (or `--cookies-file cookies.txt`).

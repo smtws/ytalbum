@@ -24,6 +24,7 @@ class Config:
     js_runtime: str | None = None
     js_runtime_path: str | None = None
     concurrency: int = 4
+    musicbrainz: bool = True
     # opt-in, only needed for age-restricted videos (DESIGN.md §7). yt-dlp writes
     # refreshed cookies back into cookies_file.
     cookies_file: Path | None = None
@@ -48,6 +49,7 @@ def load(path: Path | None = None) -> Config:
         js_runtime=data.get("js_runtime"),
         js_runtime_path=data.get("js_runtime_path"),
         concurrency=int(data.get("concurrency", 4)),
+        musicbrainz=bool(data.get("musicbrainz", True)),
     )
     if root := data.get("library_root"):
         cfg.library_root = Path(root).expanduser()
