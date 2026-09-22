@@ -227,6 +227,12 @@ class App:
                 return self.jobs.submit("fetch", f"fetch {label}", fetch_all)
             case "update":
                 return self.jobs.submit("update", "update the library", lambda s: s.update_all())
+            case "prune":
+                found = self.album(str(body.get("id", "")))
+                if not found:
+                    raise ValueError("unknown album")
+                album_dir = found[0]
+                return self.jobs.submit("prune", f"remove gone tracks from {found[1].album}", lambda s: s.prune(album_dir))
             case "edit":
                 source_id = str(body.get("id", ""))
                 if not self.album(source_id):

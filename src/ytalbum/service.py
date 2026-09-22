@@ -195,6 +195,29 @@ class Service:
             return set()
         return {p.source_id for _, p in iter_plans(self.library)}
 
+    # -- removing tracks that left the source ------------------------------------------------
+
+    def prune(self, album_dir: Path) -> Outcome:
+        """Delete the tracks the last fetch found no longer in the source; retag the rest."""
+        plan = load_plan(album_dir)
+        if not plan:
+            return Outcome("failed", message=f"no plan in {album_dir}")
+        gone = [t for t in plan.tracks if not t.in_source]
+        if not gone:
+            self.log("nothing to remove: every track is still in the source")
+            return Outcome("ok", plan, album_dir)
+        for t in gone:
+            path = _inside(album_dir, t.filename)
+            if path and path.exists():
+                path.unlink()
+            self.log(f"removed {t.number:02d} {t.artist} - {t.title}" + ("" if path else " (unsafe file name ignored)"))
+        plan.tracks = [t for t in plan.tracks if t.in_source]
+        if all(t.disc == 1 for t in plan.tracks):  # gone tracks were numbered last; close any gap
+            for number, t in enumerate(plan.tracks, 1):
+                t.number = number
+        save_plan(plan, album_dir)
+        return self.execute(plan, album_dir)  # renames/retags only (tracktotal changed)
+
     # -- edits (web UI) ----------------------------------------------------------------
 
     def find_album(self, source_id: str) -> tuple[Path, AlbumPlan] | None:
@@ -209,6 +232,12 @@ class Service:
         apply_user_edits(plan, edits)
         album_dir = relocate(album_dir, plan, self.library)
         return self.execute(plan, album_dir)
+
+
+def _inside(album_dir: Path, filename: str) -> Path | None:
+    """album_dir/filename, but only if that really is a file directly in the album folder."""
+    path = (album_dir / filename).resolve()
+    return path if path.parent == album_dir.resolve() and path.name == filename else None
 
 
 def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:

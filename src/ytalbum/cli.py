@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("download", help="download from an (edited) plan in an album folder")
     d.add_argument("album_dir", type=Path)
 
+    pr = sub.add_parser("prune", help="delete the tracks that are no longer in the source playlist")
+    pr.add_argument("album_dir", type=Path)
+    pr.add_argument("--yes", action="store_true", help="do not ask")
+
     u = sub.add_parser("update", help="re-check every album in the library against its source")
     u.add_argument("--library", type=Path)
     u.add_argument("--dry-run", action="store_true", help="only report what changed")
@@ -84,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 2 if library is None else exit_code(_service(cfg, library).update_all(report_only=args.dry_run))
             case "serve":
                 return _serve(args, cfg)
+            case "prune":
+                return _prune(args, cfg)
     except NotSupported as e:
         print(f"not supported: {e}", file=sys.stderr)
         return 2
@@ -177,6 +183,29 @@ def _pick_and_fetch(service: Service, groups, args, dry: bool, missing: list[str
         print(f"\nMusicBrainz lists {len(missing)} more studio album(s) not found on YouTube: " + "; ".join(missing))
     chosen = _choose(refs, args)
     return exit_code(service.fetch_many(chosen, dry=dry)) if chosen else 0
+
+
+def _prune(args: argparse.Namespace, cfg: config_mod.Config) -> int:
+    from .download import load_plan
+
+    plan = load_plan(args.album_dir)
+    if not plan:
+        print(f"no plan in {args.album_dir}", file=sys.stderr)
+        return 2
+    gone = [t for t in plan.tracks if not t.in_source]
+    if not gone:
+        print("nothing to remove: every track is still in the source")
+        return 0
+    print("no longer in the source playlist — these files will be deleted:")
+    for t in gone:
+        print(f"  {t.number:02d} {t.artist} - {t.title}")
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print("add --yes to confirm", file=sys.stderr)
+            return 2
+        if input("delete them? [y/N] ").strip().lower() not in ("y", "yes", "j", "ja"):
+            return 0
+    return exit_code(_service(cfg, None).prune(args.album_dir))
 
 
 def _serve(args: argparse.Namespace, cfg: config_mod.Config) -> int:

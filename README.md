@@ -8,6 +8,7 @@ uv run ytalbum config --library ~/Music/YouTube   # once; or pass --library per 
 uv run ytalbum fetch  <playlist-or-video-url>     # plan + download + tag
 uv run ytalbum fetch  <channel-url>               # list its releases/playlists, pick (--pick 1,3-5 / --all)
 uv run ytalbum search "Artist"                   # find the artist's albums/playlists, pick which to fetch
+uv run ytalbum prune <album-folder> [--yes]        # delete tracks no longer in the playlist (asks first)
 uv run ytalbum update [--dry-run]                 # re-check every album in the library, fetch what's new
 uv run ytalbum fetch  <url> --dry-run             # just show what would be written
 uv run ytalbum plan   <url>                       # write .ytalbum.json into the album folder, edit it …

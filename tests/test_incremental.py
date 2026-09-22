@@ -288,3 +288,46 @@ def test_merge_never_downgrades_to_a_weaker_source():
     merged = merge_plans(existing, build_plan(vol1()))  # this time without MusicBrainz
     assert (merged.tracks[10].artist, merged.tracks[10].title) == ("Ashley Serena", "Lullaby of Woe")
     assert merged.tracks[10].provenance["artist"] == Provenance.MB
+
+
+def test_prune_deletes_only_gone_tracks_and_retags_the_rest(tmp_path, yt):
+    from ytalbum.config import Config
+    from ytalbum.service import Service
+
+    plan = build_plan(vol1())
+    album_dir = tmp_path / plan.folder
+    run(plan, album_dir, yt)
+    fresh_coll = vol1()
+    del fresh_coll.entries[5]  # Subway to Sally removed from the playlist
+    merged = merge_plans(load_plan(album_dir), build_plan(fresh_coll))
+    run(merged, album_dir, yt)
+    gone_file = album_dir / next(t.filename for t in merged.tracks if not t.in_source)
+    assert gone_file.exists()
+
+    outcome = Service(Config(musicbrainz=False), tmp_path, yt=yt).prune(album_dir)
+    assert outcome.status == "ok"
+    saved = load_plan(album_dir)
+    assert len(saved.tracks) == 12 and all(t.in_source for t in saved.tracks)
+    assert [t.number for t in saved.tracks] == list(range(1, 13))
+    assert not gone_file.exists()
+    assert len(list(album_dir.glob("*.opus"))) == 12
+    assert OggOpus(album_dir / saved.tracks[0].filename)["tracktotal"] == ["12"]
+    assert len(yt.downloads) == 13  # nothing downloaded again
+
+
+def test_prune_never_deletes_outside_the_album(tmp_path, yt):
+    from ytalbum.config import Config
+    from ytalbum.download import save_plan
+    from ytalbum.service import Service
+
+    plan = build_plan(vol1())
+    album_dir = tmp_path / plan.folder
+    run(plan, album_dir, yt)
+    victim = tmp_path / "precious.txt"
+    victim.write_text("keep me")
+    plan = load_plan(album_dir)
+    plan.tracks[0].in_source = False
+    plan.tracks[0].filename = "../../precious.txt"  # a tampered plan
+    save_plan(plan, album_dir)
+    Service(Config(musicbrainz=False), tmp_path, yt=yt).prune(album_dir)
+    assert victim.read_text() == "keep me"

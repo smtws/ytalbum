@@ -138,6 +138,7 @@ function renderAlbum() {
         t.state === "done" ? h("span", { class: "badge ok" }, "✓") : t.state === "failed" ? h("span", { class: "badge bad", title: t.error || "" }, "failed") : h("span", { class: "badge" }, "pending"),
         t.in_source ? null : h("span", { class: "badge", title: "no longer in the source playlist" }, "gone"))));
   const skipped = (p.skipped || []).map((s) => h("li", { class: "muted" }, `${s.title} — ${s.reason}`));
+  const gone = p.tracks.filter((t) => !t.in_source);
   panel.replaceChildren(
     h("div", { class: "panel-head" },
       h("div", {}, h("h2", {}, `${p.albumartist} — ${p.album}`), h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.folder}`)),
@@ -149,8 +150,14 @@ function renderAlbum() {
       h("div", { class: "actions" },
         h("button", { type: "submit" }, "Save changes (rename + retag)"),
         h("button", { class: "quiet", type: "button", onclick: () => submit("fetch", { urls: [p.source_url] }) }, "Re-check source"),
+        gone.length ? h("button", { class: "danger", type: "button", onclick: () => pruneAlbum(p, gone) }, `Remove ${gone.length} track${gone.length > 1 ? "s" : ""} no longer in the playlist`) : null,
         h("a", { href: p.source_url, target: "_blank", rel: "noopener" }, "open on YouTube"))));
   panel.hidden = false;
+}
+
+function pruneAlbum(p, gone) {
+  const list = gone.map((t) => `  ${t.number}. ${t.artist} – ${t.title}`).join("\n");
+  if (confirm(`Delete these files? They are no longer in the YouTube playlist:\n\n${list}`)) submit("prune", { id: p.source_id });
 }
 
 function saveAlbum(ev) {
