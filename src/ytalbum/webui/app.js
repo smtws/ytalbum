@@ -215,8 +215,14 @@ function renderAlbum() {
       h("td", {}, h("input", { type: "text", name: "artist", value: t.artist, "aria-label": "artist" })),
       h("td", {}, h("input", { type: "text", name: "title", value: t.title, "aria-label": "title" })),
       h("td", { class: "trim" },
-        h("input", { type: "text", name: "trim_start", value: asTime(t.trim_start), placeholder: "0:00", "aria-label": "cut from the front", size: 5 }),
+        h("input", { type: "text", name: "trim_start", value: asTime(t.trim_start), placeholder: "0:00", "aria-label": "cut from the front", size: 5,
+          oninput: (e) => suggestEnd(e.currentTarget, t) }),
         h("input", { type: "text", name: "trim_end", value: asTime(t.trim_end), placeholder: "end", "aria-label": "play until", size: 5 }),
+        t.mb_length ? h("span", { class: `muted mb-len${usableLength(t) ? "" : " unusable"}`,
+          title: usableLength(t)
+            ? `MusicBrainz: the song is ${asTime(t.mb_length)} long — used to suggest the end`
+            : `MusicBrainz knows a ${asTime(t.mb_length)} version, but this file is ${asTime(t.duration)} — no suggestion` },
+          asTime(t.mb_length)) : null,
         t.channel ? h("button", { class: "quiet small", type: "button", title: `Apply this trim to every track from ${t.channel} in the library`,
           onclick: (e) => trimChannel(t, e.currentTarget) }, "⇉") : null),
       h("td", { class: "src" }, provBadge(t.provenance.title)),
@@ -246,7 +252,28 @@ function pruneAlbum(p, gone, button) {
   if (confirm(`Delete these files? They are no longer in the YouTube playlist:\n\n${list}`)) submit("prune", { id: p.source_id }, button);
 }
 
-const asTime = (seconds) => (seconds == null ? "" : `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`);
+const asTime = (seconds) => (seconds == null ? "" : `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`);
+
+const fromTime = (text) => {
+  const parts = String(text).trim().split(":");
+  if (!text.trim() || parts.some((p) => p.trim() === "" || isNaN(Number(p)))) return null;
+  return parts.reduce((acc, p) => acc * 60 + Number(p), 0);
+};
+
+// MusicBrainz knows how long the song is: once a start is set, propose where it ends
+// only when the known length actually fits this file: MusicBrainz often has another,
+// longer version of the same song (live, extended), which would suggest past the end
+const usableLength = (t) => t.mb_length && t.duration && t.mb_length < t.duration - 0.5;
+
+function suggestEnd(startInput, track) {
+  const end = startInput.closest("tr").querySelector("[name=trim_end]");
+  if (!usableLength(track) || (end.value && end.dataset.suggested !== "1")) return;
+  const start = fromTime(startInput.value);
+  if (start == null) return;
+  end.value = asTime(start + track.mb_length);
+  end.dataset.suggested = "1";
+  end.title = "suggested from the MusicBrainz length — change it if it cuts too early";
+}
 
 function trimChannel(track, button) {
   const row = button.closest("tr");

@@ -100,6 +100,7 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
                 provenance={"artist": artist_prov, "title": title_prov},
                 auto={"artist": artist, "title": title},
                 channel=entry.channel,
+                duration=entry.duration,
             )
         )
 
@@ -180,6 +181,8 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
             if t.provenance.get("title") != Provenance.USER:
                 t.mbid = f.mbid or t.mbid
             t.channel = f.channel or t.channel
+            t.mb_length = f.mb_length or t.mb_length
+            t.duration = f.duration or t.duration
 
     for f in fresh.tracks:
         if f.video_id not in known:

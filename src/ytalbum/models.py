@@ -116,6 +116,8 @@ class PlanTrack:
     trim_start: float | None = None  # seconds cut from the front (label idents …)
     trim_end: float | None = None  # play only up to here (previews, outros)
     trimmed: str | None = None  # the trim actually applied to the file on disk
+    mb_length: float | None = None  # seconds, as MusicBrainz knows the recording
+    duration: float | None = None  # seconds of the video itself (YouTube)
 
 
 @dataclass

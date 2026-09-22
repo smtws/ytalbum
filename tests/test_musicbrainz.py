@@ -200,3 +200,20 @@ def test_client_spaces_requests(monkeypatch):
     mb.search_recordings("A", "B")
     mb.search_recordings("A", "C")
     assert slept and 0.9 < slept[-1] <= 1.0
+
+
+def test_recording_length_is_kept_for_the_trim_suggestion():
+    plan = plan_for("vol1_collection.json")
+    enrich(plan, RecordedMB())
+    known = [t for t in plan.tracks if t.mb_length]
+    assert len(known) >= 10
+    # MusicBrainz sometimes knows another, longer version: "Prinzessin" is 3:30 on YouTube,
+    # the matched recording is 5:01 — the UI must not suggest an end past the file
+    schandmaul = next(t for t in plan.tracks if t.artist == "Schandmaul")
+    assert (schandmaul.mb_length, round(schandmaul.duration)) == (301.0, 210)
+
+
+def test_release_tracks_keep_their_length_too():
+    plan = plan_for("legends_olak_collection.json")
+    enrich(plan, RecordedMB())
+    assert all(t.mb_length and t.mb_length > 60 for t in plan.tracks)

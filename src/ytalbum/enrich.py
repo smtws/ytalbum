@@ -125,6 +125,8 @@ def enrich_track(t: PlanTrack, mb: MusicBrainzAPI) -> bool:
     if feat_text(title_source) and len(ac) == 1:  # MB has no guest credit: keep ours
         title += "".join(f" {g}" for g in re.findall(r"\([^)]*feat[^)]*\)", title_source, re.I))
     _set(t, "artist", credit_phrase(ac))
+    if length := rec.get("length"):
+        t.mb_length = round(length / 1000, 1)  # lets the UI suggest where the song ends
     if extra:
         # "(Live)", "(Behind The Scenes Documentary)": the artist is confirmed, but this is
         # not that recording - keep our title, attach no recording id
@@ -201,6 +203,8 @@ def enrich_release(plan: AlbumPlan, mb: MusicBrainzAPI) -> bool:
                 _set(t, "title", m["title"])
                 _set(t, "artist", credit_phrase(m.get("artist-credit") or release["artist-credit"]))
                 t.number, t.disc, t.mbid = int(m["position"]), int(m["disc"]), m["recording"]["id"]
+                if length := m.get("length") or m["recording"].get("length"):
+                    t.mb_length = round(int(length) / 1000, 1)
             else:
                 t.number, next_number = next_number, next_number + 1
         plan.tracks.sort(key=lambda t: (t.disc, t.number))
