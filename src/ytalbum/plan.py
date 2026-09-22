@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import copy
 from collections import Counter
 
 from .models import AlbumPlan, Collection, Entry, Kind, PlanTrack, Provenance
@@ -89,15 +90,15 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
     for number, entry in enumerate(entries, start=1):
         artist, artist_prov = track_artist(entry)
         title, title_prov = track_title(entry)
-        show_artist = kind == Kind.COMPILATION or _key(artist) != _key(albumartist)
         tracks.append(
             PlanTrack(
                 video_id=entry.video_id,
                 number=number,
                 artist=artist,
                 title=title,
-                filename=track_filename(albumartist, album, number, artist if show_artist else None, title),
+                filename="",  # set by refresh_derived
                 provenance={"artist": artist_prov, "title": title_prov},
+                auto={"artist": artist, "title": title},
             )
         )
 
@@ -106,7 +107,7 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         for e in collection.entries
         if (reason := skip_reason(e, collection))
     ]
-    return AlbumPlan(
+    plan = AlbumPlan(
         source_url=collection.source_url,
         source_id=collection.source_id,
         kind=kind,
@@ -114,11 +115,87 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         albumartist=albumartist,
         year=year,
         cover_url=collection.thumbnail or (entries[0].thumbnail if entries else None),
-        folder=f"{safe_name(albumartist)}/{safe_name(album)}",
+        folder="",  # set by refresh_derived
         tracks=tracks,
         skipped=skipped,
         provenance=album_prov,
+        auto={"kind": kind, "album": album, "albumartist": albumartist, "year": year},
     )
+    return refresh_derived(plan)
+
+
+def wanted_folder(plan: AlbumPlan) -> str:
+    """Where the album belongs, relative to the library root, given its (edited) fields."""
+    return f"{safe_name(plan.albumartist)}/{safe_name(plan.album)}"
+
+
+def wanted_filename(plan: AlbumPlan, t: PlanTrack) -> str:
+    show_artist = plan.kind == Kind.COMPILATION or _key(t.artist) != _key(plan.albumartist)
+    return track_filename(plan.albumartist, plan.album, t.number, t.artist if show_artist else None, t.title)
+
+
+def refresh_derived(plan: AlbumPlan) -> AlbumPlan:
+    """Update names of things not on disk yet. `folder` and the filenames of finished tracks
+    describe what IS on disk; only the executor moves those (download.relocate / download.run)."""
+    if not plan.folder:
+        plan.folder = wanted_folder(plan)
+    for t in plan.tracks:
+        if t.state != "done":
+            t.filename = wanted_filename(plan, t)
+    return plan
+
+
+ALBUM_FIELDS = ("kind", "album", "albumartist", "year")
+TRACK_FIELDS = ("artist", "title")
+
+
+def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
+    """Bring an existing plan up to date with a fresh one from the same source (DESIGN.md slice 3).
+
+    - user edits (value differs from the recorded auto value) always win;
+      untouched fields take the fresh auto value
+    - existing tracks keep their numbers; new videos are appended
+    - tracks that left the source are kept (their files stay) and flagged
+    """
+    merged = copy.deepcopy(existing)
+    _merge_fields(merged, fresh, ALBUM_FIELDS)
+    merged.cover_url = fresh.cover_url or merged.cover_url
+    merged.skipped = fresh.skipped
+
+    fresh_by_id = {t.video_id: t for t in fresh.tracks}
+    known = set()
+    for t in merged.tracks:
+        known.add(t.video_id)
+        f = fresh_by_id.get(t.video_id)
+        t.in_source = f is not None
+        if f:
+            _merge_fields(t, f, TRACK_FIELDS)
+
+    next_number = max((t.number for t in merged.tracks), default=0) + 1
+    for f in fresh.tracks:
+        if f.video_id not in known:
+            new = copy.deepcopy(f)
+            new.number = next_number
+            next_number += 1
+            merged.tracks.append(new)
+    return refresh_derived(merged)
+
+
+def _merge_fields(target: AlbumPlan | PlanTrack, fresh: AlbumPlan | PlanTrack, fields: tuple[str, ...]) -> None:
+    for name in fields:
+        if _edited(target, name):
+            target.provenance[name] = Provenance.USER
+        else:
+            setattr(target, name, getattr(fresh, name))
+            if name in fresh.provenance:
+                target.provenance[name] = fresh.provenance[name]
+            else:
+                target.provenance.pop(name, None)
+        target.auto[name] = fresh.auto.get(name)
+
+
+def _edited(obj: AlbumPlan | PlanTrack, name: str) -> bool:
+    return name in obj.auto and getattr(obj, name) != obj.auto[name]
 
 
 def compilation_album_title(playlist_title: str, curator: str) -> str:

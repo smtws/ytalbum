@@ -180,7 +180,15 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    channel, `@xxHANDLExx` feat. credit) are by design for the lookup in slice 5.
    Also: `release_year` exists on plain videos too (upload year) — only trusted together
    with an `album` field.
-3. Incremental re-run from `.ytalbum.json` (Vol. 20 grows → only new tracks).
+3. ✅ Incremental re-run from `.ytalbum.json` (Vol. 20 grows → only new tracks). *Done
+   2026-09-22:* the plan records the auto-derived value of every field; a differing
+   value is a user edit and always wins, untouched fields follow better derivations.
+   `folder`/`filename` in the plan mean *what is on disk*; wanted names are computed and
+   the executor renames/moves (never overwriting). Tags carry a signature → retag only
+   on change (e.g. tracktotal grows). `cover.*` in the album folder is used (user can
+   replace it). Albums are found by source id, so renamed folders are still updated.
+   Verified live: re-running Vol. 1 renamed 8 files to their slice-2 names, retagged
+   13, downloaded 0.
 4. Channel URL → pick which collections to fetch.
 5. MusicBrainz enrichment (album + recording level) with provenance and cover art.
 6. Artist search (channel releases/playlists tab, Topic channel, YT playlist search).

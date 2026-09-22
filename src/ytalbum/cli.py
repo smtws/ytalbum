@@ -9,9 +9,9 @@ import sys
 from pathlib import Path
 
 from . import config as config_mod
-from .download import load_plan, run, save_plan
+from .download import find_plan, load_plan, relocate, run, save_plan
 from .models import AlbumPlan, PlanTrack
-from .plan import build_plan
+from .plan import build_plan, merge_plans
 from .youtube import NotSupported, YouTube
 
 PROV_MARK = {"mb": "MB", "yt_music": "YTM", "yt_title": "title", "playlist": "playlist", "user": "user"}
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--library", type=Path, help="set the library root")
 
     args = p.parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     cfg = config_mod.load()
 
     try:
@@ -90,11 +90,16 @@ def _fetch(args: argparse.Namespace, cfg: config_mod.Config) -> int:
         _print_plan(plan)
         return 0
 
-    album_dir = library / plan.folder
-    existing = load_plan(album_dir)
-    if existing and existing.source_id == plan.source_id:
-        print(f"using the existing plan in {album_dir} (your edits are kept)", file=sys.stderr)
-        plan = existing
+    library = library.expanduser()
+    if found := find_plan(library, plan.source_id):
+        old_dir, existing = found
+        new = [t.video_id for t in plan.tracks if t.video_id not in {x.video_id for x in existing.tracks}]
+        plan = merge_plans(existing, plan)
+        album_dir = relocate(old_dir, plan, library)
+        gone = sum(not t.in_source for t in plan.tracks)
+        print(f"updating {album_dir}: {len(new)} new, {gone} no longer in the source (your edits are kept)", file=sys.stderr)
+    else:
+        album_dir = library / plan.folder
     _print_plan(plan)
 
     if args.cmd == "plan":
@@ -110,20 +115,22 @@ def _download(album_dir: Path, cfg: config_mod.Config) -> int:
         print(f"no plan in {album_dir}", file=sys.stderr)
         return 2
     _warn_js_runtime(cfg)
+    library = album_dir.resolve().parents[1]  # <library>/<artist>/<album>
+    album_dir = relocate(album_dir, plan, library)
     _print_plan(plan)
     return _execute(plan, album_dir, YouTube(cfg))
 
 
 def _execute(plan: AlbumPlan, album_dir: Path, yt: YouTube) -> int:
-    todo = sum(t.state != "done" for t in plan.tracks)
+    todo = sum(t.state != "done" and t.in_source for t in plan.tracks)
     print(f"\ndownloading {todo} of {len(plan.tracks)} tracks into {album_dir}")
 
-    def report(t: PlanTrack) -> None:
-        status = "ok  " if t.state == "done" else "FAIL"
-        print(f"  {status} {t.number:02d} {t.artist} - {t.title}" + (f"  ({t.error})" if t.error else ""))
+    def report(t: PlanTrack, what: str) -> None:
+        status = {"downloaded": "ok  ", "failed": "FAIL"}.get(what, what)
+        print(f"  {status} {t.number:02d} {t.artist} - {t.title}" + (f"  ({t.error})" if t.error and what == "failed" else ""))
 
     run(plan, album_dir, yt, on_track=report)
-    failed = [t for t in plan.tracks if t.state != "done"]
+    failed = [t for t in plan.tracks if t.state != "done" and t.in_source]
     print(f"\n{len(plan.tracks) - len(failed)}/{len(plan.tracks)} tracks done" + (f", {len(failed)} failed — run again to retry" if failed else ""))
     return 1 if failed else 0
 
@@ -145,6 +152,7 @@ def _print_plan(plan: AlbumPlan) -> None:
     for t in plan.tracks:
         marks = f"[{PROV_MARK.get(t.provenance.get('artist'), '?')}/{PROV_MARK.get(t.provenance.get('title'), '?')}]"
         state = "" if t.state == "pending" else f"  <{t.state}>"
+        state += "" if t.in_source else "  <no longer in source>"
         print(f"  {t.number:02d}  {t.artist} - {t.title}  {marks}{state}")
     for s in plan.skipped:
         print(f"  --  skipped: {s['title']}  ({s['reason']})")

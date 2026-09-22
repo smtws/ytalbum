@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 from pathlib import Path
 
 from mutagen.flac import Picture
 from mutagen.oggopus import OggOpus
 
 from .models import AlbumPlan, PlanTrack
+
+PICTURE_KEY = "metadata_block_picture"
 
 
 def image_mime(data: bytes) -> str | None:
@@ -21,9 +25,7 @@ def image_mime(data: bytes) -> str | None:
     return None
 
 
-def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None = None) -> None:
-    audio = OggOpus(path)
-    audio.delete()  # drop whatever yt-dlp/ffmpeg put there
+def build_tags(plan: AlbumPlan, track: PlanTrack) -> dict[str, str]:
     tags = {
         "title": track.title,
         "artist": track.artist,
@@ -41,7 +43,22 @@ def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None 
         tags["compilation"] = "1"
     if max(t.disc for t in plan.tracks) > 1:
         tags["discnumber"] = str(track.disc)
-    for key, value in tags.items():
+    return tags
+
+
+def signature(plan: AlbumPlan, track: PlanTrack, cover: bytes | None) -> str:
+    """Changes whenever the tags or cover that tag_file would write change."""
+    payload = json.dumps(build_tags(plan, track), sort_keys=True).encode()
+    payload += hashlib.sha1(cover or b"").digest()
+    return hashlib.sha1(payload).hexdigest()[:16]
+
+
+def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None = None) -> str:
+    """Replace all tags. Keeps an already embedded cover if no new one is given. Returns the signature."""
+    audio = OggOpus(path)
+    old_picture = (audio.tags or {}).get(PICTURE_KEY)
+    audio.delete()  # drop whatever yt-dlp/ffmpeg or an earlier run put there
+    for key, value in build_tags(plan, track).items():
         audio[key] = [value]
 
     if cover and (mime := image_mime(cover)):
@@ -50,5 +67,8 @@ def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None 
         pic.mime = mime
         pic.desc = "Cover"
         pic.data = cover
-        audio["metadata_block_picture"] = [base64.b64encode(pic.write()).decode("ascii")]
+        audio[PICTURE_KEY] = [base64.b64encode(pic.write()).decode("ascii")]
+    elif old_picture and cover is None:
+        audio[PICTURE_KEY] = old_picture
     audio.save()
+    return signature(plan, track, cover)

@@ -36,7 +36,9 @@ class _YdlLogger:
         log.debug(msg)
 
     def warning(self, msg: str) -> None:
-        log.warning(msg)
+        # yt-dlp warns about things it then recovers from itself ("re-fetching using API");
+        # real failures arrive as DownloadError. Visible with -v.
+        log.info(msg)
 
     def error(self, msg: str) -> None:
         log.debug(msg)  # surfaced via the DownloadError we catch instead

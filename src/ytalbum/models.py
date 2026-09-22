@@ -87,6 +87,10 @@ class PlanTrack:
     disc: int = 1
     state: str = "pending"  # pending | done | failed
     error: str | None = None
+    # values as derived automatically; a field that differs from these was edited by the user
+    auto: dict[str, str] = field(default_factory=dict)
+    in_source: bool = True  # False once the video has left the source playlist
+    tagged: str | None = None  # signature of the tags last written to the file
 
 
 @dataclass
@@ -102,6 +106,7 @@ class AlbumPlan:
     tracks: list[PlanTrack]
     skipped: list[dict[str, str]] = field(default_factory=list)  # {video_id, title, reason}
     provenance: dict[str, str] = field(default_factory=dict)
+    auto: dict[str, object] = field(default_factory=dict)  # album-level twin of PlanTrack.auto
     schema: int = PLAN_SCHEMA
 
     @property
