@@ -590,7 +590,7 @@ function renderTrim() {
   const t = queue[qi];
   const total = trimLimit();
   const show = Boolean(t && total);
-  $("#p-trim").hidden = !show;
+  for (const id of ["#p-keep", "#p-h-start", "#p-h-end"]) $(id).hidden = !show;
   $("#p-trim-actions").hidden = !show;
   if (!show) return;
   const start = t.start || 0;

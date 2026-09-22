@@ -132,11 +132,17 @@ tr.playing td.num .n { color: var(--accent); font-weight: 700; }
 button.icon { padding: .35rem .6rem; line-height: 1; }
 button.big { width: 2.6rem; height: 2.6rem; border-radius: 50%; padding: 0; font-size: 1rem; }
 .p-seek { display: flex; gap: .6rem; align-items: center; font-size: .8rem; }
-.p-bar { flex: 1; display: grid; gap: .15rem; }
-.p-seek input[type=range] { width: 100%; accent-color: var(--accent); }
-.p-trim { position: relative; height: .55rem; border-radius: 4px; background: color-mix(in srgb, var(--ink) 18%, transparent); }
-.p-keep { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--accent); opacity: .55; }
-.p-handle { position: absolute; top: 50%; width: .8rem; height: 1.1rem; margin: -.55rem 0 0 -.4rem; padding: 0; border-radius: 3px;
+/* one line: position, trim region and both handles share the same bar */
+.p-bar { position: relative; flex: 1; height: 1.2rem; }
+.p-line, .p-keep { position: absolute; top: 50%; height: .35rem; transform: translateY(-50%); border-radius: 3px; pointer-events: none; }
+.p-line { left: 0; right: 0; background: color-mix(in srgb, var(--ink) 20%, transparent); }
+.p-keep { background: var(--accent); opacity: .5; }
+.p-seek input[type=range] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; }
+.p-seek input[type=range]::-webkit-slider-runnable-track { background: transparent; height: .35rem; }
+.p-seek input[type=range]::-moz-range-track { background: transparent; height: .35rem; }
+.p-seek input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: .85rem; height: .85rem; margin-top: -.25rem; border-radius: 50%; background: var(--ink); border: 2px solid var(--panel); }
+.p-seek input[type=range]::-moz-range-thumb { width: .85rem; height: .85rem; border-radius: 50%; background: var(--ink); border: 2px solid var(--panel); }
+.p-handle { position: absolute; top: 50%; z-index: 2; width: .55rem; height: 1.1rem; margin: -.55rem 0 0 -.275rem; padding: 0; border-radius: 3px;
   background: var(--accent); border: 1px solid var(--panel); cursor: ew-resize; touch-action: none; }
 .p-handle:focus-visible { outline: 2px solid var(--ink); }
 .p-trim-actions { display: flex; gap: .3rem; align-items: center; }

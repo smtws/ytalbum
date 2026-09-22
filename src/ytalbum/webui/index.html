@@ -47,13 +47,12 @@
     </div>
     <div class="p-seek">
       <span id="p-time" class="muted">0:00</span>
-      <div class="p-bar">
-        <div id="p-trim" class="p-trim" hidden>
-          <div id="p-keep" class="p-keep"></div>
-          <button id="p-h-start" class="p-handle" type="button" title="Drag: where the song starts" aria-label="Trim start"></button>
-          <button id="p-h-end" class="p-handle end" type="button" title="Drag: where the song ends" aria-label="Trim end"></button>
-        </div>
+      <div id="p-trim" class="p-bar">
+        <div class="p-line"></div>
+        <div id="p-keep" class="p-keep" hidden></div>
         <input id="p-pos" type="range" min="0" max="1000" value="0" aria-label="Position">
+        <button id="p-h-start" class="p-handle" type="button" hidden title="Drag: where the song starts" aria-label="Trim start"></button>
+        <button id="p-h-end" class="p-handle end" type="button" hidden title="Drag: where the song ends" aria-label="Trim end"></button>
       </div>
       <span id="p-dur" class="muted">0:00</span>
       <span id="p-trim-actions" class="p-trim-actions" hidden>
