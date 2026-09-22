@@ -1,0 +1,213 @@
+# YT-Downloads v3 — Design
+
+Status: draft, 2026-09-22. Replaces `ARCHITECTURE_PLAN.md` (v2) and the v1 tree in
+`~/YT-Downloads-master`. Nothing from v1/v2 is carried over as code unless listed under
+"Salvage" at the end.
+
+## 1. Goal
+
+Turn a YouTube *collection* into a properly tagged album on disk:
+
+- **Input:** a URL (playlist, channel, video) — or later an artist search.
+- **Output:** `<library_root>/<AlbumArtist>/<Album>/<AlbumArtist> - <Album> - NN - [TrackArtist - ]Title.opus`,
+  tagged (artist, albumartist, album, title, tracknumber/total, disc if >1, date,
+  embedded cover), without re-encoding YouTube's Opus stream.
+- **Re-runnable:** running it again on the same source downloads only what is new
+  (e.g. a growing playlist like My Dark Lullabies Vol. 20).
+
+MusicBrainz is an **enricher, never a gatekeeper.** A collection with no MusicBrainz
+entry is downloaded with the best metadata YouTube offers, which the user can edit before
+downloading.
+
+## 2. The three cases
+
+| Kind | Example | Album-level data | Track-level data |
+|---|---|---|---|
+| `official_album` | YT Music album playlist (`OLAK5uy_…`), Topic channel release | MB release if matched, else YT Music fields | MB tracklist if matched, else per-video `track`/`artist` |
+| `artist_playlist` | an artist's own playlist, a YouTube-only band | playlist title / channel | per-video music fields, else cleaned video title |
+| `compilation` | My Dark Lullabies Vol. 1 (14 bands, 14 uploaders) | albumartist = curator, album = playlist title minus curator prefix (see §2.1) | per track: YT music fields → title parsing → MB recording lookup |
+| (`chapter_album`) | one "full album" video with chapters | video title / channel | chapters |
+
+### 2.1 Compilation naming (decided 2026-09-22)
+
+- **albumartist = the curator** (the playlist's channel, e.g. `My Dark Lullabies`).
+- **album = the playlist title with the curator prefix removed**:
+  `My Dark Lullabies Vol. 1 - Heavy Sleeping` → `Vol. 1 - Heavy Sleeping`.
+- The curator's own titles are inconsistent (`Vol.1`/`Vol. 1`, `-`/`–`), so the album
+  title is normalised to `Vol. N - Title` with an ASCII hyphen, so all 20 volumes look
+  and sort alike. Editable in the preview like any other field.
+- Result: `Library/My Dark Lullabies/Vol. 1 - Heavy Sleeping/My Dark Lullabies - Vol. 1 - Heavy Sleeping - 01 - Enemy Inside - Lullaby.opus`
+  (the `[TrackArtist - ]` part is always present for compilations).
+
+### 2.2 Classification
+
+Classification (deterministic, testable, overridable in the preview):
+1. Playlist id starts with `OLAK5uy_` → `official_album`.
+2. Single video with chapters → `chapter_album`; without chapters → single track.
+3. Playlist whose entries resolve (after step 4.2) to one artist → `artist_playlist`,
+   several artists → `compilation`.
+
+## 3. Verified facts about yt-dlp (checked 2026-09-22, yt-dlp 2026.08.19)
+
+These are the facts v1/v2 got wrong or never knew. Fixtures in `design-fixtures/`.
+
+1. **`playlist_count` on a flat entry is the size of the list the entry was found in,
+   not its own track count.** `ytsearch5:` → every video has 5; `@channel/playlists` →
+   every playlist has 20. This single misread caused the whole v2 fix/break loop
+   ("MB:11 / YT:46"). A playlist's real size is only known after fetching *that* playlist.
+2. **Full (non-flat) extraction of a single video returns music metadata**: `artist`,
+   `artists`, `track`, `album`, `release_year` — not only for Topic channels but also for
+   band channels (Schandmaul "Prinzessin" → album "Anderswelt", 2008). Flat entries don't
+   have these. This is the primary source for compilation tracks.
+3. **Artist-channel "Full Album" playlists are not albums.** Sabaton "Legends (Full Album)"
+   = 11 songs + feat. versions + the full-album video + 3 documentaries (17 entries; the
+   old debug scripts expected 7). Playlists change over time → tests must use saved
+   snapshots, never live data.
+4. **Compilations contain non-songs**: Vol. 1 starts with a 3 s intro card uploaded by the
+   curator. Rule: skip entries < 30 s, and entries whose title equals the playlist title.
+5. **yt-dlp now needs a JS runtime** ("No supported JavaScript runtime… some formats may be
+   missing"). Only deno is enabled by default; node is installed here and needs
+   `js_runtimes` config. Must be solved in setup, or formats (incl. Opus 251) may vanish.
+6. Opus 251 (~148 kbps) exists for normal videos; download it and remux, never transcode.
+7. Channel `/releases` tab exists only for official artist channels; a curator channel
+   (MyDarkLullabies) has only `/playlists`.
+
+## 4. Pipeline
+
+Each stage is a plain function: input → output, no shared mutable state, no network in
+stages 3–5. Stages 1–2 do all YouTube I/O.
+
+```
+URL ─► 1 resolve ─► 2 inspect ─► 3 classify ─► 4 enrich ─► 5 plan ─► [preview/edit] ─► 6 download ─► 7 tag+place
+```
+
+1. **resolve(url)** → `Source` list. Channel URL → its playlists (and releases tab if
+   any) as separate sources. Playlist → one source. Video → one source.
+2. **inspect(source)** → `Collection` with real entries: fetch the playlist itself,
+   then full-extract each entry (bounded concurrency, e.g. 4) to get duration, chapters,
+   music fields, availability. Unavailable/private entries are recorded as `skipped` with
+   a reason — never abort the collection.
+3. **classify(collection)** → kind (§2). Pure.
+4. **enrich(collection)** → proposed metadata, every field carrying its **provenance**
+   (`mb`, `yt_music`, `yt_title`, `playlist`, `user`):
+   - album level: MB release search only for `official_album`/`artist_playlist`;
+     accept only if artist AND title match and track count is within ±1 of songs.
+   - track level: YT music fields → title parser (§5) → optional MB recording lookup.
+5. **plan(collection, metadata)** → `AlbumPlan`: folder, filenames, tags, cover source,
+   list of video ids to download. Written as JSON next to the album
+   (`.ytalbum.json`) — this is also the manifest for incremental re-runs.
+6. **download(plan)** → Opus files, one at a time or small concurrency; each track is
+   tagged and moved into place as soon as it finishes (interrupt-safe, v1's good idea).
+7. **tag(file, track)** — mutagen `OggOpus`, cover as `METADATA_BLOCK_PICTURE`.
+
+The user can stop after step 5 (`--dry-run`), edit the plan, and run step 6–7 from it.
+
+## 5. Title parsing (compilation / YouTube-only)
+
+Order of trust for a track's artist + title:
+1. yt-dlp `artist`/`track` fields (§3.2).
+2. Channel is `<X> - Topic` → artist = X, title = video title.
+3. Channel name ≈ first part of `A - B` title → artist = A.
+4. Parse `A - B` / `A "B"` / `A – B`; strip noise: `(Official Video)`, `(Official Music Video)`,
+   `(Official Lyric Video)`, `(Official Visualizer)`, `[4K UPGRADE]`, `(LYRICS)`,
+   `| <Label>` suffix, `(feat. @handle)` → `feat. Handle`.
+5. Label / lyrics / fan channels (Napalm Records, "Common Sense", "dernachtwaechter")
+   are never the artist. Reverse order ("Lullaby of Woe - Ashley Serena") is only fixable
+   by a lookup (MB recording search both ways) or the user.
+
+Every rule gets a fixture case from `design-fixtures/vol1.json`; the expected results are
+the right-hand column of the table in §8.
+
+## 6. Data model (one shape, versioned)
+
+```
+Collection  { source_url, source_id, kind, title, channel, fetched_at, entries[] }
+Entry       { video_id, position, title, channel, duration, chapters[], music{artist,track,album,year}, status: ok|skipped(reason) }
+Field<T>    { value: T, provenance: mb|yt_music|yt_title|playlist|user }
+AlbumPlan   { schema: 1, album, albumartist, year, cover, folder, tracks[] }
+PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|done|failed(reason) }
+```
+
+- "Entries in the playlist" and "songs on the album" are different numbers and are
+  never stored in the same field.
+- Counters shown in any UI are **computed** from these lists, never maintained by hand.
+- Schema changes bump `schema` and come with a migration of `.ytalbum.json`; there is
+  never more than one live shape.
+
+## 7. Tech choices
+
+- Python 3.14, `uv`-managed venv, `pyproject.toml` with pinned deps
+  (`yt-dlp`, `mutagen`, `httpx`; nothing else until needed).
+- yt-dlp **Python API** (`YoutubeDL.extract_info`) in a thread pool with a semaphore —
+  not dozens of CLI subprocesses. Timeouts on everything.
+- No cookies by default. Optional exported `cookies.txt`; never `--cookies-from-browser`
+  on every call (v2 decrypted Chrome's DB ~50× per search).
+- MusicBrainz: real UA with contact, one async-safe limiter (≤1 req/s, lock + monotonic
+  clock), retry on 503, Lucene escaping; disk cache (sqlite) for hits; misses cached
+  short (1 h), errors not cached.
+- ffmpeg only for remux (`-c:a copy`) and chapter splitting.
+- Config: one TOML file (`~/.config/ytalbum/config.toml`), overridable per run by CLI
+  flags. Holds `library_root` (**configurable, no default path baked into code**; the
+  first run asks, or takes `--library`), filename template, compilation naming rules,
+  MB on/off, concurrency, JS runtime.
+- UI: **CLI first** (`ytalbum fetch <url> [--dry-run] [--edit]`). Web/PWA later on top
+  of the same library — the library never knows about the UI.
+
+## 8. Test cases (all offline from saved fixtures, plus one opt-in live smoke test)
+
+| Fixture | Asserts |
+|---|---|
+| `tab_playlists.json` (@MyDarkLullabies/playlists) | channel → 20 sources; flat `playlist_count` is never used as a track count |
+| `vol1.json` (Vol. 1 - Heavy Sleeping) | kind = compilation; intro card skipped → 13 tracks; parsed artists: Enemy Inside, Dominum feat. Feuerschwanz, Mono Inc(.), Schandmaul, Subway to Sally, Lacrimosa, Letzte Instanz, Mantus, Erben der Schöpfung, Disturbed, Ashley Serena*, Lord of the Lost, Tungsten (*needs lookup) |
+| `legends.json` (Sabaton channel "Full Album" playlist) | kind = artist_playlist, not official_album; MB release "Legends" must NOT be auto-accepted (17 entries vs 11 songs) |
+| to capture: an `OLAK5uy_` album | kind = official_album; MB match accepted; tracklist from MB |
+| to capture: a chaptered full-album video | chapter split, titles from chapters |
+| to capture: Carolus Rex | release-country preference picks the international edition |
+| to capture: albums titled "1984" / "1918" | normalisation never strips the year-like title |
+
+## 9. Vertical slices (each ends with something usable)
+
+1. **Paste playlist URL → tagged album folder** (any kind, metadata from YouTube only),
+   plus `--dry-run` plan output. Includes JS-runtime setup (§3.5).
+2. Compilation parsing (§5) + intro skipping; Vol. 1 comes out right.
+3. Incremental re-run from `.ytalbum.json` (Vol. 20 grows → only new tracks).
+4. Channel URL → pick which collections to fetch.
+5. MusicBrainz enrichment (album + recording level) with provenance and cover art.
+6. Artist search (channel releases/playlists tab, Topic channel, YT playlist search).
+7. Web UI / PWA on the library.
+8. Intro/outro trimming — **wanted, but only once slices 1–5 are stable(ish).** Must be
+   non-destructive (keep the original, or store trim points in the plan) and never on
+   by default for a track until it has been shown to work on real fixtures.
+
+## 10. Rules for whoever implements this (lessons from the v2 loop)
+
+- **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a
+  card, trace it to the extractor before touching dedup/merge/display code.
+- **Every bug gets a fixture test first** (captured JSON, offline), then the fix.
+  No ad-hoc `debug_*.py` / `test_*.py` in the repo root, no live-only "tests",
+  no inspecting a running server by constructing a second instance in another process.
+- **Never tune for one artist.** Two failures in a row on the same symptom → stop and
+  re-examine the assumption, don't add a third layer.
+- Commit everything that runs (v2's whole frontend was never committed).
+- No hardcoded `/home/tordt/…` paths or ports scattered across files; one config.
+
+## 11. Salvage from v1/v2 (as reference, rewritten)
+
+- Filename convention and tag rules (albumartist vs artist, disc only if >1) — v1
+  `downloader.py:1282`, `audio_tagger.py:186-244`.
+- Per-track tag-on-arrival (v1 `downloader.py:748-785`).
+- Release-country priority table (v2 `models.py:120-135`); MB track count = sum of
+  `media[].track-count` (v2 `musicbrainz_service.py:316`).
+- YouTube id extraction (v2 `youtube_deduplicator.py:22-67`), extended for
+  `music.youtube.com` and `OLAK5uy_`.
+- Cover Art Archive lookup (v2 `musicbrainz_service.py:358-419`).
+- Title-suffix lists from v2 `normalization_service.py`, **without** the year regex.
+- Negative keywords for search ranking (karaoke, cover, reaction, …; v1
+  `advanced_search.py:678`).
+
+## 12. Decisions (2026-09-22)
+
+- Compilation albumartist = curator; album = playlist title minus curator prefix (§2.1).
+- Library root is configurable (§7).
+- v3 lives on a **new branch** in this repo (`github.com/Tordt/YT-Downloads`).
+- Intro/outro trimming: yes, later — after the rest is stable (slice 8).
