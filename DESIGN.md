@@ -64,7 +64,8 @@ These are the facts v1/v2 got wrong or never knew. Fixtures in `design-fixtures/
    old debug scripts expected 7). Playlists change over time → tests must use saved
    snapshots, never live data.
 4. **Compilations contain non-songs**: Vol. 1 starts with a 3 s intro card uploaded by the
-   curator. Rule: skip entries < 30 s, and entries whose title equals the playlist title.
+   curator. Rule: skip entries < 30 s. (NOT "title equals the playlist title": that also
+   matches Sabaton's 45-min "Legends (Full Album)" video inside the Legends playlist.)
 5. **yt-dlp now needs a JS runtime** ("No supported JavaScript runtime… some formats may be
    missing"). Only deno is enabled by default; node is installed here and needs
    `js_runtimes` config. Must be solved in setup, or formats (incl. Opus 251) may vanish.
@@ -167,8 +168,13 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
 
 ## 9. Vertical slices (each ends with something usable)
 
-1. **Paste playlist URL → tagged album folder** (any kind, metadata from YouTube only),
-   plus `--dry-run` plan output. Includes JS-runtime setup (§3.5).
+1. ✅ **Paste playlist URL → tagged album folder** (any kind, metadata from YouTube only),
+   plus `--dry-run` plan output. Includes JS-runtime setup (§3.5). *Done 2026-09-22:*
+   Vol. 1 downloads 13/13 (Opus 251 copied, 147 kbps), tags + 1280×720 cover embedded,
+   resume and per-track retry (YouTube sporadically answers 403) verified live.
+   Known gaps, left for their slices: raw video titles for 8 of 13 Vol. 1 tracks
+   (slice 2), YouTube covers are 16:9 not square, a single video is filed as a
+   1-track "album" under its YT Music album name.
 2. Compilation parsing (§5) + intro skipping; Vol. 1 comes out right.
 3. Incremental re-run from `.ytalbum.json` (Vol. 20 grows → only new tracks).
 4. Channel URL → pick which collections to fetch.

@@ -1,0 +1,141 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from ytalbum.models import AlbumPlan, Collection, Kind, Provenance
+from ytalbum.plan import build_plan, classify, compilation_album_title, safe_name, track_filename
+from ytalbum.youtube import entry_from_info
+
+FIXTURES = Path(__file__).parent.parent / "design-fixtures"
+
+
+def load_collection(name: str) -> Collection:
+    return Collection.from_dict(json.loads((FIXTURES / name).read_text()))
+
+
+def flat_collection(name: str) -> Collection:
+    """A Collection from a flat `yt-dlp -J` dump (no per-video music fields)."""
+    d = json.loads((FIXTURES / name).read_text())
+    return Collection(
+        source_url=d["webpage_url"],
+        source_id=d["id"],
+        is_playlist=True,
+        title=d["title"],
+        channel=d["channel"],
+        thumbnail=None,
+        fetched_at="2026-09-22T00:00:00+00:00",
+        entries=[entry_from_info(e, i) for i, e in enumerate(d["entries"], 1)],
+    )
+
+
+@pytest.fixture
+def vol1() -> Collection:
+    return load_collection("vol1_collection.json")
+
+
+def test_vol1_is_a_compilation_by_the_curator(vol1):
+    plan = build_plan(vol1)
+    assert plan.kind == Kind.COMPILATION
+    assert plan.albumartist == "My Dark Lullabies"
+    assert plan.album == "Vol. 1 - Heavy Sleeping"
+    assert plan.folder == "My Dark Lullabies/Vol. 1 - Heavy Sleeping"
+    assert plan.provenance == {"albumartist": Provenance.PLAYLIST, "album": Provenance.PLAYLIST}
+
+
+def test_vol1_skips_the_intro_card(vol1):
+    plan = build_plan(vol1)
+    assert len(vol1.entries) == 14
+    assert len(plan.tracks) == 13
+    assert [s["video_id"] for s in plan.skipped] == ["0gr0bwQgTSo"]
+    assert [t.number for t in plan.tracks] == list(range(1, 14))
+
+
+def test_vol1_uses_youtube_music_fields_where_present(vol1):
+    by_id = {t.video_id: t for t in build_plan(vol1).tracks}
+    schandmaul = by_id["Lkrs1eggmBg"]
+    assert (schandmaul.artist, schandmaul.title) == ("Schandmaul", "Prinzessin")
+    assert schandmaul.provenance == {"artist": Provenance.YT_MUSIC, "title": Provenance.YT_MUSIC}
+    mantus = by_id["ON7dZX0HPoI"]
+    assert (mantus.artist, mantus.title) == ("Mantus", "Ein Hauch von Wirklichkeit")
+
+
+def test_compilation_filenames_always_carry_the_track_artist(vol1):
+    track = build_plan(vol1).tracks[3]
+    assert track.filename == "My Dark Lullabies - Vol. 1 - Heavy Sleeping - 04 - Schandmaul - Prinzessin.opus"
+
+
+def test_all_twenty_volume_titles_normalise():
+    d = json.loads((FIXTURES / "tab_playlists.json").read_text())
+    titles = [compilation_album_title(e["title"], "My Dark Lullabies") for e in d["entries"]]
+    assert len(titles) == 20
+    assert titles[-1] == "Vol. 1 - Heavy Sleeping"
+    assert "Vol. 4 - Haunted Nursery" in titles  # source uses an en dash
+    assert "Vol. 17 - 25 Shadows Later" in titles  # source has no space after "Vol."
+    assert all(t.startswith("Vol. ") for t in titles)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["My Dark Lullabies Vol.1 - Heavy Sleeping", "MyDarkLullabies vol 1: Heavy Sleeping", "my dark lullabies – Vol. 1 – Heavy Sleeping"],
+)
+def test_curator_prefix_is_matched_by_words(raw):
+    assert compilation_album_title(raw, "My Dark Lullabies") == "Vol. 1 - Heavy Sleeping"
+
+
+def test_title_without_curator_prefix_is_kept():
+    assert compilation_album_title("Best of Goth 2024", "My Dark Lullabies") == "Best of Goth 2024"
+
+
+def test_artist_full_album_playlist_is_not_an_official_album():
+    legends = flat_collection("legends.json")
+    assert classify(legends) == Kind.ARTIST_PLAYLIST
+    plan = build_plan(legends)
+    assert plan.albumartist == "Sabaton"
+    assert plan.album == "Legends (Full Album)"  # "SABATON - " prefix stripped
+    # the 17-entry playlist is kept as-is for now; recognising the 11 real songs is MB's job (slice 5)
+    assert len(plan.tracks) == 17
+
+
+def test_olak_playlists_are_official_albums(vol1):
+    vol1.source_id = "OLAK5uy_example"
+    assert classify(vol1) == Kind.OFFICIAL_ALBUM
+
+
+def test_single_video_is_a_single(vol1):
+    vol1.is_playlist = False
+    assert classify(vol1) == Kind.SINGLE
+
+
+def test_track_artist_omitted_when_same_as_albumartist():
+    assert track_filename("Sabaton", "Legends", 3, None, "Templars") == "Sabaton - Legends - 03 - Templars.opus"
+
+
+@pytest.mark.parametrize(
+    ("raw", "safe"),
+    [
+        ("AC/DC", "AC-DC"),
+        ('ENEMY INSIDE - "Lullaby"', "ENEMY INSIDE - 'Lullaby'"),
+        ("Who? What: Why*", "Who What - Why"),
+        ("  trailing dots... ", "trailing dots"),
+        ("", "_"),
+    ],
+)
+def test_safe_name(raw, safe):
+    assert safe_name(raw) == safe
+
+
+def test_safe_name_limits_bytes():
+    assert len(safe_name("ö" * 500).encode()) <= 240
+
+
+def test_plan_round_trips_through_json(vol1):
+    plan = build_plan(vol1)
+    again = AlbumPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+    assert again == plan
+
+
+def test_unknown_plan_schema_is_refused(vol1):
+    d = build_plan(vol1).to_dict() | {"schema": 99}
+    with pytest.raises(ValueError, match="schema"):
+        AlbumPlan.from_dict(d)

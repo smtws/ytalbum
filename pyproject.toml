@@ -1,0 +1,25 @@
+[project]
+name = "ytalbum"
+version = "0.1.0"
+description = "Turn YouTube playlists into properly tagged Opus albums"
+authors = [
+    { name = "Tordt", email = "info@smt-webservices.de" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "httpx>=0.28.1",
+    "mutagen>=1.48.1",
+    "yt-dlp[default]>=2026.8.19",
+]
+
+[project.scripts]
+ytalbum = "ytalbum:main"
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
