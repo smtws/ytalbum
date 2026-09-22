@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,7 @@ from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, PlanTrack, Provenance, SourceRef
 from .plan import build_plan, merge_plans, refresh_derived
 from .search import SearchResult, search_artist
-from .youtube import BOT_CHECK, YouTube, channel_base_url
+from .youtube import BOT_CHECK, Cancelled, YouTube, channel_base_url
 
 log = logging.getLogger(__name__)
 
@@ -50,12 +51,19 @@ class Service:
         on_track: Callable[[PlanTrack, str], None] = lambda t, what: None,
         yt: YouTube | None = None,
         mb: MusicBrainz | None = None,
+        cancel: threading.Event | None = None,
     ) -> None:
         self.cfg = cfg
         self.library = library.expanduser() if library else None
         self.log, self.on_plan, self.on_track = log, on_plan, on_track
-        self.yt = yt or YouTube(cfg)
+        self.cancel = cancel
+        self.yt = yt or YouTube(cfg, cancel)
         self._mb = mb
+
+    def check(self) -> None:
+        """Stop here if the job was cancelled (only called where stopping is safe)."""
+        if self.cancel is not None and self.cancel.is_set():
+            raise Cancelled()
 
     @property
     def mb(self) -> MusicBrainz | None:
@@ -77,8 +85,10 @@ class Service:
         dump: Path | None = None,
     ) -> Outcome:
         """Read a playlist/video, enrich it, merge with the library, then (unless told not to) download."""
+        self.check()
         self.log(f"reading {url} …")
         collection = self.yt.fetch(url)
+        self.check()
         if dump:
             dump.write_text(json.dumps(collection.to_dict(), indent=2, ensure_ascii=False) + "\n")
         if unreadable := collection.unreadable:
@@ -93,7 +103,7 @@ class Service:
 
         plan = build_plan(collection)
         if mb := self.mb:
-            stats = enrich(plan, mb, progress=lambda m: self.log(f"  {m}"))
+            stats = enrich(plan, mb, progress=lambda m: (self.check(), self.log(f"  {m}")))
             self.log("MusicBrainz: " + ("release matched" if stats["release"] else f"{stats['tracks']}/{stats['looked_up']} tracks matched"))
 
         if dry or self.library is None:
@@ -116,6 +126,7 @@ class Service:
                 return Outcome("reported", plan)
             album_dir = self.library / plan.folder
 
+        self.check()  # last point before anything on disk changes
         self.on_plan(plan)
         if plan_only:
             save_plan(plan, album_dir)
@@ -125,7 +136,7 @@ class Service:
     def execute(self, plan: AlbumPlan, album_dir: Path) -> Outcome:
         todo = sum(t.state != "done" and t.in_source for t in plan.tracks)
         self.log(f"downloading {todo} of {len(plan.tracks)} tracks into {album_dir}")
-        run(plan, album_dir, self.yt, on_track=self.on_track)
+        run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check)
         failed = [t for t in plan.tracks if t.state != "done" and t.in_source]
         self.log(f"{len(plan.tracks) - len(failed)}/{len(plan.tracks)} tracks done" + (f", {len(failed)} not yet — run again to retry" if failed else ""))
         if any(t.error == BOT_CHECK for t in failed):
@@ -170,6 +181,8 @@ class Service:
     def _guarded(self, action: Callable[[], Outcome]) -> Outcome:
         try:
             return action()
+        except Cancelled:
+            raise  # the user's cancel ends the whole job, not just this source
         except Exception as e:  # one broken source must not stop the others
             log.debug("source failed", exc_info=True)
             self.log(f"  failed: {e}")

@@ -71,13 +71,13 @@ function settleJobs() {
     mine.delete(id);
     if (info.button?.isConnected) setWorking(info.button, false);
     const last = (job.log || []).filter((l) => !l.startsWith("  ")).at(-1) || "";
-    const text = { done: "✓", failed: "✗", blocked: "⏸" }[job.state] + ` ${info.label}` + (last ? ` — ${last}` : "");
+    const text = { done: "✓", failed: "✗", blocked: "⏸", cancelled: "⏹" }[job.state] + ` ${info.label}` + (last ? ` — ${last}` : "");
     toast(text, job.state);
   }
 }
 
 function toast(text, kind = "done") {
-  const el = h("div", { class: `toast ${kind}`, role: "status" }, text);
+  const el = h("div", { class: `toast ${kind === "cancelled" ? "blocked" : kind}`, role: "status" }, text);
   $("#toasts").append(el);
   setTimeout(() => el.classList.add("gone"), kind === "done" ? 5000 : 9000);
   setTimeout(() => el.remove(), kind === "done" ? 5600 : 9600);
@@ -92,7 +92,8 @@ function renderActivity() {
     const queued = state.jobs.filter((j) => j.state === "queued").length;
     el.replaceChildren(h("span", { class: "dot" }), h("strong", {}, running.label),
       h("span", { class: "muted" }, " ", (running.log || []).at(-1) || "starting…"),
-      queued > (running.state === "queued" ? 1 : 0) ? h("span", { class: "badge" }, `+${queued - (running.state === "queued" ? 1 : 0)} queued`) : null);
+      queued > (running.state === "queued" ? 1 : 0) ? h("span", { class: "badge" }, `+${queued - (running.state === "queued" ? 1 : 0)} queued`) : null,
+      cancelButton(running));
   }
 }
 
@@ -304,11 +305,22 @@ function pickView(r, close) {
 
 // -- jobs ------------------------------------------------------------------------------
 
+function cancelButton(job) {
+  if (!["queued", "running"].includes(job.state)) return null;
+  const asked = (job.log || []).at(-1) === "cancel requested…";
+  return h("button", { class: "quiet cancel", type: "button", disabled: asked, title: "Stop after the current step; finished tracks are kept",
+    onclick: async (e) => {
+      e.stopPropagation();
+      setWorking(e.currentTarget, true);
+      try { await api("/api/cancel", { id: job.id }); schedulePoll(200); } catch (err) { toast(err.message, "failed"); }
+    } }, asked ? "Stopping…" : "Cancel");
+}
+
 function renderJobs() {
   const recent = state.jobs.filter((j) => ["queued", "running"].includes(j.state) || Date.now() / 1000 - (j.finished || 0) < 120).slice(0, 4);
   $("#jobs").replaceChildren(...recent.map((j) =>
     h("div", { class: `job ${j.state}`, "data-id": j.id },
-      h("div", {}, h("strong", {}, j.label), " ", h("span", { class: "badge" }, j.state), " ",
+      h("div", {}, h("strong", {}, j.label), " ", h("span", { class: "badge" }, j.state), " ", cancelButton(j), " ",
         h("button", { class: "quiet", type: "button", onclick: () => { openLog = openLog === j.id ? null : j.id; poll(); } }, openLog === j.id ? "hide log" : "log")),
       openLog === j.id ? h("pre", { id: `log-${j.id}` }) : h("div", { class: "line" }, (j.log || []).at(-1) || ""))));
 }

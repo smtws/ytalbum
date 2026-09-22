@@ -93,14 +93,19 @@ def run(
     album_dir: Path,
     yt: YouTube,
     on_track: Callable[[PlanTrack, str], None] = lambda t, what: None,
+    check: Callable[[], None] = lambda: None,
 ) -> AlbumPlan:
-    """Download, tag and place every track that is not done yet; rename/retag finished ones."""
+    """Download, tag and place every track that is not done yet; rename/retag finished ones.
+
+    `check()` is called between tracks and may raise to stop (cancel); the plan is always saved.
+    """
     refresh_derived(plan)
     save_plan(plan, album_dir)
     cover = _cover(plan, album_dir, yt)
     parts = album_dir / PARTS_DIR
 
     for track in plan.tracks:
+        check()
         wanted = wanted_filename(plan, track)
         if track.state == "done" and track.filename != wanted:
             old, new = album_dir / track.filename, album_dir / wanted

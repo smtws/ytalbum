@@ -62,7 +62,9 @@ td.src { width: 7rem; white-space: nowrap; }
 .job.running, .job.queued { border-left-color: var(--accent); }
 .job.done { border-left-color: var(--ok); }
 .job.failed { border-left-color: var(--bad); }
-.job.blocked { border-left-color: var(--warn); }
+.job.blocked, .job.cancelled { border-left-color: var(--warn); }
+button.cancel { padding: .1rem .55rem; font-size: .78rem; border-color: var(--bad); color: var(--bad); }
+.activity button.cancel { margin-left: auto; flex: none; }
 .job > div:first-child { display: flex; gap: .4rem; align-items: center; min-width: 0; }
 .job strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .job .line { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

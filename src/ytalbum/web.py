@@ -35,6 +35,7 @@ from .config import Config
 from .download import COVER_STEM, iter_plans
 from .models import AlbumPlan
 from .service import Outcome, Service, _inside, channel_base_url
+from .youtube import Cancelled
 from .tag import image_mime
 
 log = logging.getLogger(__name__)
@@ -59,8 +60,9 @@ class Job:
     id: int
     kind: str
     label: str
-    state: str = "queued"  # queued | running | done | failed | blocked
+    state: str = "queued"  # queued | running | done | failed | blocked | cancelled
     log: list[str] = field(default_factory=list)
+    cancel: threading.Event = field(default_factory=threading.Event, repr=False)
     result: Any = None
     created: float = field(default_factory=time.time)
     finished: float | None = None
@@ -99,9 +101,21 @@ class Jobs:
     def busy(self) -> bool:
         return any(j.state in ("queued", "running") for j in self._jobs.values())
 
+    def cancel(self, job_id: int) -> Job | None:
+        """Queued: will never run. Running: stops at the next safe point."""
+        job = self._jobs.get(job_id)
+        if job and job.state in ("queued", "running"):
+            job.cancel.set()
+            job.log.append("cancel requested…" if job.state == "running" else "cancelled before it started")
+            if job.state == "queued":
+                job.state, job.finished = "cancelled", time.time()
+        return job
+
     def _work(self) -> None:
         while True:
             job, action = self._queue.get()
+            if job.cancel.is_set():
+                continue  # cancelled while queued
             job.state = "running"
             try:
                 result = action(self.make_service(job))
@@ -113,6 +127,9 @@ class Jobs:
                     job.state = "failed"
                 else:
                     job.state = "done"
+            except Cancelled:
+                job.log.append("cancelled — everything finished so far is kept")
+                job.state = "cancelled"
             except Exception as e:  # a job must never kill the worker
                 log.debug("job %s failed", job.id, exc_info=True)
                 job.log.append(f"error: {e}")
@@ -139,7 +156,7 @@ class App:
     def __init__(self, cfg: Config, library: Path, host: str = "127.0.0.1", port: int = 8765, service_factory=None) -> None:
         self.cfg, self.library, self.host, self.port = cfg, library.expanduser(), host, port
         self.last_request = time.monotonic()
-        self._service_factory = service_factory or (lambda job: Service(cfg, self.library, log=lambda s: _append(job, s), on_track=lambda t, what: _append(job, f"{what}: {t.number:02d} {t.artist} - {t.title}")))
+        self._service_factory = service_factory or (lambda job: Service(cfg, self.library, log=lambda s: _append(job, s), on_track=lambda t, what: _append(job, f"{what}: {t.number:02d} {t.artist} - {t.title}"), cancel=job.cancel))
         self.jobs = Jobs(self._service_factory)
 
     # read side
@@ -425,6 +442,9 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
             body = body if isinstance(body, dict) else {}
+            if url.path == "/api/cancel":
+                job = self.app.jobs.cancel(int(body.get("id", 0)))
+                return self._json(job.summary()) if job else self._error(HTTPStatus.NOT_FOUND, "no such job")
             if url.path == "/api/settings":
                 try:
                     return self._json(self.app.save_settings(body))

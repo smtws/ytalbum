@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError
+from yt_dlp.utils import DownloadCancelled, DownloadError
 
 from . import pot as pot_server
 from .config import Config
@@ -32,6 +32,10 @@ log = logging.getLogger(__name__)
 
 class NotSupported(Exception):
     """The URL is valid but its kind is not handled yet."""
+
+
+class Cancelled(Exception):
+    """The user cancelled the job; raised only at points where stopping leaves nothing half-done."""
 
 
 BOT_CHECK = "YouTube wants a sign-in (bot check): wait a while, or configure cookies"
@@ -82,8 +86,9 @@ class _YdlLogger:
 
 
 class YouTube:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, cancel: threading.Event | None = None) -> None:
         self.cfg = cfg
+        self.cancel = cancel
         self._pot_checked = False
         self._pot_lock = threading.Lock()
         self._last_beat = 0.0
@@ -100,6 +105,16 @@ class YouTube:
             home, node = self._pot_home(), self.cfg.resolved_node()
             if home and node:
                 pot_server.ensure_server(home, node, self.cfg.pot_port, self.cfg.pot_idle)
+
+    def check(self) -> None:
+        if self.cancel is not None and self.cancel.is_set():
+            raise Cancelled()
+
+    def _progress(self, *_: Any) -> None:
+        """yt-dlp progress hook: abort a running download on cancel, keep the token server alive."""
+        if self.cancel is not None and self.cancel.is_set():
+            raise DownloadCancelled("cancelled")
+        self._beat()
 
     def _beat(self, *_: Any) -> None:
         """Keep the token server alive while we work (throttled)."""
@@ -118,6 +133,7 @@ class YouTube:
             "fragment_retries": 3,
             "extractor_retries": 2,
             "sleep_interval_requests": 0.5,  # be gentle; YouTube answers bursts with a bot check
+            "progress_hooks": [self._progress],
         }
         if self.cfg.cookies_file:
             params["cookiefile"] = str(self.cfg.cookies_file)
@@ -132,7 +148,6 @@ class YouTube:
             args: dict[str, dict[str, list[str]]] = {"youtubepot-bgutilscript": {"server_home": [str(pot)]}}
             if self.cfg.pot_mode == "server":  # the plugin prefers the server, falls back to the script
                 args["youtubepot-bgutilhttp"] = {"base_url": [pot_server.base_url(self.cfg.pot_port)]}
-                params["progress_hooks"] = [self._beat]
                 self._beat()
             params["extractor_args"] = args
         params.update(extra)
@@ -239,6 +254,7 @@ class YouTube:
                 transient=is_transient(raw),
             )
 
+        self.check()
         if blocked is not None and blocked.is_set():
             return failed(BOT_CHECK, BOT_CHECK)
         try:
@@ -269,6 +285,8 @@ class YouTube:
         try:
             with YoutubeDL(params) as ydl:
                 ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+        except DownloadCancelled as e:
+            raise Cancelled() from e
         except DownloadError as e:
             short = _short_error(e)
             raise DownloadError(short) if short.startswith("no audio-only") else e
