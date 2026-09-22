@@ -65,6 +65,7 @@ class Job:
     id: int
     kind: str
     label: str
+    lane: str = "write"  # "write" changes the library and runs alone; "read" runs beside it
     state: str = "queued"  # queued | running | done | failed | blocked | cancelled
     log: list[str] = field(default_factory=list)
     cancel: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -73,7 +74,8 @@ class Job:
     finished: float | None = None
 
     def summary(self, full: bool = False) -> dict[str, Any]:
-        d = {"id": self.id, "kind": self.kind, "label": self.label, "state": self.state, "created": self.created, "finished": self.finished}
+        d = {"id": self.id, "kind": self.kind, "label": self.label, "state": self.state, "lane": self.lane,
+             "created": self.created, "finished": self.finished}
         d["log"] = self.log if full else self.log[-3:]
         if full:
             d["result"] = self.result
@@ -81,19 +83,24 @@ class Job:
 
 
 class Jobs:
+    # jobs that change the library run one at a time; reading jobs (search, preview,
+    # channel listing) get their own lane so a search never waits for a download
+    READ_ONLY = ("search", "preview", "channel")
+
     def __init__(self, make_service: Callable[[Job], Service]) -> None:
         self.make_service = make_service
         self._jobs: dict[int, Job] = {}
         self._ids = itertools.count(1)
-        self._queue: queue.Queue[tuple[Job, Callable[[Service], Any]]] = queue.Queue()
+        self._queues: dict[str, queue.Queue[tuple[Job, Callable[[Service], Any]]]] = {"write": queue.Queue(), "read": queue.Queue()}
         self._lock = threading.Lock()
-        threading.Thread(target=self._work, name="ytalbum-jobs", daemon=True).start()
+        for lane in self._queues:
+            threading.Thread(target=self._work, args=(lane,), name=f"ytalbum-jobs-{lane}", daemon=True).start()
 
     def submit(self, kind: str, label: str, action: Callable[[Service], Any]) -> Job:
-        job = Job(next(self._ids), kind, label)
+        job = Job(next(self._ids), kind, label, lane="read" if kind in self.READ_ONLY else "write")
         with self._lock:
             self._jobs[job.id] = job
-        self._queue.put((job, action))
+        self._queues[job.lane].put((job, action))
         return job
 
     def get(self, job_id: int) -> Job | None:
@@ -103,8 +110,9 @@ class Jobs:
         with self._lock:
             return sorted(self._jobs.values(), key=lambda j: j.id, reverse=True)[:n]
 
-    def busy(self) -> bool:
-        return any(j.state in ("queued", "running") for j in self._jobs.values())
+    def busy(self, lane: str | None = None) -> bool:
+        """Something is queued or running (by default in any lane)."""
+        return any(j.state in ("queued", "running") and lane in (None, j.lane) for j in self._jobs.values())
 
     def cancel(self, job_id: int) -> Job | None:
         """Queued: will never run. Running: stops at the next safe point."""
@@ -116,9 +124,9 @@ class Jobs:
                 job.state, job.finished = "cancelled", time.time()
         return job
 
-    def _work(self) -> None:
+    def _work(self, lane: str) -> None:
         while True:
-            job, action = self._queue.get()
+            job, action = self._queues[lane].get()
             if job.cancel.is_set():
                 continue  # cancelled while queued
             job.state = "running"
@@ -354,6 +362,7 @@ class App:
             "albums": self.albums(),
             "jobs": [j.summary() for j in self.jobs.recent()],
             "busy": self.jobs.busy(),
+            "busy_write": self.jobs.busy("write"),
             "musicbrainz": self.cfg.musicbrainz,
         }
 

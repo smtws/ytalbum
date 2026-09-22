@@ -98,7 +98,8 @@ def busy(port: int | None = None) -> bool:
     """True if the running web UI has a queued or running job (nothing to interrupt if not)."""
     try:
         r = httpx.get(f"http://127.0.0.1:{port or installed_port()}/api/state", timeout=2)
-        return bool(r.json().get("busy"))
+        state = r.json()
+        return bool(state.get("busy_write", state.get("busy")))  # a running search is cheap to lose
     except (httpx.HTTPError, ValueError):
         return False
 

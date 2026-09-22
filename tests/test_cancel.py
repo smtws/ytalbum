@@ -87,3 +87,38 @@ def test_queued_job_never_runs_and_running_job_reports_cancelled(tmp_path):
     assert wait(first).state == "cancelled"
     time.sleep(0.1)
     assert ran == [] and second.state == "cancelled"
+
+
+def test_a_search_runs_while_a_download_is_running(tmp_path):
+    """The write lane is serialized; reading jobs must not wait for it."""
+    downloading = threading.Event()
+    release = threading.Event()
+    jobs = Jobs(lambda job: Service(Config(musicbrainz=False), tmp_path, yt=object(), cancel=job.cancel))
+
+    def long_download(service):
+        downloading.set()
+        release.wait(5)
+
+    fetch = jobs.submit("fetch", "download", long_download)
+    downloading.wait(2)
+    search = jobs.submit("search", "search", lambda s: "results")
+    wait(search, timeout=3)
+    assert (search.state, search.result) == ("done", "results")
+    assert fetch.state == "running"  # still going, untouched
+    assert jobs.busy("write") and not jobs.busy("read")
+    release.set()
+    assert wait(fetch).state == "done"
+
+
+def test_saving_waits_for_the_running_download(tmp_path):
+    order = []
+    release = threading.Event()
+    jobs = Jobs(lambda job: Service(Config(musicbrainz=False), tmp_path, yt=object(), cancel=job.cancel))
+    first = jobs.submit("fetch", "download", lambda s: (order.append("download"), release.wait(5)))
+    time.sleep(0.05)
+    second = jobs.submit("edit", "save", lambda s: order.append("save"))
+    time.sleep(0.2)
+    assert order == ["download"]  # the save waits: both change the library
+    release.set()
+    wait(first), wait(second)
+    assert order == ["download", "save"]
