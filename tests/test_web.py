@@ -149,3 +149,20 @@ def test_audio_streams_with_ranges_and_only_known_tracks(server):
     assert c.get(url, headers={"Range": f"bytes={len(full.content) + 10}-"}).status_code == 416
     assert c.get(f"/api/audio?id={plan['source_id']}&v=../../etc/passwd").status_code == 404
     assert c.get("/api/audio?id=nope&v=x").status_code == 404
+
+
+def test_settings_validate_then_apply(server, monkeypatch, tmp_path):
+    app, c = server
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    st = c.get("/api/state").json()["settings"]
+    assert {"library", "musicbrainz", "pot_mode", "pot_idle_minutes", "concurrency", "info"} <= set(st)
+    assert c.post("/api/settings", json={"concurrency": 9}, headers=HDR).status_code == 400
+    assert c.post("/api/settings", json={"pot_mode": "turbo"}, headers=HDR).status_code == 400
+    assert c.post("/api/settings", json={"library": "relative/path"}, headers=HDR).status_code == 400
+    new_lib = tmp_path / "Music"
+    r = c.post("/api/settings", json={"concurrency": 1, "musicbrainz": False, "pot_idle_minutes": 10, "library": str(new_lib)}, headers=HDR)
+    assert r.status_code == 200
+    assert (app.cfg.concurrency, app.cfg.musicbrainz, app.cfg.pot_idle) == (1, False, 600)
+    assert new_lib.is_dir() and app.library == new_lib and c.get("/api/state").json()["albums"] == []
+    text = (tmp_path / "cfg" / "ytalbum" / "config.toml").read_text()
+    assert "concurrency = 1" in text and "musicbrainz = false" in text and f'library_root = "{new_lib}"' in text

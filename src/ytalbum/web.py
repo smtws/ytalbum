@@ -187,14 +187,65 @@ class App:
         return path if path and path.is_file() else None
 
     def settings(self) -> dict[str, Any]:
-        return {"cookies_from_browser": self.cfg.cookies_from_browser, "cookies_file": str(self.cfg.cookies_file or ""), "browsers": config_mod.detect_browsers()}
+        runtime = self.cfg.resolved_js_runtime()
+        pot = self.cfg.resolved_pot_provider()
+        return {
+            "library": str(self.library),
+            "cookies_from_browser": self.cfg.cookies_from_browser,
+            "cookies_file": str(self.cfg.cookies_file or ""),
+            "browsers": config_mod.detect_browsers(),
+            "musicbrainz": self.cfg.musicbrainz,
+            "pot_mode": self.cfg.pot_mode,
+            "pot_idle_minutes": round(self.cfg.pot_idle / 60),
+            "concurrency": self.cfg.concurrency,
+            "info": {
+                "config file": str(config_mod.config_path()),
+                "JavaScript runtime": " ".join(filter(None, runtime)) if runtime else "none found",
+                "token generator": str(pot) if pot else "not set up (see README)",
+                "audio": "Opus, the best stream YouTube offers, never re-encoded",
+            },
+        }
 
     def save_settings(self, body: dict[str, Any]) -> dict[str, Any]:
-        browser = body.get("cookies_from_browser")
-        if browser not in (None, "", *config_mod.detect_browsers()):
-            raise ValueError(f"unknown browser {browser!r}")
-        self.cfg.cookies_from_browser = browser or None  # the job services share this Config
-        config_mod.save_setting("cookies_from_browser", self.cfg.cookies_from_browser)
+        """Validate everything first, then apply to the running app and the config file."""
+        changes: dict[str, Any] = {}
+        if "cookies_from_browser" in body:
+            browser = body["cookies_from_browser"] or None
+            if browser not in (None, *config_mod.detect_browsers()):
+                raise ValueError(f"unknown browser {browser!r}")
+            changes["cookies_from_browser"] = browser
+        if "musicbrainz" in body:
+            changes["musicbrainz"] = bool(body["musicbrainz"])
+        if "pot_mode" in body:
+            if body["pot_mode"] not in ("server", "script", "off"):
+                raise ValueError("token helper mode must be server, script or off")
+            changes["pot_mode"] = body["pot_mode"]
+        if "pot_idle_minutes" in body:
+            minutes = int(body["pot_idle_minutes"])
+            if not 1 <= minutes <= 120:
+                raise ValueError("token server idle time must be 1–120 minutes")
+            changes["pot_idle"] = minutes * 60
+        if "concurrency" in body:
+            n = int(body["concurrency"])
+            if not 1 <= n <= 4:
+                raise ValueError("parallel requests must be 1–4 (more trips YouTube's bot check)")
+            changes["concurrency"] = n
+        library = None
+        if "library" in body and str(body["library"]).strip() != str(self.library):
+            library = Path(str(body["library"]).strip()).expanduser()
+            if not library.is_absolute():
+                raise ValueError("the library folder must be an absolute path")
+            if self.jobs.busy():
+                raise ValueError("wait until the running jobs are finished before changing the library")
+            library.mkdir(parents=True, exist_ok=True)  # ValueError-free: OSError surfaces as 400 below
+            changes["library_root"] = str(library)
+
+        for name, value in changes.items():
+            if name != "library_root":
+                setattr(self.cfg, name, value)  # job services share this Config: effective from the next job
+            config_mod.save_setting(name, value)
+        if library is not None:
+            self.library = library
         return self.settings()
 
     def state(self) -> dict[str, Any]:
@@ -375,7 +426,10 @@ class _Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
             body = body if isinstance(body, dict) else {}
             if url.path == "/api/settings":
-                return self._json(self.app.save_settings(body))
+                try:
+                    return self._json(self.app.save_settings(body))
+                except OSError as e:
+                    return self._error(HTTPStatus.BAD_REQUEST, f"cannot use that folder: {e.strerror or e}")
             job = self.app.submit(url.path.removeprefix("/api/"), body)
         except (ValueError, json.JSONDecodeError) as e:
             return self._error(HTTPStatus.BAD_REQUEST, str(e))

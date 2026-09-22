@@ -102,13 +102,17 @@ def load(path: Path | None = None) -> Config:
     return cfg
 
 
-def save_setting(name: str, value: str | None, path: Path | None = None) -> Path:
-    """Set (or with None: remove) one top-level string setting, keeping all other lines."""
+def save_setting(name: str, value: str | bool | int | None, path: Path | None = None) -> Path:
+    """Set (or with None: remove) one top-level setting, keeping all other lines."""
     path = path or config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = path.read_text().splitlines() if path.exists() else []
     lines = [l for l in lines if l.split("=")[0].strip() != name]
-    if value is not None:
+    if isinstance(value, bool):
+        lines.insert(0, f"{name} = {'true' if value else 'false'}")
+    elif isinstance(value, int):
+        lines.insert(0, f"{name} = {value}")
+    elif value is not None:
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         lines.insert(0, f'{name} = "{escaped}"')
     path.write_text("\n".join(lines) + "\n")

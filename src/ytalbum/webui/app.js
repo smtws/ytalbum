@@ -322,23 +322,58 @@ function renderLog(job) {
 
 const BROWSER_NAMES = { firefox: "Firefox", chrome: "Chrome", chromium: "Chromium", brave: "Brave", edge: "Edge", vivaldi: "Vivaldi", opera: "Opera" };
 
-function renderSettings() {
-  const sel = $("#browser");
-  if (document.activeElement === sel || !state.settings) return;
-  const current = state.settings.cookies_from_browser || "";
-  const options = ["", ...state.settings.browsers];
-  if (current && !options.includes(current)) options.push(current); // e.g. "firefox:profile"
-  sel.replaceChildren(...options.map((b) => h("option", { value: b, selected: b === current }, b ? BROWSER_NAMES[b.split(":")[0]] || b : "none")));
+function renderSettings() {} // the panel is built when opened, so polling never overwrites what you type
+
+function openSettings() {
+  const panel = $("#settings");
+  if (!panel.hidden) { panel.hidden = true; return; }
+  const st = state.settings;
+  if (!st) return;
+  const browsers = ["", ...st.browsers];
+  if (st.cookies_from_browser && !browsers.includes(st.cookies_from_browser)) browsers.push(st.cookies_from_browser);
+  const row = (label, help, input) => h("label", { class: "setting" }, h("span", {}, h("strong", {}, label), h("small", { class: "muted" }, help)), input);
+  panel.replaceChildren(
+    h("div", { class: "panel-head" }, h("h2", {}, "Settings"), h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; } }, "Close")),
+    h("form", { id: "settingsform", onsubmit: saveSettings },
+      row("Library folder", "where albums are stored (created if missing); existing albums are not moved",
+        h("input", { type: "text", name: "library", value: st.library })),
+      row("YouTube login", "browser whose YouTube session is used — avoids the bot check, needed for age-restricted videos",
+        h("select", { name: "cookies_from_browser" }, browsers.map((b) => h("option", { value: b, selected: b === (st.cookies_from_browser || "") }, b ? BROWSER_NAMES[b.split(":")[0]] || b : "none")))),
+      row("MusicBrainz", "look up correct names, years, covers and tracklists",
+        h("input", { type: "checkbox", name: "musicbrainz", checked: st.musicbrainz })),
+      row("Token helper", "proof-of-origin tokens for streams YouTube withholds; server = started on demand",
+        h("select", { name: "pot_mode" }, ["server", "script", "off"].map((m) => h("option", { value: m, selected: m === st.pot_mode }, m)))),
+      row("Token server stops after", "minutes without YouTube activity",
+        h("input", { type: "number", name: "pot_idle_minutes", min: 1, max: 120, value: st.pot_idle_minutes })),
+      row("Parallel YouTube requests", "1–4; more is faster but trips YouTube's bot check sooner",
+        h("input", { type: "number", name: "concurrency", min: 1, max: 4, value: st.concurrency })),
+      h("dl", { class: "info" }, Object.entries(st.info).flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+      h("div", { class: "actions" }, h("button", { type: "submit" }, "Save settings"))));
+  panel.hidden = false;
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-$("#browser").addEventListener("change", async (ev) => {
+async function saveSettings(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const button = ev.submitter;
+  setWorking(button, true);
   try {
-    state.settings = await api("/api/settings", { cookies_from_browser: ev.target.value });
+    state.settings = await api("/api/settings", {
+      library: f.library.value, cookies_from_browser: f.cookies_from_browser.value, musicbrainz: f.musicbrainz.checked,
+      pot_mode: f.pot_mode.value, pot_idle_minutes: Number(f.pot_idle_minutes.value), concurrency: Number(f.concurrency.value),
+    });
+    toast("✓ Settings saved — they apply from the next job", "done");
+    $("#settings").hidden = true;
+    poll();
   } catch (e) {
-    alert(e.message);
+    toast(e.message, "failed");
+  } finally {
+    setWorking(button, false);
   }
-  renderSettings();
-});
+}
+
+$("#gear").addEventListener("click", openSettings);
 
 // -- player ----------------------------------------------------------------------------
 

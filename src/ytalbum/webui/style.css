@@ -130,3 +130,15 @@ body.has-player main { padding-bottom: 16rem; }
 .activity.offline { border-color: var(--bad); }
 .activity.offline .dot { background: var(--bad); }
 code { font-size: .85em; padding: .05rem .3rem; border-radius: 4px; background: var(--line); }
+
+/* -- settings -------------------------------------------------------------------------- */
+.setting { display: grid; grid-template-columns: minmax(12rem, 22rem) 1fr; gap: .4rem 1.25rem; align-items: center; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+.setting > span { display: grid; gap: .1rem; }
+.setting small { font-size: .78rem; }
+.setting input[type=checkbox] { justify-self: start; width: 1.2rem; height: 1.2rem; accent-color: var(--accent); }
+.setting input[type=number] { max-width: 7rem; }
+.setting select { justify-self: start; min-width: 10rem; }
+dl.info { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 1rem 0 0; font-size: .82rem; color: var(--muted); }
+dl.info dt { font-weight: 600; }
+dl.info dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 40rem) { .setting { grid-template-columns: 1fr; } }
