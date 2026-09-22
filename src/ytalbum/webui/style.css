@@ -57,14 +57,41 @@ td.src { width: 7rem; white-space: nowrap; }
 .pick { display: flex; gap: .5rem; align-items: center; padding: .25rem 0; }
 .pick input { width: auto; }
 .jobs { position: fixed; right: 1rem; bottom: 1rem; width: min(26rem, calc(100vw - 2rem)); display: grid; gap: .5rem; z-index: 3; }
-.job { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: 8px; padding: .5rem .7rem; font-size: .85rem; box-shadow: 0 4px 16px #0002; }
+.job { min-width: 0; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: 8px; padding: .5rem .7rem; font-size: .85rem; box-shadow: 0 4px 16px #0002; }
 .job.running, .job.queued { border-left-color: var(--accent); }
 .job.done { border-left-color: var(--ok); }
 .job.failed { border-left-color: var(--bad); }
 .job.blocked { border-left-color: var(--warn); }
+.job > div:first-child { display: flex; gap: .4rem; align-items: center; min-width: 0; }
+.job strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .job .line { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .job pre { max-height: 16rem; overflow: auto; white-space: pre-wrap; font-size: .78rem; margin: .4rem 0 0; }
 .job button { padding: .1rem .5rem; font-size: .78rem; }
 @media (max-width: 40rem) { .fields { grid-template-columns: 1fr; } td.src { display: none; } }
 .login { font-size: .85rem; color: var(--muted); display: flex; gap: .4rem; align-items: center; }
 select { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .4rem .5rem; }
+
+/* -- direct feedback ------------------------------------------------------------ */
+button.working { position: relative; padding-left: 2rem; opacity: .85; cursor: progress; }
+button.working::before { content: ""; position: absolute; left: .7rem; top: 50%; width: .8rem; height: .8rem; margin-top: -.4rem;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+.activity { position: sticky; top: 3.6rem; z-index: 2; display: flex; gap: .5rem; align-items: center; max-width: 76rem; margin: .75rem auto 0;
+  padding: .5rem .8rem; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--panel); font-size: .9rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity .muted { overflow: hidden; text-overflow: ellipsis; }
+.activity .dot { flex: none; width: .6rem; height: .6rem; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.toasts { position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%); display: grid; gap: .5rem; z-index: 5; width: min(34rem, calc(100vw - 2rem)); }
+.toast { padding: .7rem 1rem; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--ok);
+  box-shadow: 0 8px 24px #0004; animation: rise .25s ease-out; transition: opacity .5s, transform .5s; }
+.toast.failed { border-left-color: var(--bad); }
+.toast.blocked { border-left-color: var(--warn); }
+.toast.gone { opacity: 0; transform: translateY(.5rem); }
+tr.changed td { animation: flash 2.4s ease-out; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { opacity: .25; transform: scale(.7); } }
+@keyframes rise { from { opacity: 0; transform: translateY(.75rem); } }
+@keyframes flash { 0%, 30% { background: color-mix(in srgb, var(--accent) 22%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  button.working::before, .activity .dot, .toast, tr.changed td { animation: none; }
+  tr.changed td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+}

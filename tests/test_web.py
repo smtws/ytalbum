@@ -90,6 +90,13 @@ def test_bad_requests(server):
     assert c.post("/api/fetch", json={"urls": ["file:///etc/passwd"]}, headers=HDR).status_code == 400
 
 
+def test_job_labels_name_the_album(server):
+    app, c = server
+    url = c.get(f"/api/album?id={c.get('/api/state').json()['albums'][0]['id']}").json()["source_url"]
+    assert app.describe(url) == "My Dark Lullabies — Vol. 1 - Heavy Sleeping"
+    assert app.describe("https://www.youtube.com/playlist?list=PLnew") == "youtube.com/playlist?list=PLnew"
+
+
 def test_edit_round_trip_renames_retags_and_marks_the_users_values(server, library):
     _, c = server
     album_id = c.get("/api/state").json()["albums"][0]["id"]

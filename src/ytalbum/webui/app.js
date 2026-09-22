@@ -32,16 +32,67 @@ async function api(path, body) {
   return data;
 }
 
-async function submit(action, body) {
+const mine = new Map(); // job id -> { button, label } for jobs started in this page
+
+async function submit(action, body, button = null) {
+  if (button) setWorking(button, true);
   try {
     const { job } = await api(`/api/${action}`, body);
+    mine.set(job.id, { button, label: job.label });
     state.jobs.unshift(job);
+    state.busy = true;
     renderJobs();
+    renderActivity();
     schedulePoll(300);
     return job.id;
   } catch (e) {
-    alert(e.message);
+    if (button) setWorking(button, false);
+    toast(e.message, "failed");
     return null;
+  }
+}
+
+function setWorking(button, on) {
+  if (on) {
+    button.dataset.label = button.dataset.label || button.textContent;
+    button.textContent = "Working…";
+  } else if (button.dataset.label) {
+    button.textContent = button.dataset.label;
+  }
+  button.classList.toggle("working", on);
+  button.disabled = on;
+}
+
+// when a job of ours finishes: free its button, say how it went
+function settleJobs() {
+  for (const [id, info] of mine) {
+    const job = state.jobs.find((j) => j.id === id);
+    if (!job || ["queued", "running"].includes(job.state)) continue;
+    mine.delete(id);
+    if (info.button?.isConnected) setWorking(info.button, false);
+    const last = (job.log || []).filter((l) => !l.startsWith("  ")).at(-1) || "";
+    const text = { done: "✓", failed: "✗", blocked: "⏸" }[job.state] + ` ${info.label}` + (last ? ` — ${last}` : "");
+    toast(text, job.state);
+  }
+}
+
+function toast(text, kind = "done") {
+  const el = h("div", { class: `toast ${kind}`, role: "status" }, text);
+  $("#toasts").append(el);
+  setTimeout(() => el.classList.add("gone"), kind === "done" ? 5000 : 9000);
+  setTimeout(() => el.remove(), kind === "done" ? 5600 : 9600);
+}
+
+// the header says what is going on right now
+function renderActivity() {
+  const running = state.jobs.find((j) => j.state === "running") || state.jobs.find((j) => j.state === "queued");
+  const el = $("#activity");
+  el.hidden = !state.busy || !running;
+  if (!el.hidden) {
+    const queued = state.jobs.filter((j) => j.state === "queued").length;
+    el.replaceChildren(h("span", { class: "dot" }), h("strong", {}, running.label),
+      h("span", { class: "muted" }, " ", (running.log || []).at(-1) || "starting…"),
+      queued > (running.state === "queued" ? 1 : 0) ? h("span", { class: "badge" }, `+${queued - (running.state === "queued" ? 1 : 0)} queued`) : null);
   }
 }
 
@@ -54,6 +105,8 @@ async function poll() {
     renderLibrary();
     renderJobs();
     renderSettings();
+    renderActivity();
+    settleJobs();
     if (waitingFor) {
       const job = state.jobs.find((j) => j.id === waitingFor);
       if (job && !["queued", "running"].includes(job.state)) {
@@ -66,7 +119,7 @@ async function poll() {
   } catch (e) {
     console.warn("poll failed", e);
   }
-  schedulePoll(state.busy || waitingFor ? 1500 : 8000);
+  schedulePoll(state.busy || waitingFor ? 700 : 8000);
 }
 
 function schedulePoll(ms) {
@@ -111,12 +164,19 @@ async function openAlbum(id) {
   $("#album").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+const rowKey = (t) => [t.number, t.artist, t.title, t.state, t.in_source].join("|");
+
 async function refreshAlbumPanel() {
   if (!currentAlbum) return;
+  const before = new Map(currentAlbum.tracks.map((t) => [t.video_id, rowKey(t)]));
   try {
     currentAlbum = await api(`/api/album?id=${encodeURIComponent(currentAlbum.source_id)}`);
-    renderAlbum();
-  } catch { /* album moved or gone */ }
+  } catch { return; /* album moved or gone */ }
+  renderAlbum();
+  for (const tr of document.querySelectorAll("#album tbody tr")) {
+    const t = currentAlbum.tracks.find((x) => x.video_id === tr.dataset.id);
+    if (t && before.get(t.video_id) !== rowKey(t)) tr.classList.add("changed");
+  }
 }
 
 function provBadge(p) {
@@ -149,15 +209,15 @@ function renderAlbum() {
       skipped.length ? h("details", {}, h("summary", { class: "muted" }, `${skipped.length} skipped`), h("ul", {}, skipped)) : null,
       h("div", { class: "actions" },
         h("button", { type: "submit" }, "Save changes (rename + retag)"),
-        h("button", { class: "quiet", type: "button", onclick: () => submit("fetch", { urls: [p.source_url] }) }, "Re-check source"),
-        gone.length ? h("button", { class: "danger", type: "button", onclick: () => pruneAlbum(p, gone) }, `Remove ${gone.length} track${gone.length > 1 ? "s" : ""} no longer in the playlist`) : null,
+        h("button", { class: "quiet", type: "button", onclick: (e) => submit("fetch", { urls: [p.source_url] }, e.currentTarget) }, "Re-check source"),
+        gone.length ? h("button", { class: "danger", type: "button", onclick: (e) => pruneAlbum(p, gone, e.currentTarget) }, `Remove ${gone.length} track${gone.length > 1 ? "s" : ""} no longer in the playlist`) : null,
         h("a", { href: p.source_url, target: "_blank", rel: "noopener" }, "open on YouTube"))));
   panel.hidden = false;
 }
 
-function pruneAlbum(p, gone) {
+function pruneAlbum(p, gone, button) {
   const list = gone.map((t) => `  ${t.number}. ${t.artist} – ${t.title}`).join("\n");
-  if (confirm(`Delete these files? They are no longer in the YouTube playlist:\n\n${list}`)) submit("prune", { id: p.source_id });
+  if (confirm(`Delete these files? They are no longer in the YouTube playlist:\n\n${list}`)) submit("prune", { id: p.source_id }, button);
 }
 
 function saveAlbum(ev) {
@@ -169,7 +229,7 @@ function saveAlbum(ev) {
       video_id: tr.dataset.id, artist: tr.querySelector("[name=artist]").value, title: tr.querySelector("[name=title]").value,
     })),
   };
-  submit("edit", { id: currentAlbum.source_id, edits });
+  submit("edit", { id: currentAlbum.source_id, edits }, ev.submitter);
 }
 
 // -- adding: preview / search / channel results -------------------------------------------
@@ -199,7 +259,7 @@ function previewView(p, close) {
       close),
     h("table", {}, h("tbody", {}, rows)),
     p.skipped?.length ? h("p", { class: "muted" }, `skipped: ${p.skipped.map((s) => `${s.title} (${s.reason})`).join("; ")}`) : null,
-    h("div", { class: "actions" }, h("button", { type: "button", onclick: () => { submit("fetch", { urls: [p.source_url] }); $("#results").hidden = true; } }, "Download")),
+    h("div", { class: "actions" }, h("button", { type: "button", onclick: (e) => { submit("fetch", { urls: [p.source_url] }, e.currentTarget).then(() => setTimeout(() => { $("#results").hidden = true; }, 1200)); } }, "Download")),
   ];
 }
 
@@ -213,9 +273,10 @@ function pickView(r, close) {
         ref.tab === "search" && ref.artist ? h("span", { class: "muted" }, `by ${ref.artist}`) : null,
         ref.count ? h("span", { class: "badge" }, `${ref.count} tracks`) : null,
         have.has(ref.id) ? h("span", { class: "badge ok" }, "in library") : null))));
-  const download = () => {
+  const download = (e) => {
     const urls = [...$("#results").querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value);
-    if (urls.length) { submit("fetch", { urls }); $("#results").hidden = true; }
+    if (!urls.length) return toast("Tick at least one entry first", "blocked");
+    submit("fetch", { urls }, e.currentTarget).then(() => setTimeout(() => { $("#results").hidden = true; }, 1200));
   };
   return [
     h("div", { class: "panel-head" }, h("h2", {}, r.groups?.length ? "Found" : "Nothing found"), close),
@@ -293,14 +354,14 @@ $("#open").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const q = $("#q").value.trim();
   if (!q) return;
-  const id = await submit("open", { q });
+  const id = await submit("open", { q }, ev.submitter || $("#open button"));
   if (id) {
     waitingFor = id;
     $("#results").replaceChildren(h("p", { class: "muted" }, /^https?:/.test(q) ? "Reading from YouTube…" : `Searching for “${q}”…`));
     $("#results").hidden = false;
   }
 });
-$("#update").addEventListener("click", () => submit("update", {}));
+$("#update").addEventListener("click", (e) => submit("update", {}, e.currentTarget));
 
 if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
 poll();

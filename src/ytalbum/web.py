@@ -211,7 +211,7 @@ class App:
                 urls = [str(u) for u in body.get("urls") or [] if str(u).startswith(("http://", "https://"))]
                 if not urls:
                     raise ValueError("no URLs")
-                label = urls[0] if len(urls) == 1 else f"{len(urls)} sources"
+                label = self.describe(urls[0]) if len(urls) == 1 else f"{len(urls)} sources"
 
                 def fetch_all(s: Service):
                     outcomes = []
@@ -224,22 +224,29 @@ class App:
                             break
                     return outcomes
 
-                return self.jobs.submit("fetch", f"fetch {label}", fetch_all)
+                return self.jobs.submit("fetch", f"Fetch {label}" if len(urls) > 1 else f"Update {label}" if " — " in label else f"Fetch {label}", fetch_all)
             case "update":
-                return self.jobs.submit("update", "update the library", lambda s: s.update_all())
+                return self.jobs.submit("update", "Update the library", lambda s: s.update_all())
             case "prune":
                 found = self.album(str(body.get("id", "")))
                 if not found:
                     raise ValueError("unknown album")
                 album_dir = found[0]
-                return self.jobs.submit("prune", f"remove gone tracks from {found[1].album}", lambda s: s.prune(album_dir))
+                return self.jobs.submit("prune", f"Remove gone tracks from {found[1].album}", lambda s: s.prune(album_dir))
             case "edit":
                 source_id = str(body.get("id", ""))
                 if not self.album(source_id):
                     raise ValueError("unknown album")
                 edits = body.get("edits") or {}
-                return self.jobs.submit("edit", f"apply edits to {source_id}", lambda s: s.apply_edits(source_id, edits))
+                return self.jobs.submit("edit", f"Save {self.describe(source_id)}", lambda s: s.apply_edits(source_id, edits))
         raise ValueError(f"unknown action {action!r}")
+
+    def describe(self, url: str) -> str:
+        """A readable job label: the album's name if the URL is one we have, else a short URL."""
+        for _, plan in iter_plans(self.library) if self.library.exists() else []:
+            if plan.source_url == url or plan.source_id in url:
+                return f"{plan.albumartist} — {plan.album}"
+        return url.replace("https://", "").replace("www.", "")[:60]
 
     # server
 
