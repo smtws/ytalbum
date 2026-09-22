@@ -59,6 +59,12 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--library", type=Path)
     sv.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to reach it from other devices (no login!)")
     sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--idle-exit", type=float, default=0, metavar="SECONDS", help="stop after this long without requests or jobs (for socket activation)")
+
+    sd = sub.add_parser("service", help="run the web UI on demand via systemd (user level)")
+    sd.add_argument("action", choices=("install", "uninstall", "status"))
+    sd.add_argument("--port", type=int, default=8765)
+    sd.add_argument("--idle-exit", type=int, default=900, metavar="SECONDS")
 
     c = sub.add_parser("config", help="show or set configuration")
     c.add_argument("--library", type=Path, help="set the library root")
@@ -90,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
                 return _serve(args, cfg)
             case "prune":
                 return _prune(args, cfg)
+            case "service":
+                return _systemd(args, cfg)
     except NotSupported as e:
         print(f"not supported: {e}", file=sys.stderr)
         return 2
@@ -208,13 +216,31 @@ def _prune(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     return exit_code(_service(cfg, None).prune(args.album_dir))
 
 
+def _systemd(args: argparse.Namespace, cfg: config_mod.Config) -> int:
+    from . import systemd
+
+    try:
+        if args.action == "install":
+            for line in systemd.install(cfg, args.port, args.idle_exit):
+                print(line)
+            print(f"ready: open http://localhost:{args.port}/ — the web UI starts on demand and stops after {args.idle_exit}s idle")
+        elif args.action == "uninstall":
+            for line in systemd.uninstall():
+                print(line)
+        print(systemd.status())
+    except (ValueError, RuntimeError) as e:
+        print(e, file=sys.stderr)
+        return 2
+    return 0
+
+
 def _serve(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     library = _library(args, cfg, required=True)
     if library is None:
         return 2
     from .web import serve
 
-    serve(cfg, library, host=args.host, port=args.port)
+    serve(cfg, library, host=args.host, port=args.port, idle_exit=args.idle_exit)
     return 0
 
 

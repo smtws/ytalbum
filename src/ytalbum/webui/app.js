@@ -116,10 +116,20 @@ async function poll() {
     }
     if (openLog) renderLog(await api(`/api/job?id=${openLog}`).catch(() => null));
     if (prevBusy && !state.busy) refreshAlbumPanel();
+    setOffline(false);
   } catch (e) {
     console.warn("poll failed", e);
+    setOffline(true);
   }
-  schedulePoll(state.busy || waitingFor ? 700 : 8000);
+  schedulePoll(offline ? 3000 : state.busy || waitingFor ? 700 : 8000);
+}
+
+let offline = false;
+
+function setOffline(on) {
+  if (on === offline) return;
+  offline = on;
+  $("#offline").hidden = !on;
 }
 
 function schedulePoll(ms) {

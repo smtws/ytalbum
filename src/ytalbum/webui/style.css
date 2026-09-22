@@ -127,3 +127,6 @@ body.has-player main { padding-bottom: 16rem; }
   .player { grid-template-columns: auto 1fr auto; }
   .p-seek { grid-column: 1 / -1; }
 }
+.activity.offline { border-color: var(--bad); }
+.activity.offline .dot { background: var(--bad); }
+code { font-size: .85em; padding: .05rem .3rem; border-radius: 4px; background: var(--line); }

@@ -23,6 +23,10 @@
     <button id="theme" class="quiet theme" type="button" title="Theme: automatic">◐</button>
   </header>
 
+  <div id="offline" class="activity offline" hidden role="alert">
+    <span class="dot"></span><strong>The ytalbum server is not reachable.</strong>
+    <span class="muted">Start it with <code>ytalbum serve</code> (or install it: <code>ytalbum service install</code>). Retrying…</span>
+  </div>
   <div id="activity" class="activity" hidden aria-live="polite"></div>
   <main>
     <section id="results" class="panel" hidden></section>

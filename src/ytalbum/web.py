@@ -15,7 +15,9 @@ import hashlib
 import itertools
 import json
 import logging
+import os
 import queue
+import socket
 import threading
 import time
 import traceback
@@ -136,6 +138,7 @@ def _jsonable(value: Any) -> Any:
 class App:
     def __init__(self, cfg: Config, library: Path, host: str = "127.0.0.1", port: int = 8765, service_factory=None) -> None:
         self.cfg, self.library, self.host, self.port = cfg, library.expanduser(), host, port
+        self.last_request = time.monotonic()
         self._service_factory = service_factory or (lambda job: Service(cfg, self.library, log=lambda s: _append(job, s), on_track=lambda t, what: _append(job, f"{what}: {t.number:02d} {t.artist} - {t.title}")))
         self.jobs = Jobs(self._service_factory)
 
@@ -260,20 +263,34 @@ class App:
 
     # server
 
+    def touch(self) -> None:
+        self.last_request = time.monotonic()
+
+    def idle_for(self) -> float:
+        """Seconds without requests and without queued/running jobs (0 while busy)."""
+        return 0.0 if self.jobs.busy() else time.monotonic() - self.last_request
+
     def allowed_host(self, host_header: str | None) -> bool:
         if self.host in ("0.0.0.0", "::"):
             return True  # explicitly opened to the network
         name = (host_header or "").rsplit(":", 1)[0].strip("[]")
         return name in {"localhost", "127.0.0.1", "::1", self.host}
 
-    def make_server(self) -> ThreadingHTTPServer:
+    def make_server(self, sock: socket.socket | None = None) -> ThreadingHTTPServer:
+        """A server on (host, port), or on an already listening socket (systemd socket activation)."""
         app = self
 
         class Handler(_Handler):
             pass
 
         Handler.app = app
-        return ThreadingHTTPServer((self.host, self.port), Handler)
+        if sock is None:
+            return ThreadingHTTPServer((self.host, self.port), Handler)
+        server = ThreadingHTTPServer(sock.getsockname()[:2], Handler, bind_and_activate=False)
+        server.socket.close()
+        server.socket = sock
+        server.server_address = sock.getsockname()[:2]
+        return server
 
 
 def _asset(name: str) -> bytes:
@@ -313,6 +330,7 @@ class _Handler(BaseHTTPRequestHandler):
     # routing
 
     def do_GET(self) -> None:
+        self.app.touch()
         if not self.app.allowed_host(self.headers.get("Host")):
             return self._error(HTTPStatus.FORBIDDEN, "host not allowed")
         url = urlsplit(self.path)
@@ -342,6 +360,7 @@ class _Handler(BaseHTTPRequestHandler):
         return self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_POST(self) -> None:
+        self.app.touch()
         if not self.app.allowed_host(self.headers.get("Host")):
             return self._error(HTTPStatus.FORBIDDEN, "host not allowed")
         if self.headers.get("X-Ytalbum") != "1" or not (self.headers.get("Content-Type") or "").startswith("application/json"):
@@ -422,13 +441,38 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def serve(cfg: Config, library: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
+def systemd_socket() -> socket.socket | None:
+    """The listening socket systemd passed us (sd_listen_fds protocol), if any."""
+    if os.environ.get("LISTEN_PID") != str(os.getpid()) or int(os.environ.get("LISTEN_FDS", "0")) < 1:
+        return None
+    for name in ("LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES"):
+        os.environ.pop(name, None)  # not for our children (the token server)
+    return socket.socket(fileno=3)
+
+
+def serve(cfg: Config, library: Path, host: str = "127.0.0.1", port: int = 8765, idle_exit: float = 0) -> None:
+    """Run the web UI. With idle_exit > 0 the server stops after that many seconds without
+    requests or jobs — meant for socket activation, where the next request starts it again."""
+    sock = systemd_socket()
     app = App(cfg, library, host, port)
-    server = app.make_server()
-    shown = "localhost" if host in ("127.0.0.1", "::1") else host
-    print(f"ytalbum: http://{shown}:{port}/  (library {library}) — Ctrl+C to stop")
-    if host in ("0.0.0.0", "::"):
+    if sock is not None:
+        app.host, app.port = sock.getsockname()[:2]
+    server = app.make_server(sock)
+    shown = "localhost" if app.host in ("127.0.0.1", "::1") else app.host
+    print(f"ytalbum: http://{shown}:{app.port}/  (library {library})" + (" [socket-activated]" if sock else " — Ctrl+C to stop"), flush=True)
+    if app.host in ("0.0.0.0", "::"):
         print("warning: reachable from your network without a login — anyone there can start downloads")
+    if idle_exit > 0:
+
+        def watch() -> None:
+            while True:
+                time.sleep(min(30.0, idle_exit / 4))
+                if app.idle_for() > idle_exit:
+                    print(f"idle for {idle_exit:.0f}s, stopping", flush=True)
+                    server.shutdown()
+                    return
+
+        threading.Thread(target=watch, name="ytalbum-idle", daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
