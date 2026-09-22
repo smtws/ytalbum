@@ -238,6 +238,7 @@ class App:
                     "failed": sum(t.state == "failed" and t.in_source for t in plan.tracks),
                     "cover": any(album_dir.glob(f"{COVER_STEM}.*")),
                     "mb": bool(plan.mbid) or any(t.mbid for t in plan.tracks),
+                    "needs_choice": sum(t.error_kind == "no_audio_stream" for t in plan.tracks),
                 }
             )
         return sorted(out, key=lambda a: (a["albumartist"].casefold(), a["album"].casefold()))

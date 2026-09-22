@@ -24,7 +24,7 @@ class SlowFake(FakeYouTube):
         super().__init__(template)
         self.cancel, self.after = cancel, after
 
-    def download_audio(self, video_id, dest_dir):
+    def download_audio(self, video_id, dest_dir, choice="best"):
         out = super().download_audio(video_id, dest_dir)
         if len(self.downloads) == self.after:
             self.cancel.set()

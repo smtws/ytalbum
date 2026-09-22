@@ -23,7 +23,7 @@ from .models import AlbumPlan, PlanTrack
 from .plan import refresh_derived, wanted_filename, wanted_folder
 from .tag import image_mime, signature, tag_file
 from .trim import apply as apply_trim
-from .youtube import BOT_CHECK, YouTube, is_bot_check
+from .youtube import BOT_CHECK, NoAudioStream, YouTube, is_bot_check
 
 log = logging.getLogger(__name__)
 
@@ -135,11 +135,16 @@ def run(
 
         for attempt in range(1, ATTEMPTS + 1):
             try:
-                tmp = yt.download_audio(track.video_id, parts)
+                tmp = yt.download_audio(track.video_id, parts, track.audio_choice)
                 track.tagged = tag_file(tmp, plan, track, cover)
                 os.replace(tmp, final)
-                track.state, track.error = "done", None
+                track.state, track.error, track.error_kind = "done", None, None
                 break
+            except NoAudioStream as e:
+                track.state = "failed"
+                track.error = f"YouTube offers no separate audio stream ({e.description})"
+                track.error_kind = "no_audio_stream"
+                break  # retrying changes nothing; the user picks what to do
             except (DownloadError, RuntimeError, OSError) as e:
                 message = str(e).removeprefix("ERROR: ").strip()
                 track.state, track.error = "failed", BOT_CHECK if is_bot_check(message) else message

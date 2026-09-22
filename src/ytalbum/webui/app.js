@@ -155,7 +155,8 @@ function card(a) {
   const cover = a.cover
     ? h("img", { class: "cover", src: `/api/cover?id=${encodeURIComponent(a.id)}&t=${a.done}`, alt: "", loading: "lazy" })
     : h("div", { class: "cover none" }, "♪");
-  const status = a.failed ? h("span", { class: "badge bad" }, `${a.failed} failed`)
+  const status = a.needs_choice ? h("span", { class: "badge warn" }, `${a.needs_choice} need${a.needs_choice > 1 ? "" : "s"} a choice`)
+    : a.failed ? h("span", { class: "badge bad" }, `${a.failed} failed`)
     : a.done < a.tracks ? h("span", { class: "badge" }, `${a.done}/${a.tracks}`) : h("span", { class: "badge ok" }, `${a.tracks} tracks`);
   const play = a.done ? h("span", { class: "card-play", role: "button", tabindex: "0", title: "Play album", "aria-label": `Play ${a.album}`,
     onclick: (e) => { e.stopPropagation(); playAlbum(a.id, 0); },
@@ -227,7 +228,10 @@ function renderAlbum() {
           onclick: (e) => trimChannel(t, e.currentTarget) }, "⇉") : null),
       h("td", { class: "src" }, provBadge(t.provenance.title)),
       h("td", { class: "src" },
-        t.state === "done" ? h("span", { class: "badge ok" }, "✓") : t.state === "failed" ? h("span", { class: "badge bad", title: t.error || "" }, "failed") : h("span", { class: "badge" }, "pending"),
+        t.state === "done" ? h("span", { class: "badge ok" }, "✓")
+          : t.error_kind === "no_audio_stream" ? h("button", { class: "quiet small", type: "button", title: t.error || "", onclick: (e) => askAudioChoice(p, t, e.currentTarget) }, "no audio — choose")
+          : t.state === "failed" ? h("span", { class: "badge bad", title: t.error || "" }, "failed") : h("span", { class: "badge" }, "pending"),
+        t.ext === "m4a" ? h("span", { class: "badge", title: "audio taken from the video stream (copied, not re-encoded)" }, "m4a") : null,
         t.in_source ? null : h("span", { class: "badge", title: "no longer in the source playlist" }, "gone"))));
   const skipped = (p.skipped || []).map((s) => h("li", { class: "muted" }, `${s.title} — ${s.reason}`));
   const gone = p.tracks.filter((t) => !t.in_source);
@@ -288,6 +292,25 @@ function trimChannel(track, button) {
   const what = start || end ? `cut ${start || "0:00"}–${end || "end"}` : "remove the trim";
   if (confirm(`Apply to every track from “${track.channel}” in the library: ${what}?`)) {
     submit("trim_channel", { channel: track.channel, start, end }, button);
+  }
+}
+
+// a track without a separate audio stream: explain, then let the user decide
+function askAudioChoice(plan, track, button) {
+  const detail = (track.error || "").replace(/^YouTube offers no separate audio stream \(?/, "").replace(/\)$/, "");
+  const message = [
+    `“${track.artist} – ${track.title}”`,
+    "",
+    "YouTube has no audio-only stream for this video — usually an old or low-quality upload.",
+    `All it offers is: ${detail || "a combined video stream"}.`,
+    "",
+    "OK: take the audio out of that video. It is copied, not re-encoded, and saved as .m4a —",
+    "the best quality available here, but audibly below your other tracks.",
+    "",
+    "Cancel: leave the track out. You can decide later; nothing is lost.",
+  ].join("\n");
+  if (confirm(message)) {
+    submit("edit", { id: plan.source_id, edits: { tracks: [{ video_id: track.video_id, audio_choice: "combined" }] } }, button);
   }
 }
 

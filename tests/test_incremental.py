@@ -26,7 +26,7 @@ class FakeYouTube:
         self.template = template
         self.downloads: list[str] = []
 
-    def download_audio(self, video_id: str, dest_dir: Path) -> Path:
+    def download_audio(self, video_id: str, dest_dir: Path, choice: str = "best") -> Path:
         self.downloads.append(video_id)
         dest_dir.mkdir(parents=True, exist_ok=True)
         out = dest_dir / f"{video_id}.opus"

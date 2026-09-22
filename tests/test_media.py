@@ -103,7 +103,6 @@ def test_short_error_messages():
 
     assert _short_error("ERROR: [youtube] abc: Sign in to confirm your age. Use --cookies…").startswith("age-restricted")
     assert _short_error("ERROR: [youtube] abc: Video unavailable. This video is private") == "Video unavailable"
-    assert _short_error("ERROR: [youtube] ZXWqDAwx9EU: Requested format is not available. Use --list-formats").startswith("no audio-only stream")
 
 
 def test_best_thumbnail_prefers_preference_then_size():
@@ -131,3 +130,51 @@ def test_pot_provider_is_only_used_when_built(tmp_path):
 
     cfg.pot_mode = "off"
     assert "extractor_args" not in YouTube(cfg)._params()
+
+
+def test_playlist_thumbnail_avoids_the_dead_album_urls():
+    from ytalbum.models import Entry
+    from ytalbum.youtube import playlist_thumbnail
+
+    tracks = [Entry(video_id="a", position=1, title="t", thumbnail="https://i.ytimg.com/vi/a/hq.jpg")]
+    dead = {"thumbnails": [{"url": "https://i9.ytimg.com/s_p/OLAK5uy_x/maxresdefault.jpg"}]}
+    assert playlist_thumbnail(dead, tracks) == "https://i.ytimg.com/vi/a/hq.jpg"
+    good = {"thumbnails": [{"url": "https://i.ytimg.com/vi/p/hq.jpg"}]}
+    assert playlist_thumbnail(good, tracks) == "https://i.ytimg.com/vi/p/hq.jpg"
+    assert playlist_thumbnail({}, tracks) == "https://i.ytimg.com/vi/a/hq.jpg"
+    assert playlist_thumbnail(dead, []) == "https://i9.ytimg.com/s_p/OLAK5uy_x/maxresdefault.jpg"  # nothing better
+
+
+def m4a_file(tmp_path):
+    import shutil
+    import subprocess
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    path = tmp_path / "t.m4a"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac", str(path)], check=True)
+    return path
+
+
+def test_m4a_gets_the_same_tags(tmp_path):
+    from mutagen.mp4 import MP4
+
+    path = m4a_file(tmp_path)
+    plan = make_plan()
+    plan.year = 2001
+    plan.tracks[0].ext = "m4a"
+    tag_file(path, plan, plan.tracks[0], cover=JPEG)
+    tags = MP4(path)
+    assert tags["\xa9nam"] == ["T1"] and tags["\xa9ART"] == ["A1"]
+    assert tags["aART"] == ["My Dark Lullabies"] and tags["\xa9alb"] == ["Vol. 1 - Heavy Sleeping"]
+    assert tags["trkn"] == [(1, 2)] and tags["\xa9day"] == ["2001"] and tags["cpil"] is True
+    assert bytes(tags["covr"][0]) == JPEG
+    assert tags["----:com.apple.iTunes:YOUTUBE_ID"][0] == b"vid1"
+
+
+def test_filenames_follow_the_format(tmp_path):
+    from ytalbum.plan import wanted_filename
+
+    plan = make_plan()
+    plan.tracks[0].ext = "m4a"
+    assert wanted_filename(plan, plan.tracks[0]).endswith(" - A1 - T1.m4a")

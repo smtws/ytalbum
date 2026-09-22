@@ -34,6 +34,14 @@ class NotSupported(Exception):
     """The URL is valid but its kind is not handled yet."""
 
 
+class NoAudioStream(Exception):
+    """YouTube offers no audio-only stream for this video (old/low-quality upload, or age-gated)."""
+
+    def __init__(self, description: str) -> None:
+        super().__init__(description)
+        self.description = description
+
+
 class Cancelled(Exception):
     """The user cancelled the job; raised only at points where stopping leaves nothing half-done."""
 
@@ -249,7 +257,7 @@ class YouTube:
             is_playlist=True,
             title=nfc(info.get("title")) or info["id"],
             channel=_channel(info),
-            thumbnail=best_thumbnail(info),
+            thumbnail=playlist_thumbnail(info, entries),
             fetched_at=fetched_at,
             entries=entries,
         )
@@ -282,17 +290,19 @@ class YouTube:
 
     # -- stage 6: download -------------------------------------------------------
 
-    def download_audio(self, video_id: str, dest_dir: Path) -> Path:
-        """Download one video's audio as Opus into dest_dir/<video_id>.opus.
+    def download_audio(self, video_id: str, dest_dir: Path, choice: str = "best") -> Path:
+        """Download one video's audio into dest_dir/<video_id>.<ext>, never re-encoding.
 
-        Prefers YouTube's native Opus stream; ffmpeg then only remuxes (no re-encode).
+        "best": YouTube's own Opus stream (remuxed). "combined": for videos that have no
+        audio-only stream — the AAC track is copied out of the video into an .m4a.
         """
         dest_dir.mkdir(parents=True, exist_ok=True)
         self.ensure_pot_server()
+        codec = "m4a" if choice == "combined" else "opus"
         params = self._params(
-            format="bestaudio[acodec=opus]/bestaudio",
+            format="bestaudio/best" if choice == "combined" else "bestaudio[acodec=opus]/bestaudio",
             outtmpl=str(dest_dir / "%(id)s.%(ext)s"),
-            postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "opus"}],
+            postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": codec}],
             noplaylist=True,
             overwrites=True,
         )
@@ -302,12 +312,28 @@ class YouTube:
         except DownloadCancelled as e:
             raise Cancelled() from e
         except DownloadError as e:
-            short = _short_error(e)
-            raise DownloadError(short) if short.startswith("no audio-only") else e
-        path = dest_dir / f"{video_id}.opus"
+            if "Requested format is not available" in str(e):
+                raise NoAudioStream(self.describe_combined(video_id)) from e
+            raise
+        path = dest_dir / f"{video_id}.{codec}"
         if not path.exists():
             raise RuntimeError(f"download produced no {path.name}")
         return path
+
+    def describe_combined(self, video_id: str) -> str:
+        """What YouTube does offer instead: e.g. '360p video, AAC ~96 kbps'."""
+        try:
+            with YoutubeDL(self._params(noplaylist=True)) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        except DownloadError:
+            return "only a combined video stream"
+        combined = [f for f in info.get("formats") or [] if f.get("acodec") not in (None, "none") and f.get("vcodec") not in (None, "none")]
+        if not combined:
+            return "only a combined video stream"
+        best = max(combined, key=lambda f: (f.get("abr") or 0, f.get("height") or 0))
+        codec = str(best.get("acodec", "")).split(".")[0].replace("mp4a", "AAC") or "audio"
+        rate = f" ~{round(best['abr'])} kbps" if best.get("abr") else ""
+        return f"{best.get('height', '?')}p video, {codec}{rate}"
 
     def fetch_bytes(self, url: str) -> bytes:
         with YoutubeDL(self._params()) as ydl:
@@ -379,6 +405,16 @@ def ref_from_ytm_album(info: dict[str, Any]) -> SourceRef | None:
     )
 
 
+def playlist_thumbnail(info: dict[str, Any], entries: list[Entry]) -> str | None:
+    """A playlist's cover. YouTube reports `s_p/OLAK…` URLs for albums that often 404,
+    so a track's thumbnail is preferred over those."""
+    own = best_thumbnail(info)
+    from_track = next((e.thumbnail for e in entries if e.thumbnail), None)
+    if not own or "/s_p/" in own:
+        return from_track or own
+    return own
+
+
 def best_thumbnail(info: dict[str, Any]) -> str | None:
     thumbs = [t for t in info.get("thumbnails") or [] if t.get("url")]
     if not thumbs:
@@ -404,7 +440,4 @@ def _short_error(e: DownloadError | str) -> str:
         return "age-restricted: needs cookies (ytalbum config --cookies-from-browser/--cookies-file)"
     if "not a bot" in msg:
         return BOT_CHECK
-    if "Requested format is not available" in msg:
-        return ("no audio-only stream offered: YouTube withholds them for age-restricted videos "
-                "unless the logged-in account is age-verified")
     return msg.split(". ")[0].strip().rstrip(".")

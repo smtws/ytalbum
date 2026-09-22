@@ -103,7 +103,7 @@ def test_download_stops_at_the_first_bot_check(tmp_path):
     class BlockedDownloads:
         calls = 0
 
-        def download_audio(self, video_id, dest_dir):
+        def download_audio(self, video_id, dest_dir, choice="best"):
             self.calls += 1
             raise DownloadError(BOT)
 

@@ -134,7 +134,7 @@ def wanted_folder(plan: AlbumPlan) -> str:
 def wanted_filename(plan: AlbumPlan, t: PlanTrack) -> str:
     show_artist = plan.kind == Kind.COMPILATION or _key(t.artist) != _key(plan.albumartist)
     disc = t.disc if max(x.disc for x in plan.tracks) > 1 else None
-    return track_filename(plan.albumartist, plan.album, t.number, t.artist if show_artist else None, t.title, disc)
+    return track_filename(plan.albumartist, plan.album, t.number, t.artist if show_artist else None, t.title, disc, t.ext)
 
 
 def refresh_derived(plan: AlbumPlan) -> AlbumPlan:
@@ -269,13 +269,13 @@ def safe_name(name: str) -> str:
 
 
 def track_filename(
-    albumartist: str, album: str, number: int, artist: str | None, title: str, disc: int | None = None
+    albumartist: str, album: str, number: int, artist: str | None, title: str, disc: int | None = None, ext: str = "opus"
 ) -> str:
     """v1's convention: 'AlbumArtist - Album - [D-]NN - [TrackArtist - ]Title.opus'."""
     middle = f"{artist} - {title}" if artist else title
     num = f"{disc}-{number:02d}" if disc else f"{number:02d}"
     stem = safe_name(f"{albumartist} - {album} - {num} - {middle}")
-    return f"{stem}.opus"
+    return f"{stem}.{ext}"
 
 
 # -- small helpers -------------------------------------------------------------------

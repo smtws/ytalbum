@@ -274,7 +274,14 @@ class Service:
         if not found:
             return Outcome("failed", message=f"unknown album {source_id}")
         album_dir, plan = found
+        before = {t.video_id: t.filename for t in plan.tracks}
         apply_user_edits(plan, edits)
+        for t in plan.tracks:  # a changed format leaves the old file behind
+            old = before.get(t.video_id)
+            if old and old != t.filename and Path(old).suffix != Path(t.filename).suffix:
+                stale = _inside(album_dir, old)
+                if stale and stale.exists():
+                    stale.unlink()
         album_dir = relocate(album_dir, plan, self.library)
         return self.execute(plan, album_dir)
 
@@ -304,6 +311,10 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
         t = by_id.get(te.get("video_id"))
         if not t:
             continue
+        if (choice := te.get("audio_choice")) in ("best", "combined") and choice != t.audio_choice:
+            # switching means fetching the track again, in the other form
+            t.audio_choice, t.ext = choice, "m4a" if choice == "combined" else "opus"
+            t.state, t.error, t.error_kind, t.tagged, t.trimmed = "pending", None, None, None, None
         if "trim_start" in te or "trim_end" in te:
             start, end = parse_time(te.get("trim_start")), parse_time(te.get("trim_end"))
             if start is not None and end is not None and end <= start:

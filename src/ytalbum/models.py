@@ -107,6 +107,9 @@ class PlanTrack:
     disc: int = 1
     state: str = "pending"  # pending | done | failed
     error: str | None = None
+    error_kind: str | None = None  # "no_audio_stream" → the UI can offer the choice
+    audio_choice: str = "best"  # "best" = separate audio stream; "combined" = take it from the video
+    ext: str = "opus"  # "m4a" when the audio was taken from a combined stream (copied, not re-encoded)
     # values as derived automatically; a field that differs from these was edited by the user
     auto: dict[str, str] = field(default_factory=dict)
     in_source: bool = True  # False once the video has left the source playlist

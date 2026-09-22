@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from mutagen.flac import Picture
+from mutagen.mp4 import MP4, MP4Cover
 from mutagen.oggopus import OggOpus
 
 from .models import AlbumPlan, PlanTrack
@@ -57,8 +58,18 @@ def signature(plan: AlbumPlan, track: PlanTrack, cover: bytes | None) -> str:
     return hashlib.sha1(payload).hexdigest()[:16]
 
 
+MP4_KEYS = {  # Vorbis comment -> MP4 atom
+    "title": "\xa9nam", "artist": "\xa9ART", "albumartist": "aART", "album": "\xa9alb",
+    "date": "\xa9day", "source": "\xa9cmt", "youtube_id": "----:com.apple.iTunes:YOUTUBE_ID",
+    "musicbrainz_albumid": "----:com.apple.iTunes:MusicBrainz Album Id",
+    "musicbrainz_trackid": "----:com.apple.iTunes:MusicBrainz Track Id",
+}
+
+
 def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None = None) -> str:
     """Replace all tags. Keeps an already embedded cover if no new one is given. Returns the signature."""
+    if path.suffix.lower() in (".m4a", ".mp4"):
+        return _tag_mp4(path, plan, track, cover)
     audio = OggOpus(path)
     old_picture = (audio.tags or {}).get(PICTURE_KEY)
     audio.delete()  # drop whatever yt-dlp/ffmpeg or an earlier run put there
@@ -74,5 +85,27 @@ def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None 
         audio[PICTURE_KEY] = [base64.b64encode(pic.write()).decode("ascii")]
     elif old_picture and cover is None:
         audio[PICTURE_KEY] = old_picture
+    audio.save()
+    return signature(plan, track, cover)
+
+
+def _tag_mp4(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None) -> str:
+    """Same tags for the .m4a files (audio copied out of a combined stream)."""
+    audio = MP4(path)
+    old_cover = audio.tags.get("covr") if audio.tags else None
+    audio.delete()
+    tags = build_tags(plan, track)
+    for key, atom in MP4_KEYS.items():
+        if value := tags.get(key):
+            audio[atom] = [value.encode() if atom.startswith("----") else value]
+    audio["trkn"] = [(track.number, len(plan.tracks))]
+    if max(t.disc for t in plan.tracks) > 1:
+        audio["disk"] = [(track.disc, max(t.disc for t in plan.tracks))]
+    audio["cpil"] = plan.is_compilation
+    if cover and (mime := image_mime(cover)) in ("image/jpeg", "image/png"):
+        fmt = MP4Cover.FORMAT_JPEG if mime == "image/jpeg" else MP4Cover.FORMAT_PNG
+        audio["covr"] = [MP4Cover(cover, imageformat=fmt)]
+    elif old_cover and cover is None:
+        audio["covr"] = old_cover
     audio.save()
     return signature(plan, track, cover)

@@ -46,6 +46,7 @@ h2 { font-size: 1rem; margin: .25rem 0 .75rem; }
 .badge.mb, .badge.user { border-color: var(--accent); color: var(--accent); }
 .badge.ok { border-color: var(--ok); color: var(--ok); }
 .badge.bad { border-color: var(--bad); color: var(--bad); }
+.badge.warn { border-color: var(--warn); color: var(--warn); }
 table { width: 100%; border-collapse: collapse; }
 td, th { padding: .3rem .4rem; border-bottom: 1px solid var(--line); vertical-align: middle; text-align: left; }
 th { font-size: .8rem; color: var(--muted); font-weight: 500; }
