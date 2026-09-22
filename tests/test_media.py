@@ -132,17 +132,22 @@ def test_pot_provider_is_only_used_when_built(tmp_path):
     assert "extractor_args" not in YouTube(cfg)._params()
 
 
-def test_playlist_thumbnail_avoids_the_dead_album_urls():
+def test_album_art_prefers_the_signed_urls_over_the_biggest():
     from ytalbum.models import Entry
     from ytalbum.youtube import playlist_thumbnail
 
     tracks = [Entry(video_id="a", position=1, title="t", thumbnail="https://i.ytimg.com/vi/a/hq.jpg")]
-    dead = {"thumbnails": [{"url": "https://i9.ytimg.com/s_p/OLAK5uy_x/maxresdefault.jpg"}]}
-    assert playlist_thumbnail(dead, tracks) == "https://i.ytimg.com/vi/a/hq.jpg"
-    good = {"thumbnails": [{"url": "https://i.ytimg.com/vi/p/hq.jpg"}]}
-    assert playlist_thumbnail(good, tracks) == "https://i.ytimg.com/vi/p/hq.jpg"
+    # YouTube lists the album art three times; only the signed ones work, the plain one 404s
+    album = {"thumbnails": [
+        {"url": "https://i9.ytimg.com/s_p/OLAK5uy_x/mqdefault.jpg?sqp=abc", "width": 180, "height": 180},
+        {"url": "https://i9.ytimg.com/s_p/OLAK5uy_x/sddefault.jpg?sqp=abc", "width": 640, "height": 640},
+        {"url": "https://i9.ytimg.com/s_p/OLAK5uy_x/maxresdefault.jpg", "width": 1200, "height": 1200},
+    ]}
+    assert playlist_thumbnail(album, tracks) == "https://i9.ytimg.com/s_p/OLAK5uy_x/sddefault.jpg?sqp=abc"
+    only_dead = {"thumbnails": [{"url": "https://i9.ytimg.com/s_p/OLAK5uy_x/maxresdefault.jpg", "width": 1200, "height": 1200}]}
+    assert playlist_thumbnail(only_dead, tracks) == "https://i.ytimg.com/vi/a/hq.jpg"  # a track's instead
     assert playlist_thumbnail({}, tracks) == "https://i.ytimg.com/vi/a/hq.jpg"
-    assert playlist_thumbnail(dead, []) == "https://i9.ytimg.com/s_p/OLAK5uy_x/maxresdefault.jpg"  # nothing better
+    assert playlist_thumbnail(only_dead, []) is None  # nothing usable at all
 
 
 def m4a_file(tmp_path):

@@ -400,19 +400,27 @@ def ref_from_ytm_album(info: dict[str, Any]) -> SourceRef | None:
         artist=", ".join(creators) or _channel(first),
         channel_url=first.get("channel_url"),
         count=info.get("playlist_count"),
-        # the playlist's own s_p/OLAK… thumbnail is often reported but 404s; a track's always works
-        thumbnail=best_thumbnail(first) or best_thumbnail(info),
+        thumbnail=album_thumbnail(info, best_thumbnail(first)),
     )
 
 
+def album_thumbnail(info: dict[str, Any], fallback: str | None = None) -> str | None:
+    """A playlist's own cover: the album art YouTube Music shows.
+
+    Its `s_p/OLAK…` URLs come signed (`?sqp=`) and unsigned; only the signed ones work,
+    and the unsigned one is usually the largest — so it must not simply win on size.
+    """
+    usable = {
+        "thumbnails": [
+            t for t in info.get("thumbnails") or []
+            if t.get("url") and not ("/s_p/" in t["url"] and "sqp=" not in t["url"])
+        ]
+    }
+    return best_thumbnail(usable) or fallback
+
+
 def playlist_thumbnail(info: dict[str, Any], entries: list[Entry]) -> str | None:
-    """A playlist's cover. YouTube reports `s_p/OLAK…` URLs for albums that often 404,
-    so a track's thumbnail is preferred over those."""
-    own = best_thumbnail(info)
-    from_track = next((e.thumbnail for e in entries if e.thumbnail), None)
-    if not own or "/s_p/" in own:
-        return from_track or own
-    return own
+    return album_thumbnail(info, next((e.thumbnail for e in entries if e.thumbnail), None))
 
 
 def best_thumbnail(info: dict[str, Any]) -> str | None:

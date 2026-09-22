@@ -94,7 +94,8 @@ def test_dedupe_by_title_keeps_first_and_fills_gaps():
 
 def test_youtube_music_album_resolves_to_its_olak_playlist():
     r = ref_from_ytm_album(json.loads((FIXTURES / "ytm_album_faun_xv.json").read_text()))
-    assert r.thumbnail and "/s_p/" not in r.thumbnail  # those 404 for many albums
+    # album art is fine, but only the signed variants work (the plain ones 404)
+    assert r.thumbnail and ("/s_p/" not in r.thumbnail or "sqp=" in r.thumbnail)
     assert r.source_id.startswith("OLAK5uy_")
     assert r.title == "XV - Best Of (Deluxe Edition)"  # "Album - " prefix removed
     assert r.channel_url == FAUNTUBE
