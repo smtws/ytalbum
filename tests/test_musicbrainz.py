@@ -62,6 +62,14 @@ def test_variant_titles_confirm_the_artist_but_not_the_recording():
     assert wardruna.mbid is None
 
 
+def test_album_name_in_brackets_is_dropped_but_the_version_stays():
+    plan = plan_for("vol20_collection.json")
+    enrich(plan, RecordedMB())
+    asp = next(t for t in plan.tracks if t.artist == "ASP")
+    assert asp.title == "Schneefall in der Hölle (Plakat Mix)"  # "[MASKENHAFT-…]" named the release
+    assert asp.mbid is None  # a mix: not that recording
+
+
 def test_unknown_tracks_keep_youtube_data():
     plan = plan_for("vol20_collection.json")
     enrich(plan, RecordedMB())
@@ -126,6 +134,7 @@ def test_title_helpers():
     assert feat_text("The Dead Don't Die (feat. xxFEUERSCHWANZxx)") == "featxxfeuerschwanzxx"
     assert kept_suffixes("Helvegen (Live)", "Helvegen") == " (Live)"
     assert kept_suffixes("Song (feat. X)", "Song") == ""
+    assert kept_suffixes("Song (Remix) [The Album]", "Song", ["The Album (Deluxe)"]) == " (Remix)"
 
 
 def test_pick_recording_requires_artist_and_title():

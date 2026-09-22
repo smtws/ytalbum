@@ -52,10 +52,22 @@ def feat_text(title: str) -> str:
     return key(" ".join(found))
 
 
-def kept_suffixes(ours: str, theirs: str) -> str:
-    """Bracket groups of our title that MusicBrainz' title lacks (e.g. '(Live)'), feat. excluded."""
-    groups = [m[0].strip() for m in _GROUP.finditer(ours) if not _FEAT.search(m[1] + " ")]
-    return "".join(f" {g}" for g in groups if key(g) not in key(theirs))
+def kept_suffixes(ours: str, theirs: str, albums: list[str] = ()) -> str:
+    """Bracket groups of our title that MusicBrainz' title lacks (e.g. '(Live)').
+
+    Not kept: feat. credits (they go into the artist) and groups naming a release the
+    recording appeared on ('[MASKENHAFT-Ein Versinken in elf Bildern]') - album info.
+    """
+    album_keys = [key(a) for a in albums if a]
+    kept = []
+    for m in _GROUP.finditer(ours):
+        g, k = m[0].strip(), key(m[1])
+        if _FEAT.search(m[1] + " ") or not k or k in key(theirs):
+            continue
+        if any(k in a or a in k for a in album_keys):
+            continue
+        kept.append(g)
+    return "".join(f" {g}" for g in kept)
 
 
 def credit_phrase(ac: list[dict[str, Any]]) -> str:
@@ -108,7 +120,7 @@ def enrich_track(t: PlanTrack, mb: MusicBrainzAPI) -> bool:
         return False
 
     ac = rec["artist-credit"]
-    extra = kept_suffixes(title_source, rec["title"])
+    extra = kept_suffixes(title_source, rec["title"], [r.get("title", "") for r in rec.get("releases", [])])
     title = rec["title"] + extra
     if feat_text(title_source) and len(ac) == 1:  # MB has no guest credit: keep ours
         title += "".join(f" {g}" for g in re.findall(r"\([^)]*feat[^)]*\)", title_source, re.I))
