@@ -112,3 +112,15 @@ def test_apply_user_edits_ignores_blanks_and_unknown_tracks():
     assert plan.album == "Vol. 1 - Heavy Sleeping" and plan.year is None
     assert "album" not in plan.provenance or plan.provenance["album"] != Provenance.USER
     assert plan.tracks[0].provenance["title"] != Provenance.USER
+
+
+def test_browser_setting(server, monkeypatch, tmp_path):
+    app, c = server
+    monkeypatch.setattr("ytalbum.config.detect_browsers", lambda: ["firefox", "chrome"])
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    assert c.get("/api/state").json()["settings"]["browsers"] == ["firefox", "chrome"]
+    assert c.post("/api/settings", json={"cookies_from_browser": "netscape"}, headers=HDR).status_code == 400
+    r = c.post("/api/settings", json={"cookies_from_browser": "firefox"}, headers=HDR)
+    assert r.json()["cookies_from_browser"] == "firefox" and app.cfg.cookies_from_browser == "firefox"
+    assert 'cookies_from_browser = "firefox"' in (tmp_path / "cfg" / "ytalbum" / "config.toml").read_text()
+    assert c.post("/api/settings", json={"cookies_from_browser": "firefox"}).status_code == 403  # header still required

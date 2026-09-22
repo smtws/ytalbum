@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from . import config as config_mod
 from .config import Config
 from .download import COVER_STEM, iter_plans
 from .models import AlbumPlan
@@ -171,8 +172,20 @@ class App:
                 return data, mime
         return None
 
+    def settings(self) -> dict[str, Any]:
+        return {"cookies_from_browser": self.cfg.cookies_from_browser, "cookies_file": str(self.cfg.cookies_file or ""), "browsers": config_mod.detect_browsers()}
+
+    def save_settings(self, body: dict[str, Any]) -> dict[str, Any]:
+        browser = body.get("cookies_from_browser")
+        if browser not in (None, "", *config_mod.detect_browsers()):
+            raise ValueError(f"unknown browser {browser!r}")
+        self.cfg.cookies_from_browser = browser or None  # the job services share this Config
+        config_mod.save_setting("cookies_from_browser", self.cfg.cookies_from_browser)
+        return self.settings()
+
     def state(self) -> dict[str, Any]:
         return {
+            "settings": self.settings(),
             "library": str(self.library),
             "albums": self.albums(),
             "jobs": [j.summary() for j in self.jobs.recent()],
@@ -301,7 +314,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "too large")
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
-            job = self.app.submit(url.path.removeprefix("/api/"), body if isinstance(body, dict) else {})
+            body = body if isinstance(body, dict) else {}
+            if url.path == "/api/settings":
+                return self._json(self.app.save_settings(body))
+            job = self.app.submit(url.path.removeprefix("/api/"), body)
         except (ValueError, json.JSONDecodeError) as e:
             return self._error(HTTPStatus.BAD_REQUEST, str(e))
         return self._json({"job": job.summary()}, HTTPStatus.ACCEPTED)

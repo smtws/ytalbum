@@ -53,6 +53,7 @@ async function poll() {
     state = await api("/api/state");
     renderLibrary();
     renderJobs();
+    renderSettings();
     if (waitingFor) {
       const job = state.jobs.find((j) => j.id === waitingFor);
       if (job && !["queued", "running"].includes(job.state)) {
@@ -232,6 +233,28 @@ function renderLog(job) {
   const pre = job && document.getElementById(`log-${job.id}`);
   if (pre) { pre.textContent = job.log.join("\n"); pre.scrollTop = pre.scrollHeight; }
 }
+
+// -- settings ----------------------------------------------------------------------------
+
+const BROWSER_NAMES = { firefox: "Firefox", chrome: "Chrome", chromium: "Chromium", brave: "Brave", edge: "Edge", vivaldi: "Vivaldi", opera: "Opera" };
+
+function renderSettings() {
+  const sel = $("#browser");
+  if (document.activeElement === sel || !state.settings) return;
+  const current = state.settings.cookies_from_browser || "";
+  const options = ["", ...state.settings.browsers];
+  if (current && !options.includes(current)) options.push(current); // e.g. "firefox:profile"
+  sel.replaceChildren(...options.map((b) => h("option", { value: b, selected: b === current }, b ? BROWSER_NAMES[b.split(":")[0]] || b : "none")));
+}
+
+$("#browser").addEventListener("change", async (ev) => {
+  try {
+    state.settings = await api("/api/settings", { cookies_from_browser: ev.target.value });
+  } catch (e) {
+    alert(e.message);
+  }
+  renderSettings();
+});
 
 // -- wiring ------------------------------------------------------------------------------
 

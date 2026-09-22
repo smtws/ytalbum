@@ -12,6 +12,23 @@ from pathlib import Path
 JS_RUNTIMES = ("deno", "node", "bun", "quickjs")
 
 
+# where yt-dlp looks for each browser's profile (Linux), so we only offer what exists
+BROWSER_DIRS = {
+    "firefox": ("~/.mozilla/firefox", "~/snap/firefox/common/.mozilla/firefox", "~/.var/app/org.mozilla.firefox/.mozilla/firefox"),
+    "chrome": ("~/.config/google-chrome",),
+    "chromium": ("~/.config/chromium", "~/snap/chromium/common/chromium"),
+    "brave": ("~/.config/BraveSoftware/Brave-Browser",),
+    "edge": ("~/.config/microsoft-edge",),
+    "vivaldi": ("~/.config/vivaldi",),
+    "opera": ("~/.config/opera",),
+}
+
+
+def detect_browsers() -> list[str]:
+    """Browsers with a profile on this machine, in yt-dlp's naming."""
+    return [name for name, dirs in BROWSER_DIRS.items() if any(Path(d).expanduser().is_dir() for d in dirs)]
+
+
 def config_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
     return Path(base) / "ytalbum" / "config.toml"

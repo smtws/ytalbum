@@ -57,3 +57,5 @@ td.src { width: 7rem; white-space: nowrap; }
 .job pre { max-height: 16rem; overflow: auto; white-space: pre-wrap; font-size: .78rem; margin: .4rem 0 0; }
 .job button { padding: .1rem .5rem; font-size: .78rem; }
 @media (max-width: 40rem) { .fields { grid-template-columns: 1fr; } td.src { display: none; } }
+.login { font-size: .85rem; color: var(--muted); display: flex; gap: .4rem; align-items: center; }
+select { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .4rem .5rem; }
