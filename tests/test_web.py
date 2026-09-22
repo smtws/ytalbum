@@ -184,3 +184,32 @@ def test_thumbnails_are_proxied_only_from_allowed_hosts(server, monkeypatch):
     for bad in ("https://evil.example/x.jpg", "http://i.ytimg.com/x.jpg", "file:///etc/passwd", "https://notytimg.com/x.jpg", ""):
         assert c.get("/api/thumb", params={"u": bad}).status_code == 404
     assert len(calls) == 1  # never fetched anything outside the allowlist
+
+
+def test_details_runner_fills_counts_in_the_background(server):
+    app, c = server
+    resolved = []
+
+    class FakeYT:
+        def playlist_details(self, url):
+            resolved.append(url)
+            return {"count": 13, "thumbnail": "https://i.ytimg.com/vi/x/hq.jpg", "title": "T"}
+
+    app.details._youtube = lambda: FakeYT()
+    app.details.PAUSE = 0
+    refs = [{"id": "PL1", "url": "https://www.youtube.com/playlist?list=PL1"}]
+    assert c.post("/api/details", json={"refs": refs}, headers=HDR).json() == {}  # queued, nothing known yet
+    for _ in range(100):
+        got = c.post("/api/details", json={"refs": refs}, headers=HDR).json()
+        if got:
+            break
+        time.sleep(0.05)
+    assert got["PL1"]["count"] == 13
+    assert resolved == ["https://www.youtube.com/playlist?list=PL1"]  # asked once, then cached
+
+
+def test_details_ignores_foreign_urls_and_oversized_requests(server):
+    app, c = server
+    app.details._youtube = lambda: pytest.fail("must not fetch")
+    assert c.post("/api/details", json={"refs": [{"id": "x", "url": "https://evil.example/p"}]}, headers=HDR).json() == {}
+    assert c.post("/api/details", json={"refs": [{"id": str(i), "url": "https://www.youtube.com/playlist?list=x"} for i in range(201)]}, headers=HDR).status_code == 400

@@ -193,6 +193,20 @@ class YouTube:
             log.info("album %s: %s", browse_id, _short_error(e))
             return None
 
+    def playlist_details(self, url: str) -> dict[str, Any] | None:
+        """One cheap flat request: how many entries a playlist has, plus a thumbnail."""
+        self.check()
+        with YoutubeDL(self._params(extract_flat="in_playlist")) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not info or info.get("_type") != "playlist":
+            return None
+        entries = [e for e in info.get("entries") or [] if e]
+        return {
+            "count": len(entries),
+            "thumbnail": best_thumbnail(entries[0]) if entries else best_thumbnail(info),
+            "title": nfc(info.get("title")),
+        }
+
     def search_playlists(self, query: str, limit: int = 10) -> list[SourceRef]:
         """YouTube search restricted to playlists (lyric-video albums, fan compilations)."""
         url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}&sp=EgIQAw%253D%253D"

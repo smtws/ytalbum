@@ -37,7 +37,7 @@ from .config import Config
 from .download import COVER_STEM, iter_plans
 from .models import AlbumPlan
 from .service import Outcome, Service, _inside, channel_base_url
-from .youtube import Cancelled
+from .youtube import Cancelled, YouTube
 from .tag import image_mime
 
 log = logging.getLogger(__name__)
@@ -154,6 +154,60 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+class Details:
+    """Fills in what a listing does not tell us (track count, cover), one playlist at a time.
+
+    Runs beside the job worker: slow on purpose, cached, and it backs off when YouTube
+    starts refusing (a fast search must never cost a bot check).
+    """
+
+    WORKERS = 2  # together with PAUSE: about one request per second
+    PAUSE = 1.0  # between playlists, per worker
+    BACKOFF = 600.0  # after a bot check
+
+    def __init__(self, youtube: Callable[[], Any]) -> None:
+        self._youtube = youtube
+        self.known: dict[str, dict[str, Any]] = {}
+        self._queue: queue.Queue[tuple[str, str]] = queue.Queue()
+        self._pending: set[str] = set()
+        self._lock = threading.Lock()
+        self._blocked_until = 0.0
+        for i in range(self.WORKERS):
+            threading.Thread(target=self._work, name=f"ytalbum-details-{i}", daemon=True).start()
+
+    def want(self, refs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Queue what we do not know yet; return what we already have."""
+        for ref in refs:
+            source_id, url = str(ref.get("id", "")), str(ref.get("url", ""))
+            if not source_id or not url.startswith("https://www.youtube.com/") or source_id in self.known:
+                continue
+            with self._lock:
+                if source_id in self._pending:
+                    continue
+                self._pending.add(source_id)
+            self._queue.put((source_id, url))
+        return {r["id"]: self.known[r["id"]] for r in refs if r.get("id") in self.known}
+
+    def _work(self) -> None:
+        while True:
+            source_id, url = self._queue.get()
+            if time.monotonic() < self._blocked_until:
+                self.known[source_id] = {"unknown": True}
+            else:
+                try:
+                    self.known[source_id] = self._youtube().playlist_details(url) or {"unknown": True}
+                except Exception as e:
+                    self.known[source_id] = {"unknown": True}
+                    if "not a bot" in str(e):
+                        self._blocked_until = time.monotonic() + self.BACKOFF
+                        log.info("details paused: YouTube is refusing requests")
+                    else:
+                        log.debug("details for %s: %s", url, e)
+            with self._lock:
+                self._pending.discard(source_id)
+            time.sleep(self.PAUSE)
+
+
 # -- the app ---------------------------------------------------------------------------------
 
 
@@ -165,6 +219,7 @@ class App:
         self._thumbs: dict[str, tuple[bytes, str]] = {}
         self._service_factory = service_factory or (lambda job: Service(cfg, self.library, log=lambda s: _append(job, s), on_track=lambda t, what: _append(job, f"{what}: {t.number:02d} {t.artist} - {t.title}"), cancel=job.cancel))
         self.jobs = Jobs(self._service_factory)
+        self.details = Details(lambda: YouTube(self.cfg))
 
     # read side
 
@@ -471,6 +526,11 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
             body = body if isinstance(body, dict) else {}
+            if url.path == "/api/details":
+                refs = body.get("refs") or []
+                if not isinstance(refs, list) or len(refs) > 200:
+                    raise ValueError("refs must be a list of at most 200 entries")
+                return self._json(self.app.details.want([r for r in refs if isinstance(r, dict)]))
             if url.path == "/api/cancel":
                 job = self.app.jobs.cancel(int(body.get("id", 0)))
                 return self._json(job.summary()) if job else self._error(HTTPStatus.NOT_FOUND, "no such job")

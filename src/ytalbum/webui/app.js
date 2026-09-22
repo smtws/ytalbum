@@ -257,7 +257,7 @@ function saveAlbum(ev) {
 
 function showResult(job) {
   const panel = $("#results");
-  const close = h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; } }, "Close");
+  const close = h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; clearTimeout(detailTimer); } }, "Close");
   const r = job.result;
   if (job.state !== "done" || !r) {
     fill(panel, h("div", { class: "panel-head" }, h("h2", {}, "That did not work"), close),
@@ -296,6 +296,7 @@ function pickView(r, close) {
     } }, "select all");
     return h("div", { class: "group" }, h("h3", {}, g.label, h("span", { class: "badge" }, g.refs.length), all), h("div", { class: "picks" }, cards));
   });
+  fillDetails((r.groups || []).flatMap((g) => g.refs));
   return [
     h("div", { class: "panel-head" },
       h("div", {}, h("h2", {}, r.groups?.length ? "Found" : "Nothing found"),
@@ -311,15 +312,47 @@ function pickView(r, close) {
 
 function pickCard(ref, inLibrary) {
   const box = h("input", { type: "checkbox", value: ref.url, onclick: (e) => e.stopPropagation() });
-  const meta = [ref.count ? `${ref.count} tracks` : null, ref.tab === "search" && ref.artist ? `by ${ref.artist}` : null].filter(Boolean).join(" · ");
-  const label = h("label", { class: `pick${inLibrary ? " have" : ""}`, onclick: () => setTimeout(updatePickCount) },
-    h("div", { class: "pick-cover" },
-      ref.thumbnail ? h("img", { src: `/api/thumb?u=${encodeURIComponent(ref.thumbnail)}`, alt: "", loading: "lazy" }) : h("div", { class: "cover none" }, "♪"),
-      box),
+  const label = h("label", { class: `pick${inLibrary ? " have" : ""}`, "data-id": ref.id, onclick: () => setTimeout(updatePickCount) },
+    h("div", { class: "pick-cover" }, cover(ref), box),
     h("div", { class: "pick-title" }, ref.title),
-    h("div", { class: "muted pick-meta" }, meta || "\u00a0", inLibrary ? h("span", { class: "badge ok" }, "in library") : null));
+    h("div", { class: "muted pick-meta" }, pickMeta(ref), inLibrary ? h("span", { class: "badge ok" }, "in library") : null));
   box.addEventListener("change", () => label.classList.toggle("on", box.checked));
   return label;
+}
+
+const cover = (ref) => (ref.thumbnail
+  ? h("img", { src: `/api/thumb?u=${encodeURIComponent(ref.thumbnail)}`, alt: "", loading: "lazy" })
+  : h("div", { class: "cover none" }, "♪"));
+
+const pickMeta = (ref) => h("span", { class: "meta-text" },
+  [ref.count ? `${ref.count} tracks` : ref.unknown ? "" : "…", ref.tab === "search" && ref.artist ? `by ${ref.artist}` : null].filter(Boolean).join(" · ") || "\u00a0");
+
+// details (track count, cover) are not in YouTube's listings: a background runner on the
+// server fetches them one playlist at a time, we poll and fill them in as they arrive
+let detailTimer = null;
+
+async function fillDetails(refs) {
+  clearTimeout(detailTimer);
+  const panel = $("#results");
+  const todo = () => refs.filter((r) => !r.count && !r.unknown);
+  const step = async () => {
+    if (panel.hidden || !todo().length) return;
+    try {
+      const known = await api("/api/details", { refs: todo().map((r) => ({ id: r.id, url: r.url })) });
+      for (const ref of refs) {
+        const info = known[ref.id];
+        const card = panel.querySelector(`.pick[data-id="${CSS.escape(ref.id)}"]`);
+        if (!info || !card) continue;
+        Object.assign(ref, info);
+        card.querySelector(".meta-text").replaceWith(pickMeta(ref));
+        if (ref.thumbnail && !card.querySelector("img")) card.querySelector(".cover.none").replaceWith(cover(ref));
+      }
+    } catch (e) {
+      console.warn("details failed", e);
+    }
+    detailTimer = setTimeout(step, 2000);
+  };
+  step();
 }
 
 function updatePickCount() {
