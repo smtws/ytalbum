@@ -98,6 +98,7 @@ another AI-assisted project by this repository's owner, and it is the reason hal
 tool exists: twenty volumes of thirteen different bands each, where no release, no
 tracklist and no cover exists to look up — so the names have to be earned from the video
 titles and MusicBrainz one track at a time.
+
 ## How it works
 
 ```
