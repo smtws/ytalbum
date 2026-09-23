@@ -90,6 +90,14 @@ idle minutes.
 | ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
 | **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library, filtered to one artist:** covers, track counts, MusicBrainz badge, and "check for new albums" for that artist alone. |
 
+The compilations throughout these screenshots are
+[**My Dark Lullabies**](https://www.youtube.com/@MyDarkLullabies) — *"a curated collection
+of sleep playlists for restless minds, melancholic souls, and lovers of the night"*, one
+themed volume at a time, from darkwave and neofolk to doom and ritual ambient. It is
+another AI-assisted project by this repository's owner, and it is the reason half of this
+tool exists: twenty volumes of thirteen different bands each, where no release, no
+tracklist and no cover exists to look up — so the names have to be earned from the video
+titles and MusicBrainz one track at a time.
 ## How it works
 
 ```
