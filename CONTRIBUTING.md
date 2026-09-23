@@ -31,6 +31,17 @@ uv run pytest        # ~240 tests, a few seconds
 They answer from responses recorded in `design-fixtures/`, so they need **no network, no
 credentials and no ffmpeg**, and they keep working when YouTube starts refusing requests.
 
+## Keeping yt-dlp current
+
+yt-dlp decides whether this project works at all: YouTube changes, yt-dlp follows. Dependabot
+opens a weekly PR for it (and for nothing else). Note what CI can and cannot tell you about
+such a bump — the tests answer from recorded fixtures, so a green run proves the yt-dlp API
+we call still exists, **not** that YouTube still works. That needs one real fetch:
+
+```sh
+uv run ytalbum fetch "https://www.youtube.com/playlist?list=…" --dry-run --no-mb
+```
+
 ## The rules this codebase follows
 
 They are in [DESIGN.md](DESIGN.md) §10, and they exist because the two previous versions of

@@ -1,0 +1,21 @@
+version: 2
+
+# Deliberately narrow: yt-dlp is the dependency that decides whether this project works at
+# all — YouTube changes and yt-dlp follows, usually within days. Everything else here
+# (httpx, mutagen, Pillow) is stable, runs on the owner's laptop and holds no secrets, so a
+# PR for it would be noise. Dependabot's security alerts still cover the whole tree.
+#
+# NOT updated on purpose: bgutil-ytdlp-pot-provider. Its version must match the token server
+# checked out in .pot-provider (see README), so bumping the package alone breaks the setup.
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    allow:
+      - dependency-name: yt-dlp
+    labels: [dependencies]
+    commit-message:
+      prefix: deps
+    open-pull-requests-limit: 2
