@@ -149,9 +149,19 @@ Order of trust for a track's artist + title:
 4. Parse `A - B` / `A "B"` / `A – B`; strip noise: `(Official Video)`, `(Official Music Video)`,
    `(Official Lyric Video)`, `(Official Visualizer)`, `[4K UPGRADE]`, `(LYRICS)`,
    `| <Label>` suffix, `(feat. @handle)` → `feat. Handle`.
+   A dash only separates artist and title when what follows it is one: if the right side is
+   *only* a video label (`"Mad World" (feat. Gary Jules) - Official Music Video`), the whole
+   text is the song and the artist comes from the channel (added 2026-09-23; v2 handled this
+   shape with ~40 literal suffix strings, which is exactly the tuning this rule replaces).
 5. Label / lyrics / fan channels (Napalm Records, "Common Sense", "dernachtwaechter")
    are never the artist. Reverse order ("Lullaby of Woe - Ashley Serena") is only fixable
    by a lookup (MB recording search both ways) or the user.
+6. **Guest credits live in the title, never in the artist field** (2026-09-23):
+   `Feuerschwanz ft. Melissa Bonny` / `Ding` → `Feuerschwanz` / `Ding ft. Melissa Bonny`,
+   applied to all three sources (video title, YouTube Music, MusicBrainz artist-credit).
+   Otherwise every collaboration becomes its own "artist" with its own folder. The marker is
+   kept as written, a guest already named in the title is not repeated, and a credit naming
+   the track's own artist is dropped (`Gary Jules` / `Mad World (feat. Gary Jules)`).
 
 Every rule gets a fixture case from `design-fixtures/vol1.json`; the expected results are
 the right-hand column of the table in §8.
@@ -196,7 +206,7 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
 | Fixture | Asserts |
 |---|---|
 | `tab_playlists.json` (@MyDarkLullabies/playlists) | channel → 20 sources; flat `playlist_count` is never used as a track count |
-| `vol1.json` (Vol. 1 - Heavy Sleeping) | kind = compilation; intro card skipped → 13 tracks; parsed artists: Enemy Inside, Dominum feat. Feuerschwanz, Mono Inc(.), Schandmaul, Subway to Sally, Lacrimosa, Letzte Instanz, Mantus, Erben der Schöpfung, Disturbed, Ashley Serena*, Lord of the Lost, Tungsten (*needs lookup) |
+| `vol1.json` (Vol. 1 - Heavy Sleeping) | kind = compilation; intro card skipped → 13 tracks; parsed artists: Enemy Inside, Dominum (the `feat.` belongs in the title, §5.6), Mono Inc(.), Schandmaul, Subway to Sally, Lacrimosa, Letzte Instanz, Mantus, Erben der Schöpfung, Disturbed, Ashley Serena*, Lord of the Lost, Tungsten (*needs lookup) |
 | `legends.json` (Sabaton channel "Full Album" playlist) | kind = artist_playlist, not official_album; MB release "Legends" must NOT be auto-accepted (17 entries vs 11 songs) |
 | to capture: an `OLAK5uy_` album | kind = official_album; MB match accepted; tracklist from MB |
 | to capture: a chaptered full-album video | chapter split, titles from chapters |
@@ -243,8 +253,9 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    labels if they contain a marker word ("(Music of the Night)" stays).
 5. ✅ MusicBrainz enrichment (album + recording level) with provenance and cover art.
    *Done 2026-09-22:* Vol. 1 13/13 recordings (incl. the reversed "Lullaby of Woe" via a
-   swapped query, "DOMINUM feat. Feuerschwanz" picked because the `@xxFEUERSCHWANZxx`
-   handle contains the guest's name), Vol. 20 9/12, official Legends matched as a release
+   swapped query; the credit "DOMINUM feat. Feuerschwanz" picked because the
+   `@xxFEUERSCHWANZxx` handle contains the guest's name — since 2026-09-23 stored as
+   artist "DOMINUM" + title "The Dead Don't Die feat. Feuerschwanz", §5.6), Vol. 20 9/12, official Legends matched as a release
    (year, tracklist, 500×500 Cover Art Archive front, `musicbrainz_*id` tags). The fan
    "Full Album" playlist is correctly *not* accepted as the release. Rules found on the
    way: a title with extra info MB lacks ("(Live)", "(Behind The Scenes Documentary)")
@@ -285,6 +296,19 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    losslessly with `ffmpeg -c copy` from `.originals/<video_id>.opus`, which is kept, so
    clearing the trim restores the original byte for byte; one button applies a trim to
    every track of one uploader across the library.
+
+9. ✅ Library hygiene and desktop integration (2026-09-23). Artist fields hold the performer
+   only — yt-dlp lists writers and producers in `artists` too, MusicBrainz credit phrases
+   carry guests, and both had produced folders like `Feuerschwanz feat. Melissa Bonny`.
+   Added: performer-only extraction, guest credits into the title (§5.6), one spelling per
+   artist across the library, and a video listed twice in a playlist counted as one track.
+   `ytalbum repair` applies all of it offline to what is already on disk (21 tracks in 12
+   albums here), and skips anything the user edited.
+   Also `ytalbum app install`: a browser-installed PWA keeps the browser's window class
+   (`WM_CLASS = "crx_<app-id>", "Google-chrome"`), and desktops group the taskbar by that
+   class, so it shows up as another browser window. No manifest key changes it — the class
+   comes from the browser process, and `--class` is only honoured by a process of its own,
+   so the launcher pairs it with a profile directory of its own.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

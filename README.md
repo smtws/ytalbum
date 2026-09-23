@@ -13,7 +13,10 @@ Comes with a command line and a small web app for the library.
   curated compilation (14 songs by 14 bands), or a single.
 - **It finds the real artist and title per track.** YouTube Music's own fields first, then
   the video title (stripping "(Official Video)", label suffixes and the like), then
-  MusicBrainz — which also fixes reversed "Song - Artist" titles and adds guest credits.
+  MusicBrainz — which also fixes reversed "Song - Artist" titles.
+- **The artist field stays the performer.** A guest credit moves into the title
+  (`Feuerschwanz` / `Ding (SEEED Cover) ft. Melissa Bonny`), so a collaboration does not
+  become an artist of its own, and one artist keeps one spelling across the library.
 - **It downloads the best audio YouTube has** (Opus, usually 130–160 kbps) and never
   re-encodes it.
 - **It tags everything**, embeds the cover and files it as
@@ -113,7 +116,7 @@ Library/
 | `ytalbum serve` | Web UI. `--host 0.0.0.0` exposes it to the network (**no login!**), `--port`, `--idle-exit SECONDS`. |
 | `ytalbum service install\|status\|restart\|uninstall` | Run the web UI on demand via a systemd **user** socket: the first request starts it, it stops itself when idle. `restart` refuses while a job runs unless given `--force`. |
 | `ytalbum app install\|status\|uninstall` | Desktop launcher (Linux) that opens the UI in a window of its own instead of another browser window. `--remove-profile` on uninstall also drops the app's browser profile. |
-| `ytalbum repair` | One-off, offline: performer-only artist names, one spelling per artist, duplicate tracks removed — renames and retags, no downloads. |
+| `ytalbum repair` | One-off, offline: performer-only artist names, guest credits moved into the title, one spelling per artist, duplicate tracks removed — renames and retags, no downloads. |
 | `ytalbum config` | Show or change settings: `--library`, `--cookies-from-browser BROWSER[:PROFILE]`, `--cookies-file FILE`. |
 
 Exit codes: `0` fine, `1` something failed, `2` wrong usage, `3` YouTube is blocking
@@ -243,7 +246,7 @@ Please respect MusicBrainz' [rate limits](https://musicbrainz.org/doc/MusicBrain
 ## Tests
 
 ```sh
-uv run pytest        # 198 tests, offline, ~11 s
+uv run pytest        # 224 tests, offline, ~11 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/`, so they
