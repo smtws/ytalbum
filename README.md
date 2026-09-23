@@ -1,4 +1,4 @@
-# ytalbum
+<h1><img src="src/ytalbum/webui/icon.svg" alt="" height="30" align="top"> ytalbum</h1>
 
 Turn YouTube playlists into properly tagged albums: correct artist and title per track,
 album art, MusicBrainz data where it exists, and the audio copied without re-encoding.
