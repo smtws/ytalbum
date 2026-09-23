@@ -114,3 +114,25 @@ def test_a_failing_quick_check_falls_back_to_reading(library):
     yt.source_state = boom
     service(tmp_path, yt).update_all()
     assert yt.full_fetches == 1
+
+
+def test_update_can_be_limited_to_one_artist(tmp_path, opus_template):
+    from ytalbum.models import Collection
+
+    first = vol1()
+    plan_one = build_plan(first)
+    yt = CountingYouTube(opus_template, [e.video_id for e in first.entries])
+    run(plan_one, tmp_path / plan_one.folder, yt)
+
+    other = vol1()  # a second album under a different artist
+    other.source_id, other.source_url, other.channel = "PLother", "https://www.youtube.com/playlist?list=PLother", "Someone Else"
+    plan_two = build_plan(other)
+    plan_two.albumartist = "Someone Else"
+    from ytalbum.plan import refresh_derived
+
+    refresh_derived(plan_two)
+    run(plan_two, tmp_path / plan_two.folder, yt)
+
+    yt.state_calls = 0
+    Service(Config(musicbrainz=False), tmp_path, yt=yt).update_all(artist="Someone Else")
+    assert yt.state_calls == 1  # only that artist's album was checked

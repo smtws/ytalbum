@@ -145,19 +145,32 @@ function schedulePoll(ms) {
 // -- library ---------------------------------------------------------------------
 
 let gridShows = "";
+let artistFilter = null;
+
+function shownAlbums() {
+  return artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums;
+}
+
+function showArtist(name) {
+  artistFilter = name;
+  $("#libtitle").textContent = name || "Library";
+  $("#artist-actions").hidden = !name;
+  renderLibrary();
+  $("#grid").querySelector(".card")?.focus();
+}
 
 function renderLibrary() {
-  $("#libpath").textContent = state.library || "";
+  $("#libpath").textContent = artistFilter ? `${shownAlbums().length} albums` : state.library || "";
   const grid = $("#grid");
-  const signature = JSON.stringify(state.albums);
+  const signature = JSON.stringify(shownAlbums()) + artistFilter;
   if (signature !== gridShows) {
     // rebuilding throws away the focused card, which would break arrow-key navigation
     const focused = document.activeElement?.closest?.("#grid .card")?.dataset.id;
     gridShows = signature;
-    fill(grid, state.albums.map(card));
+    fill(grid, shownAlbums().map(card));
     if (focused) grid.querySelector(`.card[data-id="${CSS.escape(focused)}"]`)?.focus();
   }
-  $("#empty").hidden = state.albums.length > 0;
+  $("#empty").hidden = shownAlbums().length > 0;
 }
 
 function card(a) {
@@ -176,7 +189,9 @@ function card(a) {
     h("div", { class: "cover-wrap" }, cover, play),
     h("div", { class: "meta" },
       h("div", { class: "title" }, a.album),
-      h("div", { class: "artist" }, a.albumartist),
+      h("div", { class: "artist" },
+        h("span", { class: "link", role: "button", tabindex: "-1", title: `Show only ${a.albumartist}`,
+          onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, a.albumartist)),
       h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null)));
 }
 
@@ -594,6 +609,16 @@ async function saveSettings(ev) {
 }
 
 $("#gear").addEventListener("click", openSettings);
+$("#artist-all").addEventListener("click", () => showArtist(null));
+$("#artist-update").addEventListener("click", (e) => submit("update", { artist: artistFilter, deep: e.shiftKey }, e.currentTarget));
+$("#artist-new").addEventListener("click", async (e) => {
+  const id = await submit("open", { q: artistFilter }, e.currentTarget);
+  if (id) {
+    waitingFor = id;
+    fill($("#results"), h("p", { class: "muted" }, `Looking for albums by “${artistFilter}” …`));
+    $("#results").hidden = false;
+  }
+});
 
 // Escape closes whichever panel is open, and the album editor gives focus back to its tile
 document.addEventListener("keydown", (e) => {
@@ -601,6 +626,7 @@ document.addEventListener("keydown", (e) => {
   if (!$("#album").hidden) closeAlbum();
   else if (!$("#results").hidden) { $("#results").hidden = true; clearTimeout(detailTimer); }
   else if (!$("#settings").hidden) $("#settings").hidden = true;
+  else if (artistFilter) showArtist(null);
 });
 
 // -- player ----------------------------------------------------------------------------

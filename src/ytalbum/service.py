@@ -183,11 +183,13 @@ class Service:
                 break
         return outcomes
 
-    def update_all(self, report_only: bool = False, deep: bool = False) -> list[Outcome]:
-        """Check every album. Unchanged, complete albums cost one request instead of one per video."""
+    def update_all(self, report_only: bool = False, deep: bool = False, artist: str | None = None) -> list[Outcome]:
+        """Check every album (or one artist's). Unchanged, complete albums cost one request."""
         albums = list(iter_plans(self.library)) if self.library and self.library.exists() else []
+        if artist:
+            albums = [(d, p) for d, p in albums if p.albumartist.casefold() == artist.casefold()]
         if not albums:
-            self.log(f"no albums in {self.library}")
+            self.log(f"no albums{f' by {artist}' if artist else ''} in {self.library}")
         outcomes: list[Outcome] = []
         skipped = 0
         for i, (album_dir, plan) in enumerate(albums, 1):

@@ -400,7 +400,9 @@ class App:
                 return self.jobs.submit("fetch", f"Fetch {label}" if len(urls) > 1 else f"Update {label}" if " — " in label else f"Fetch {label}", fetch_all)
             case "update":
                 deep = bool(body.get("deep"))
-                return self.jobs.submit("update", "Update the library" + (" (full)" if deep else ""), lambda s: s.update_all(deep=deep))
+                artist = str(body.get("artist") or "").strip() or None
+                label = f"Update {artist}" if artist else "Update the library"
+                return self.jobs.submit("update", label + (" (full)" if deep else ""), lambda s: s.update_all(deep=deep, artist=artist))
             case "prune":
                 found = self.album(str(body.get("id", "")))
                 if not found:

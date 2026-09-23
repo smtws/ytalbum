@@ -31,7 +31,13 @@
     <section id="results" class="panel" hidden></section>
     <section id="album" class="panel" hidden></section>
     <section>
-      <div class="section-head"><h2>Library</h2><span id="libpath" class="muted"></span></div>
+      <div class="section-head"><h2 id="libtitle">Library</h2><span id="libpath" class="muted"></span>
+        <span id="artist-actions" class="artist-actions" hidden>
+          <button id="artist-new" class="quiet" type="button" title="Search YouTube for this artist — albums you already have are marked">Check for new albums</button>
+          <button id="artist-update" class="quiet" type="button" title="Re-check only this artist's albums against their sources">Update these albums</button>
+          <button id="artist-all" class="quiet" type="button">Show all artists</button>
+        </span>
+      </div>
       <div id="grid" class="grid"></div>
       <p id="empty" class="muted" hidden>Nothing here yet. Paste a playlist URL or type an artist above.</p>
     </section>
