@@ -331,3 +331,16 @@ def test_prune_never_deletes_outside_the_album(tmp_path, yt):
     save_plan(plan, album_dir)
     Service(Config(musicbrainz=False), tmp_path, yt=yt).prune(album_dir)
     assert victim.read_text() == "keep me"
+
+
+def test_a_video_listed_twice_becomes_one_track():
+    # YouTube allows the same video more than once in a playlist (seen on an album playlist)
+    doubled = vol1()
+    doubled.entries.append(doubled.entries[3])
+    plan = build_plan(doubled)
+    assert len(plan.tracks) == 13
+    assert len({t.video_id for t in plan.tracks}) == 13
+    assert len({t.filename for t in plan.tracks}) == 13
+
+    merged = merge_plans(build_plan(vol1()), plan)
+    assert len(merged.tracks) == 13 and len({t.filename for t in merged.tracks}) == 13

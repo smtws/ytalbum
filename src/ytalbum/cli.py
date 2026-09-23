@@ -50,6 +50,9 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("album_dir", type=Path)
     pr.add_argument("--yes", action="store_true", help="do not ask")
 
+    rp = sub.add_parser("repair", help="tidy artist names in the library, offline (one-off)")
+    rp.add_argument("--library", type=Path)
+
     dl = sub.add_parser("delete", help="delete an album (or one track) — files are removed")
     dl.add_argument("album_dir", type=Path)
     dl.add_argument("--track", metavar="VIDEO_ID", help="delete only this track")
@@ -107,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
                 return _systemd(args, cfg)
             case "delete":
                 return _delete(args, cfg)
+            case "repair":
+                library = _library(args, cfg, required=True)
+                return 2 if library is None else exit_code(_service(cfg, library).repair())
     except NotSupported as e:
         print(f"not supported: {e}", file=sys.stderr)
         return 2

@@ -95,6 +95,7 @@ def run(
     yt: YouTube,
     on_track: Callable[[PlanTrack, str], None] = lambda t, what: None,
     check: Callable[[], None] = lambda: None,
+    download: bool = True,
 ) -> AlbumPlan:
     """Download, tag and place every track that is not done yet; rename/retag finished ones.
 
@@ -102,7 +103,7 @@ def run(
     """
     refresh_derived(plan)
     save_plan(plan, album_dir)
-    cover = _cover(plan, album_dir, yt)
+    cover = _cover(plan, album_dir, yt, fetch=download)
     parts = album_dir / PARTS_DIR
 
     for track in plan.tracks:
@@ -130,8 +131,8 @@ def run(
                 save_plan(plan, album_dir)
                 on_track(track, "retagged")
             continue
-        if not track.in_source:
-            continue  # gone from the playlist before we got it
+        if not track.in_source or not download:
+            continue  # gone from the playlist, or we are only tidying up files
 
         for attempt in range(1, ATTEMPTS + 1):
             try:
@@ -174,7 +175,7 @@ def cover_candidates(url: str) -> list[str]:
     return [url]
 
 
-def _cover(plan: AlbumPlan, album_dir: Path, yt: YouTube) -> bytes | None:
+def _cover(plan: AlbumPlan, album_dir: Path, yt: YouTube, fetch: bool = True) -> bytes | None:
     """The album cover, kept as cover.* in the album folder.
 
     A cover the user put there is always used. One we saved ourselves is replaced once a
@@ -197,6 +198,8 @@ def _cover(plan: AlbumPlan, album_dir: Path, yt: YouTube) -> bytes | None:
         existing.unlink()
         return _save_cover(plan, album_dir, *new)
 
+    if not fetch:
+        return None
     for url in filter(None, (plan.cover_url, plan.cover_fallback_url)):
         if found := _download_cover(url, yt):
             return _save_cover(plan, album_dir, *found)

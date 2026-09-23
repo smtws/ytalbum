@@ -75,7 +75,11 @@ These are the facts v1/v2 got wrong or never knew. Fixtures in `design-fixtures/
    any more; YouTube Music's album search (`music.youtube.com/search?q=…#albums`) returns
    `MPREb_` ids that resolve to the `OLAK5uy_` playlists, whose tracks name the real
    uploading channel (Faun → "fauntube").
-8. **YouTube's bot check.** After a few hundred requests in a day, every video answers
+8. **A playlist may list the same video twice.** Mono Inc's "The Clock Ticks On" album
+   playlist lists seven acoustic versions a second time. Both entries became tracks with
+   the same wanted filename, overwrote each other and left the renamed older copies as
+   orphans. A video is one track per album, in `usable_entries` and in `merge_plans`.
+9. **YouTube's bot check.** After a few hundred requests in a day, every video answers
    "Sign in to confirm you're not a bot" while playlist listings still work. A run then
    sees a playlist whose entries all failed — and v3 briefly reclassified Vol. 1 from that
    partial view and moved it to `Erben der Schöpfung/…`. Rules since: failures are
@@ -87,7 +91,7 @@ These are the facts v1/v2 got wrong or never knew. Fixtures in `design-fixtures/
    (`cookies_from_browser = "firefox"`) the same day's full `update` ran without a single
    bot check. (Chrome cookies stopped working for the owner earlier — Chrome changed its
    cookie storage.)
-9. **Age-restricted videos** become *readable* with a login, but an account that is not
+10. **Age-restricted videos** become *readable* with a login, but an account that is not
    age-verified gets only format 18 (360p video, low-bitrate AAC); all audio-only streams
    are withheld or need a PO token. It is *not* the account: the same video plays in high
    resolution in that very Firefox, because the browser presents a proof-of-origin token.

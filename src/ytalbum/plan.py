@@ -24,7 +24,14 @@ def skip_reason(entry: Entry, collection: Collection) -> str | None:
 
 
 def usable_entries(collection: Collection) -> list[Entry]:
-    return [e for e in collection.entries if skip_reason(e, collection) is None]
+    """Entries that become tracks. A playlist may list the same video twice — it is one track."""
+    seen: set[str] = set()
+    out = []
+    for e in collection.entries:
+        if skip_reason(e, collection) is None and e.video_id not in seen:
+            seen.add(e.video_id)
+            out.append(e)
+    return out
 
 
 # -- track-level metadata ------------------------------------------------------------
@@ -179,7 +186,7 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
     merged.skipped = fresh.skipped
     merged.source_state = fresh.source_state or merged.source_state
 
-    fresh_by_id = {t.video_id: t for t in fresh.tracks}
+    fresh_by_id = {t.video_id: t for t in fresh.tracks}  # a repeated video is one entry
     listed = set(fresh_by_id) | {s["video_id"] for s in fresh.skipped}  # skipped videos are still in the source
     known = set()
     for t in merged.tracks:
@@ -200,11 +207,16 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
 
     # numbering: the fresh plan's, then everything no longer in it, in its previous order
     by_id = {t.video_id: t for t in merged.tracks}
-    ordered = [by_id[f.video_id] for f in fresh.tracks]
+    ordered, placed = [], set()
+    for f in fresh.tracks:
+        if f.video_id not in placed:
+            placed.add(f.video_id)
+            ordered.append(by_id[f.video_id])
     rest = sorted((t for t in merged.tracks if t.video_id not in fresh_by_id), key=lambda t: (t.disc, t.number))
-    for t, f in zip(ordered, fresh.tracks):
-        t.number, t.disc = f.number, f.disc
-    last = max((f.number for f in fresh.tracks), default=0)
+    for number, t in enumerate(ordered, 1):
+        fresh_track = fresh_by_id[t.video_id]
+        t.number, t.disc = (fresh_track.number, fresh_track.disc) if len(ordered) == len(fresh.tracks) else (number, fresh_track.disc)
+    last = max((t.number for t in ordered), default=0)
     for i, t in enumerate(rest, 1):
         t.number, t.disc = last + i, max((f.disc for f in fresh.tracks), default=1)
     merged.tracks = ordered + rest

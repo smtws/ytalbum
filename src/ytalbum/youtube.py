@@ -361,7 +361,9 @@ def nfc(s: str | None) -> str | None:
 
 
 def entry_from_info(info: dict[str, Any], position: int) -> Entry:
-    artists = [nfc(a) for a in info.get("artists") or ([info["artist"]] if info.get("artist") else [])]
+    # yt-dlp lists writers and producers in `artists` too ("Feuerschwanz, Peter Henrici"),
+    # and the performer comes first — guest credits come from MusicBrainz instead
+    artists = [nfc(a) for a in info.get("artists") or ([info["artist"]] if info.get("artist") else [])][:1]
     return Entry(
         video_id=info["id"],
         position=position,

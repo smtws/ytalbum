@@ -92,9 +92,10 @@ def test_cover_candidates_prefer_maxres():
     assert cover_candidates("https://example.org/a.jpg") == ["https://example.org/a.jpg"]
 
 
-def test_entry_from_info_joins_multiple_artists():
-    e = entry_from_info({"id": "x" * 11, "title": "t", "artists": ["Dominum", "Feuerschwanz"], "track": "The Dead Don't Die"}, 2)
-    assert e.music.artist == "Dominum, Feuerschwanz"
+def test_only_the_performer_is_taken_from_youtubes_artist_list():
+    # yt-dlp lists writers and producers too: "Feuerschwanz, Benjamin Metzner, Peter Henrici"
+    e = entry_from_info({"id": "x" * 11, "title": "t", "artists": ["Feuerschwanz", "Peter Henrici"], "track": "Metvernichter"}, 2)
+    assert e.music.artist == "Feuerschwanz"
     assert e.position == 2
 
 

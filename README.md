@@ -112,6 +112,7 @@ Library/
 | `ytalbum delete <album-folder>` | Delete an album, or one track with `--track <video-id>` (asks first, `--yes` skips). |
 | `ytalbum serve` | Web UI. `--host 0.0.0.0` exposes it to the network (**no login!**), `--port`, `--idle-exit SECONDS`. |
 | `ytalbum service install\|status\|restart\|uninstall` | Run the web UI on demand via a systemd **user** socket: the first request starts it, it stops itself when idle. `restart` refuses while a job runs unless given `--force`. |
+| `ytalbum repair` | One-off, offline: performer-only artist names, one spelling per artist, duplicate tracks removed — renames and retags, no downloads. |
 | `ytalbum config` | Show or change settings: `--library`, `--cookies-from-browser BROWSER[:PROFILE]`, `--cookies-file FILE`. |
 
 Exit codes: `0` fine, `1` something failed, `2` wrong usage, `3` YouTube is blocking
@@ -233,7 +234,7 @@ Please respect MusicBrainz' [rate limits](https://musicbrainz.org/doc/MusicBrain
 ## Tests
 
 ```sh
-uv run pytest        # 193 tests, offline, ~10 s
+uv run pytest        # 198 tests, offline, ~11 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/`, so they

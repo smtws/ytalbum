@@ -20,9 +20,10 @@ from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, re
 from .trim import ORIGINALS, original_path
 from .enrich import enrich
 from .mb import MusicBrainz, default_cache_path
-from .models import AlbumPlan, PlanTrack, Provenance, SourceRef
+from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
 from .plan import build_plan, merge_plans, refresh_derived, renumber
 from .search import SearchResult, search_artist
+from .titles import key as text_key
 from .youtube import BOT_CHECK, Cancelled, YouTube, channel_base_url
 
 log = logging.getLogger(__name__)
@@ -144,12 +145,24 @@ class Service:
                 return Outcome("reported", plan)
             album_dir = self.library / plan.folder
 
+        self._harmonize_artist(plan)
         self.check()  # last point before anything on disk changes
         self.on_plan(plan)
         if plan_only:
             save_plan(plan, album_dir)
             return Outcome("planned", plan, album_dir)
         return self.execute(plan, album_dir)
+
+    def _harmonize_artist(self, plan: AlbumPlan) -> None:
+        """One spelling per artist in the library: 'SCHANDMAUL' and 'Schandmaul' are one folder."""
+        if plan.provenance.get("albumartist") == Provenance.USER or not self.library or not self.library.exists():
+            return
+        known = {p.albumartist for _, p in iter_plans(self.library)} | {plan.albumartist}
+        same = [name for name in known if text_key(name) == text_key(plan.albumartist)]
+        best = min(same, key=lambda n: (n.isupper(), n.islower(), len(n), n))  # mixed case wins
+        if best != plan.albumartist:
+            self.log(f"artist spelled '{best}' elsewhere in the library — using that")
+            plan.albumartist = plan.auto["albumartist"] = best
 
     def execute(self, plan: AlbumPlan, album_dir: Path) -> Outcome:
         todo = sum(t.state != "done" and t.in_source for t in plan.tracks)
@@ -283,6 +296,40 @@ class Service:
                 t.number = number
         save_plan(plan, album_dir)
         return self.execute(plan, album_dir)  # renames/retags only (tracktotal changed)
+
+    # -- offline repair --------------------------------------------------------------------
+
+    def repair(self) -> list[Outcome]:
+        """Tidy the library without asking YouTube: performer-only artists, one spelling.
+
+        Fixes albums downloaded before those rules existed — renames and retags only.
+        """
+        outcomes = []
+        for album_dir, plan in list(iter_plans(self.library)) if self.library and self.library.exists() else []:
+            before = (plan.albumartist, [t.artist for t in plan.tracks], len(plan.tracks))
+            seen: set[str] = set()  # the same video listed twice in a playlist is one track
+            unique = [t for t in plan.tracks if not (t.video_id in seen or seen.add(t.video_id))]
+            if len(unique) != len(plan.tracks):
+                self.log(f"{len(plan.tracks) - len(unique)} duplicate track(s) removed from the album")
+                plan.tracks = unique
+                renumber(plan)
+            for t in plan.tracks:
+                if t.provenance.get("artist") == Provenance.YT_MUSIC and ", " in t.artist:
+                    t.artist = t.auto["artist"] = t.artist.split(", ")[0]  # writers and producers
+            if plan.kind != Kind.COMPILATION and plan.provenance.get("albumartist") in (Provenance.YT_MUSIC, Provenance.YT_TITLE):
+                names = [t.artist for t in plan.tracks]
+                if names:
+                    plan.albumartist = plan.auto["albumartist"] = max(set(names), key=names.count)
+            self._harmonize_artist(plan)
+            if before == (plan.albumartist, [t.artist for t in plan.tracks], len(plan.tracks)):
+                continue
+            self.log(f"=== {plan.albumartist} — {plan.album}")
+            save_plan(plan, album_dir)
+            album_dir = relocate(album_dir, plan, self.library)
+            run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False)
+            outcomes.append(Outcome("ok", plan, album_dir))
+        self.log(f"{len(outcomes)} album(s) tidied up")
+        return outcomes
 
     # -- deleting (always asked for explicitly) -------------------------------------------
 

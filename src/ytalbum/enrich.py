@@ -189,7 +189,8 @@ def enrich_release(plan: AlbumPlan, mb: MusicBrainzAPI) -> bool:
             continue
         rg = release.get("release-group") or cand.get("release-group") or {}
         _set(plan, "album", release["title"])
-        _set(plan, "albumartist", credit_phrase(release["artist-credit"]))
+        # the album belongs to the main artist; guest credits stay on the tracks
+        _set(plan, "albumartist", credit_names(release["artist-credit"])[0] or credit_phrase(release["artist-credit"]))
         if year := (rg.get("first-release-date") or release.get("date") or "")[:4]:
             _set(plan, "year", int(year))
         plan.mbid = release["id"]
