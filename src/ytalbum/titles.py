@@ -14,14 +14,18 @@ import unicodedata
 NOISE_WORDS = {
     "official", "music", "video", "videoclip", "clip", "lyric", "lyrics", "with",
     "visualizer", "visualiser", "audio", "hd", "hq", "4k", "8k", "upgrade", "upgraded",
-    "new", "premiere", "explicit", "mv", "360", "grad", "degree",
+    "new", "premiere", "explicit", "mv", "360", "grad", "degree", "full", "fps", "60fps",
     "offizielles", "offizielle", "offizieller", "offiziell", "musikvideo", "musikclip",
+    "oficial", "officiel", "ufficiale",  # the same label in other languages
+    # resolutions: a video fact, never an audio one - unlike "(Remaster)", which stays
+    "1080p", "720p", "480p", "2160p", "1440p", "360p", "240p", "144p", "uhd", "fullhd",
 }
 # ...but only when the group clearly labels the video (so "(Music of the Night)" stays intact)
 MARKER_WORDS = {
     "official", "offizielles", "offizielle", "offizieller", "offiziell", "video", "videoclip",
     "clip", "visualizer", "visualiser", "lyric", "lyrics", "audio", "mv", "hd", "hq", "4k", "8k",
-    "musikvideo", "musikclip",
+    "musikvideo", "musikclip", "oficial", "officiel", "ufficiale",
+    "1080p", "720p", "480p", "2160p", "1440p", "360p", "240p", "144p", "uhd", "fullhd",
 }
 _BRACKETS = re.compile(r"\s*[(\[【]([^()\[\]【】]*)[)\]】]")
 # A dash separates when spaced on both sides, or - "Arcana- Innocent Child" - when what
@@ -188,17 +192,20 @@ def _clean_group(m: re.Match[str]) -> str:
 
 
 def _drop_noise_tail(title: str) -> str:
-    """Trailing video-label words that carry no punctuation: 'Gloria Offizielles Musikvideo'.
+    """Trailing video-label words that carry no punctuation: 'Strange World HD 1080p'.
 
-    Only dropped while one of them is a marker word, so "Video Killed the Radio Star" and a
-    song that merely ends in "New" keep their words.
+    The whole trailing run of noise words is judged together and dropped only if one of them
+    labels the video: "Full HD" goes, while "Life Is Full" keeps its last word, because
+    "full" alone labels nothing.
     """
     words = title.split()
-    while len(words) > 1 and re.sub(r"\W", "", words[-1]).casefold() in NOISE_WORDS:
-        if not any(re.sub(r"\W", "", w).casefold() in MARKER_WORDS for w in words[-1:]):
-            break
-        words.pop()
-    return " ".join(words) if words else title
+    plain = [re.sub(r"\W", "", w).casefold() for w in words]
+    cut = len(words)
+    while cut > 1 and plain[cut - 1] in NOISE_WORDS:
+        cut -= 1
+    if cut == len(words) or not any(w in MARKER_WORDS for w in plain[cut:]):
+        return title
+    return " ".join(words[:cut])
 
 
 def _is_noise(group: str) -> bool:

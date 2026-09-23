@@ -248,3 +248,27 @@ def test_strip_leading_artist():
         == "Annabel"
     )
     assert strip_leading_artist("Sabaton", "Bismarck") == "Bismarck"  # nothing to strip
+
+
+# -- a resolution is a video fact; a remaster is an audio one -------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "cleaned"),
+    [
+        ("Aeternus (1080p)", "Aeternus"),
+        ("Strange World HD 1080p", "Strange World"),
+        ("Perséfone (Oficial) Full HD", "Perséfone"),  # the label word in another language
+        ("Even In Death (Remastered 1080p)", "Even In Death (Remastered)"),  # keep the audio half
+        # a remaster is real information about the recording and always stays
+        ("Broken Heroes (Remaster)", "Broken Heroes (Remaster)"),
+        ("Leif Erikson (2012 Remaster)", "Leif Erikson (2012 Remaster)"),
+        ("My Last Breath (Remastered 2023)", "My Last Breath (Remastered 2023)"),
+        # words that only label a video in company, not alone
+        ("Life Is Full", "Life Is Full"),
+        ("Full Moon", "Full Moon"),
+        ("Video Killed the Radio Star", "Video Killed the Radio Star"),
+    ],
+)
+def test_video_quality_markers_go_and_audio_facts_stay(raw, cleaned):
+    assert clean_title(raw) == cleaned
