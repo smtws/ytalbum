@@ -1,5 +1,7 @@
 # Contributing
 
+By taking part here you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 **Bug reports and ideas are very welcome. Pull requests are read, but rarely merged as they
 arrive** — this is a personal project that doubles as an evaluation of what an autonomous
 coding AI can build and maintain (see the README), so a change usually gets reimplemented
