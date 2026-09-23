@@ -85,10 +85,10 @@ idle minutes.
 
 | | |
 |---|---|
-| ![Album view](docs/screenshots/album.jpg) | ![Search results](docs/screenshots/search.jpg) |
-| **Album view:** cover, editable fields, where each value came from, trim points, per-track delete — and the player with trim handles on its position bar. | **Search:** albums, singles, channel playlists and other playlists, with track counts filled in afterwards and "in library" markers. |
+| ![Album view](docs/screenshots/album.jpg) | ![Channel listing](docs/screenshots/search.jpg) |
+| **Album view:** cover, editable fields, where each value came from, trim points and per-track delete. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
 | ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
-| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests. | **Library:** covers, progress, MusicBrainz badge; click an artist to see only their albums. |
+| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library, filtered to one artist:** covers, track counts, MusicBrainz badge, and "check for new albums" for that artist alone. |
 
 ## How it works
 
