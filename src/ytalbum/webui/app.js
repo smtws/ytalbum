@@ -202,6 +202,15 @@ $("#grid").addEventListener("keydown", (e) => {
 let currentAlbum = null;
 let lastAlbumId = (() => { try { return localStorage.getItem("ytalbum-last"); } catch { return null; } })();
 
+// closing the editor hands focus back to the album's tile, so the keyboard keeps working
+function closeAlbum(focusId = currentAlbum?.source_id) {
+  $("#album").hidden = true;
+  currentAlbum = null;
+  const grid = $("#grid");
+  const tile = focusId && grid.querySelector(`.card[data-id="${CSS.escape(focusId)}"]`);
+  (tile || grid.querySelector(".card"))?.focus();
+}
+
 function markAlbum(id) {
   lastAlbumId = id;
   try { localStorage.setItem("ytalbum-last", id); } catch { /* private mode */ }
@@ -280,7 +289,7 @@ function renderAlbum() {
           alt: "", title: "Play album", onclick: () => playAlbum(p.source_id, 0), onerror: (e) => { e.currentTarget.hidden = true; } }),
         h("div", {}, h("h2", {}, `${p.albumartist} — ${p.album}`, p.year ? h("span", { class: "muted" }, ` (${p.year})`) : null),
           h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.tracks.length} tracks · ${p.folder}`))),
-      h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; currentAlbum = null; } }, "Close")),
+      h("button", { class: "quiet", type: "button", onclick: () => closeAlbum() }, "Close")),
     h("form", { id: "albumform", onsubmit: saveAlbum },
       h("div", { class: "fields" }, field("Album artist", "albumartist", p.albumartist), field("Album", "album", p.album), field("Year", "year", p.year, "number")),
       h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Artist"), h("th", {}, "Title"), h("th", { title: "cut the front / play until — for label idents and previews" }, "trim"), h("th", {}, "from"), h("th", {}, ""))), h("tbody", {}, rows)),
@@ -303,7 +312,7 @@ function deleteAlbum(plan, button) {
   const n = plan.tracks.length;
   const message = `Delete the album “${plan.albumartist} — ${plan.album}”?\n\n${n} track(s), the cover and the album data are removed from\n${plan.folder}\n\nFiles you put there yourself are kept.`;
   if (confirm(message)) {
-    submit("delete_album", { id: plan.source_id }, button).then(() => { $("#album").hidden = true; currentAlbum = null; });
+    submit("delete_album", { id: plan.source_id }, button).then(() => closeAlbum(null));
   }
 }
 
@@ -585,6 +594,14 @@ async function saveSettings(ev) {
 }
 
 $("#gear").addEventListener("click", openSettings);
+
+// Escape closes whichever panel is open, and the album editor gives focus back to its tile
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.target?.closest?.("input, select, textarea")) return;
+  if (!$("#album").hidden) closeAlbum();
+  else if (!$("#results").hidden) { $("#results").hidden = true; clearTimeout(detailTimer); }
+  else if (!$("#settings").hidden) $("#settings").hidden = true;
+});
 
 // -- player ----------------------------------------------------------------------------
 
