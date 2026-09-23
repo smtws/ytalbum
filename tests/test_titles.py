@@ -5,7 +5,7 @@ import pytest
 
 from ytalbum.models import Collection
 from ytalbum.plan import build_plan
-from ytalbum.titles import channel_artist, clean_title, move_feat, parse_video_title, split_feat
+from ytalbum.titles import channel_artist, clean_title, move_feat, parse_video_title, split_feat, strip_self_feat
 
 FIXTURES = Path(__file__).parent.parent / "design-fixtures"
 
@@ -148,3 +148,35 @@ def test_plan_moves_the_guest_credit_into_the_title():
     )
     t = build_plan(collection).tracks[0]
     assert (t.artist, t.title) == ("Feuerschwanz", "Ding (SEEED Cover) ft. Melissa Bonny")
+
+
+# -- a dash does not always separate artist and title ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("title", "channel", "parsed"),
+    [
+        # what follows the dash only labels the video: the whole text is the song
+        ('"Mad World" (feat. Gary Jules) - Official Music Video', "Gary Jules Official", (None, "Mad World (feat. Gary Jules)")),
+        ("Nachtblume - Official Lyric Video", "ASP", (None, "Nachtblume")),
+        ("Bismarck - Official Music Video", "Sabaton", (None, "Bismarck")),
+        # ...but a real title after the dash still is one
+        ("Sabaton - Bismarck (Official Music Video)", "Sabaton", ("Sabaton", "Bismarck")),
+        ("Wardruna - Helvegen - Live", "Wardruna", ("Wardruna", "Helvegen - Live")),
+    ],
+)
+def test_video_label_after_the_dash_is_not_a_title(title, channel, parsed):
+    assert parse_video_title(title, channel) == parsed
+
+
+@pytest.mark.parametrize(
+    ("artist", "title", "kept"),
+    [
+        ("Gary Jules", "Mad World (feat. Gary Jules)", "Mad World"),  # the guest is us
+        ("Gary Jules", "Mad World feat. Gary Jules", "Mad World"),
+        ("Feuerschwanz", "Ding ft. Melissa Bonny", "Ding ft. Melissa Bonny"),  # a real guest stays
+        ("Mono Inc.", "Children of the Dark (feat. Tilo Wolff)", "Children of the Dark (feat. Tilo Wolff)"),
+    ],
+)
+def test_strip_self_feat(artist, title, kept):
+    assert strip_self_feat(artist, title) == kept

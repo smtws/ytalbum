@@ -23,7 +23,7 @@ from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
 from .plan import build_plan, merge_plans, refresh_derived, renumber
 from .search import SearchResult, search_artist
-from .titles import key as text_key, move_feat
+from .titles import key as text_key, move_feat, strip_self_feat
 from .youtube import BOT_CHECK, Cancelled, YouTube, channel_base_url
 
 log = logging.getLogger(__name__)
@@ -319,7 +319,8 @@ class Service:
                 if Provenance.USER in (t.provenance.get("artist"), t.provenance.get("title")):
                     continue  # the user decided how this one reads
                 artist, title = move_feat(t.artist, t.title)  # guests belong in the title
-                if artist != t.artist:
+                title = strip_self_feat(artist, title)
+                if (artist, title) != (t.artist, t.title):
                     t.artist, t.title = artist, title
                     t.auto.update(artist=artist, title=title)
             if plan.kind != Kind.COMPILATION and plan.provenance.get("albumartist") in (Provenance.YT_MUSIC, Provenance.YT_TITLE):

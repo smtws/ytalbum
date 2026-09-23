@@ -7,7 +7,7 @@ import copy
 from collections import Counter
 
 from .models import AlbumPlan, Collection, Entry, Kind, PlanTrack, Provenance
-from .titles import NOISE_WORDS, channel_artist, key, move_feat, parse_video_title
+from .titles import NOISE_WORDS, channel_artist, key, move_feat, parse_video_title, strip_self_feat
 
 MIN_TRACK_SECONDS = 30  # shorter entries are intro cards, not songs (DESIGN.md §3.4)
 
@@ -98,6 +98,7 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         artist, artist_prov = track_artist(entry)
         title, title_prov = track_title(entry)
         artist, title = move_feat(artist, title)  # guests belong in the title
+        title = strip_self_feat(artist, title)
         tracks.append(
             PlanTrack(
                 video_id=entry.video_id,

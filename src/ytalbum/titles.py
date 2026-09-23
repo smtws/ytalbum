@@ -25,6 +25,7 @@ MARKER_WORDS = {
 _BRACKETS = re.compile(r"\s*[(\[【]([^()\[\]【】]*)[)\]】]")
 _SEPARATOR = re.compile(r"\s+[-–—~]{1,2}\s+")
 _QUOTED = re.compile(r'^(?P<artist>[^"“”„]+?)\s*["“„](?P<title>[^"“”]+)["”“](?P<rest>.*)$')
+_LEADING_QUOTED = re.compile(r'^["“„](?P<title>[^"“”]+)["”“](?P<rest>.*)$')
 _CHANNEL_NOISE = re.compile(r"(\s*-\s*topic|vevo|\s*official)$", re.I)
 
 
@@ -65,6 +66,21 @@ def move_feat(artist: str, title: str) -> tuple[str, str]:
     return main, f"{title} {guests}"
 
 
+def strip_self_feat(artist: str, title: str) -> str:
+    """'Gary Jules' - 'Mad World (feat. Gary Jules)': the guest is the artist. Drop the credit."""
+    if not artist:
+        return title
+
+    def drop(m: re.Match[str]) -> str:
+        guests = _FEAT_WORD.split(m[1], maxsplit=1)
+        return "" if len(guests) == 2 and key(guests[1]) == key(artist) else m[0]
+
+    out = _BRACKETS.sub(drop, title)
+    if (m := _FEAT_TAIL.search(out)) and key(m["guests"]) == key(artist):
+        out = out[: m.start()]
+    return re.sub(r"\s+", " ", out).strip(" -–—~")
+
+
 def key(s: str) -> str:
     """Comparison key: case- and punctuation-insensitive."""
     return re.sub(r"\W+", "", s.casefold())
@@ -101,7 +117,9 @@ def parse_video_title(title: str, channel: str | None) -> tuple[str | None, str]
     text = unicodedata.normalize("NFC", title).split(" | ")[0]
 
     parts = _SEPARATOR.split(text, maxsplit=1)
-    if len(parts) == 2:
+    # '"Mad World" (feat. Gary Jules) - Official Music Video': what follows the dash only
+    # labels the video, so the whole text is the song - it names no artist.
+    if len(parts) == 2 and not _is_noise(parts[1]):
         left, right = clean_title(parts[0]), clean_title(parts[1])
         if ch and key(right) == key(ch) and key(left) != key(ch):
             left, right = right, left  # "Song - Artist" where the channel tells us the artist
@@ -110,7 +128,11 @@ def parse_video_title(title: str, channel: str | None) -> tuple[str | None, str]
     if m := _QUOTED.match(text):
         return _prefer_channel_spelling(clean_title(m["artist"]), ch), clean_title(m["title"])
 
-    return None, clean_title(text)
+    cleaned = clean_title(text)
+    if m := _LEADING_QUOTED.match(cleaned):  # nothing before the quoted song: no artist in the title
+        return None, clean_title(f"{m['title']}{m['rest']}")
+
+    return None, cleaned
 
 
 def _prefer_channel_spelling(artist: str, ch: str | None) -> str:
