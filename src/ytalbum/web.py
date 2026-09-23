@@ -37,9 +37,9 @@ from .config import Config
 from .download import COVER_STEM, iter_plans
 from .models import AlbumPlan
 from .service import Outcome, Service, _inside, channel_base_url
-from .youtube import Cancelled, YouTube
 from .tag import image_mime
 from .titles import natural_key
+from .youtube import Cancelled, YouTube
 
 log = logging.getLogger(__name__)
 

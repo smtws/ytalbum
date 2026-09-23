@@ -1,8 +1,8 @@
 """Offline repair: performer-only artists and one spelling per artist, without asking YouTube."""
 
 import pytest
+from test_incremental import FakeYouTube, opus_template, vol1
 
-from test_incremental import FakeYouTube, opus_template, vol1  # noqa: F401 (fixture)
 from ytalbum.config import Config
 from ytalbum.download import load_plan, run, save_plan
 from ytalbum.models import Provenance

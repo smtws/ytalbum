@@ -107,7 +107,7 @@ def save_setting(name: str, value: str | bool | int | None, path: Path | None = 
     path = path or config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = path.read_text().splitlines() if path.exists() else []
-    lines = [l for l in lines if l.split("=")[0].strip() != name]
+    lines = [line for line in lines if line.split("=")[0].strip() != name]
     if isinstance(value, bool):
         lines.insert(0, f"{name} = {'true' if value else 'false'}")
     elif isinstance(value, int):

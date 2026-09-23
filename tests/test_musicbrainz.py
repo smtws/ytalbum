@@ -7,7 +7,16 @@ from pathlib import Path
 import httpx
 import pytest
 
-from ytalbum.enrich import core, credit_phrase, enrich, feat_text, kept_suffixes, pick_recording, split_lookup, uploader_stood_in
+from ytalbum.enrich import (
+    core,
+    credit_phrase,
+    enrich,
+    feat_text,
+    kept_suffixes,
+    pick_recording,
+    split_lookup,
+    uploader_stood_in,
+)
 from ytalbum.mb import MusicBrainz, MusicBrainzError, phrase
 from ytalbum.models import Collection, Kind, PlanTrack, Provenance
 from ytalbum.plan import build_plan

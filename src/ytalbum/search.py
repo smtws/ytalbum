@@ -105,7 +105,7 @@ def dedupe_by_title(refs: list[SourceRef]) -> list[SourceRef]:
         if k not in out:
             out[k] = r
             continue
-        for field in ("count", "thumbnail", "artist", "channel_url"):
-            if getattr(r, field) and not getattr(out[k], field):
-                setattr(out[k], field, getattr(r, field))
+        for name in ("count", "thumbnail", "artist", "channel_url"):  # not `field`: dataclasses.field
+            if getattr(r, name) and not getattr(out[k], name):
+                setattr(out[k], name, getattr(r, name))
     return list(out.values())

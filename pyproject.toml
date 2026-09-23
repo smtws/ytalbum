@@ -27,3 +27,22 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.ruff]
+line-length = 127  # the code is hand-formatted; this only bounds it, `ruff format` is not used
+
+[tool.ruff.lint]
+# Hygiene, not style: unused and shadowed names, import order, obvious mistakes.
+select = ["E4", "E7", "E9", "F", "I", "UP", "RUF"]
+ignore = [
+    "RUF001",  # ambiguous unicode in strings: the fixtures and titles are full of real ones
+    "RUF003",
+    "RUF059",  # unused unpacked variable: `_, title = parse(...)` reads better than indexing
+]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixtures are imported to be used by name, which every linter reads as unused
+"tests/*" = ["F401", "F811"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ytalbum"]

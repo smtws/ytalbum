@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: How this project works, and what was tried and rejected
-    url: https://github.com/smtws/ytalbum/blob/v3/DESIGN.md
+    url: https://github.com/smtws/ytalbum/blob/main/DESIGN.md
     about: Automatic intro detection, libcamera-style dead ends and other measured decisions are documented here — worth a look before proposing one of them again.

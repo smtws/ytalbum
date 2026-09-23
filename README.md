@@ -245,7 +245,7 @@ The repository has three generations, all in its history:
 2. **v2** (`pwa` branch): a FastAPI + Vue rewrite, search only, abandoned mid-way. Its
    central number, the "track count", was read from a yt-dlp field that actually reports the
    size of the surrounding list — the bug that sent the project into a fix/break loop.
-3. **v3** (`v3` branch, this code): rebuilt from scratch on 22 September 2026 after an
+3. **v3** (`main`, this code): rebuilt from scratch on 22 September 2026 after an
    analysis of both predecessors. [DESIGN.md](DESIGN.md) records that analysis, the verified
    facts about yt-dlp and YouTube, every decision, and the ideas that were measured and
    dropped (automatic intro detection, for one).

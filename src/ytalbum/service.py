@@ -17,13 +17,14 @@ from typing import Any
 
 from .config import Config
 from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, relocate, run, save_plan
-from .trim import ORIGINALS, original_path
 from .enrich import enrich
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
 from .plan import build_plan, merge_plans, refresh_derived, renumber
 from .search import SearchResult, search_artist
-from .titles import key as text_key, move_feat, strip_self_feat
+from .titles import key as text_key
+from .titles import move_feat, strip_self_feat
+from .trim import ORIGINALS, original_path
 from .youtube import BOT_CHECK, Cancelled, YouTube, channel_base_url
 
 log = logging.getLogger(__name__)
@@ -477,4 +478,4 @@ def exit_code(outcomes: list[Outcome] | Outcome) -> int:
     return 1 if any(o.status in ("failed", "incomplete") for o in items) else 0
 
 
-__all__ = ["Outcome", "Service", "apply_user_edits", "exit_code", "channel_base_url"]
+__all__ = ["Outcome", "Service", "apply_user_edits", "channel_base_url", "exit_code"]

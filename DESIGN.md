@@ -365,5 +365,5 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
 
 - Compilation albumartist = curator; album = playlist title minus curator prefix (§2.1).
 - Library root is configurable (§7).
-- v3 lives on a **new branch** in this repo (`github.com/Tordt/YT-Downloads`).
+- v3 lives on a **new branch** in this repo, which became `main` (`github.com/smtws/ytalbum`).
 - Intro/outro trimming: yes, later — after the rest is stable (slice 8).

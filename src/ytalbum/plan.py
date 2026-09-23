@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import re
 import copy
+import re
 from collections import Counter
 
 from .models import AlbumPlan, Collection, Entry, Kind, PlanTrack, Provenance

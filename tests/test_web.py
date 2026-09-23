@@ -8,8 +8,8 @@ from pathlib import Path
 import httpx
 import pytest
 from mutagen.oggopus import OggOpus
+from test_incremental import JPEG, FakeYouTube, opus_template, vol1
 
-from test_incremental import JPEG, FakeYouTube, opus_template, vol1  # noqa: F401 (fixture)
 from ytalbum.config import Config
 from ytalbum.download import load_plan, run
 from ytalbum.models import Provenance
