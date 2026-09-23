@@ -312,6 +312,7 @@ function card(a) {
 $("#libfilter").addEventListener("input", (e) => {
   libFilter = e.target.value.trim();
   renderLibrary();
+  if (!$("#album").hidden) markAlbumFields();
 });
 // Enter jumps into the results; Escape clears the filter before anything else closes
 $("#libfilter").addEventListener("keydown", (e) => {
@@ -320,6 +321,7 @@ $("#libfilter").addEventListener("keydown", (e) => {
     e.stopPropagation();
     e.target.value = libFilter = "";
     renderLibrary();
+    if (!$("#album").hidden) markAlbumFields();
   }
 });
 
@@ -448,6 +450,17 @@ function renderAlbum() {
         gone.length ? h("button", { class: "danger", type: "button", onclick: (e) => pruneAlbum(p, gone, e.currentTarget) }, `Remove ${gone.length} track${gone.length > 1 ? "s" : ""} no longer in the playlist`) : null,
         h("a", { href: p.source_url, target: "_blank", rel: "noopener" }, "open on YouTube"))));
   panel.hidden = false;
+  markAlbumFields();
+}
+
+// The value of an input cannot be highlighted character by character — the whole field is
+// tinted instead, so an album opened from a filtered library shows which fields matched.
+function markAlbumFields() {
+  const terms = libFilter ? fold(libFilter).split(" ").filter(Boolean) : [];
+  for (const el of $("#album").querySelectorAll('input[type="text"]')) {
+    const maps_ = maps(el.value);
+    el.classList.toggle("hit", terms.some((term) => maps_.some((m) => m.folded.includes(term))));
+  }
 }
 
 function deleteTrack(plan, track, button) {
