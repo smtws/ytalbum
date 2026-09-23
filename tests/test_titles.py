@@ -272,3 +272,20 @@ def test_strip_leading_artist():
 )
 def test_video_quality_markers_go_and_audio_facts_stay(raw, cleaned):
     assert clean_title(raw) == cleaned
+
+
+@pytest.mark.parametrize(
+    ("raw", "cleaned"),
+    [
+        ("U-Gra (Tagelharpa playthrough) / Napalm Records", "U-Gra (Tagelharpa playthrough)"),
+        ("Song / Nuclear Blast Records", "Song"),
+        ("Heilung | Season of Mist", "Heilung"),  # the pipe form needs no evidence
+        # a slash is part of plenty of real titles, so only publisher words justify cutting
+        ("Intro / Outro", "Intro / Outro"),
+        ("Wardruna / Skald", "Wardruna / Skald"),
+        ("Highway to Hell (AC/DC cover)", "Highway to Hell (AC/DC cover)"),
+        ("Working 24/7", "Working 24/7"),
+    ],
+)
+def test_publisher_suffixes_are_dropped(raw, cleaned):
+    assert clean_title(raw) == cleaned

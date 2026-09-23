@@ -28,6 +28,10 @@ MARKER_WORDS = {
     "1080p", "720p", "480p", "2160p", "1440p", "360p", "240p", "144p", "uhd", "fullhd",
 }
 _BRACKETS = re.compile(r"\s*[(\[【]([^()\[\]【】]*)[)\]】]")
+# a trailing segment naming a publisher: "… / Napalm Records". Unlike "|", a slash appears in
+# real titles ("Intro / Outro", "AC/DC"), so the words have to say it is a label.
+PUBLISHER_WORDS = {"records", "record", "recordings", "entertainment", "productions", "publishing", "media", "label", "musikverlag"}
+_SLASH = re.compile(r"\s+/\s+")
 # A dash separates when spaced on both sides, or - "Arcana- Innocent Child" - when what
 # follows it starts a name: a German compound ellipsis continues in lowercase ("sang- und
 # klanglos") and must stay whole. A colon separates too ("Metallica: Nothing Else Matters").
@@ -133,8 +137,9 @@ def channel_artist(channel: str | None) -> str | None:
 
 
 def clean_title(title: str) -> str:
-    """Drop '| Label' suffixes, noise brackets like '(Official Video)', stray quotes and spacing."""
+    """Drop label suffixes, noise brackets like '(Official Video)', stray quotes and spacing."""
     title = clean_text(title).split(" | ")[0]
+    title = _drop_publisher(title)
     title = _BRACKETS.sub(_clean_group, title)
     parts = _SEPARATOR.split(title)
     while len(parts) > 1 and _is_noise(parts[-1]):  # "Song – Official Lyric Video"
@@ -189,6 +194,14 @@ def _clean_group(m: re.Match[str]) -> str:
         return ""
     opening, closing = m[0].strip()[0], m[0].strip()[-1]
     return f" {opening}{' '.join(kept)}{closing}"
+
+
+def _drop_publisher(title: str) -> str:
+    """'U-Gra (Tagelharpa playthrough) / Napalm Records' -> without the label."""
+    parts = _SLASH.split(title)
+    while len(parts) > 1 and PUBLISHER_WORDS.intersection(re.findall(r"\w+", parts[-1].casefold())):
+        parts.pop()
+    return " / ".join(parts)
 
 
 def _drop_noise_tail(title: str) -> str:
