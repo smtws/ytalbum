@@ -26,18 +26,41 @@ Comes with a command line and a small web app for the library.
 - **Re-runs are cheap.** An update checks each album with a single request and only does
   real work when the playlist actually changed.
 
-## Quick start
+## Install
+
+Needs **Python ≥ 3.14**, [uv](https://docs.astral.sh/uv/), [ffmpeg](https://ffmpeg.org/)
+and a JavaScript runtime for yt-dlp ([Node](https://nodejs.org/) ≥ 20,
+[deno](https://deno.com/) or bun).
 
 ```sh
-uv sync
+sudo apt install ffmpeg nodejs                      # Debian/Ubuntu; brew install ffmpeg node on macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh     # if you do not have uv yet
+
+git clone https://github.com/smtws/ytalbum.git
+cd ytalbum
+uv sync                                             # venv + dependencies
+uv run ytalbum config                               # shows what it found: ffmpeg, JS runtime, token helper
+```
+
+`uv sync` needs no system Python 3.14 — uv fetches the interpreter itself.
+
+## First run
+
+```sh
 uv run ytalbum config --library ~/Music/YouTube        # once
 uv run ytalbum fetch "https://www.youtube.com/playlist?list=…"
 uv run ytalbum serve                                   # web UI on http://localhost:8765
 ```
 
-Needs [ffmpeg](https://ffmpeg.org/) and a JavaScript runtime for yt-dlp
-([deno](https://deno.com/) or [Node](https://nodejs.org/) ≥ 20). `ytalbum config` shows
-what it found.
+To have the web UI always there without a terminal (Linux):
+
+```sh
+uv run ytalbum service install    # systemd user socket: starts on the first request, idles out
+uv run ytalbum app install        # menu entry with its own window and icon
+```
+
+The library, the CLI and the web UI are platform-independent; `ytalbum service` (systemd)
+and `ytalbum app` (freedesktop launcher) are Linux-only.
 
 **YouTube's bot check.** After a few hundred requests YouTube starts refusing everything
 ("Sign in to confirm you're not a bot"). A logged-in browser session avoids that:
@@ -242,6 +265,16 @@ a measurement contradicted the plan.
 
 Please respect MusicBrainz' [rate limits](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)
 (ytalbum does) and download only what you are allowed to.
+
+## Licence
+
+[MIT](LICENSE) for this code.
+
+Two dependencies are copyleft and are installed separately by `uv`/`pip`, not shipped
+here: **mutagen** (GPL-2.0-or-later, used for tagging) and **bgutil-ytdlp-pot-provider**
+(GPL-3.0). Using and modifying ytalbum from source is unaffected — but a *bundle* that
+contains them (a PyInstaller binary, a container image) is a combined work and has to be
+distributed under the GPL.
 
 ## Tests
 

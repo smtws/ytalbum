@@ -6,6 +6,8 @@ authors = [
     { name = "Tordt", email = "info@smt-webservices.de" }
 ]
 requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "bgutil-ytdlp-pot-provider>=2.0.0",
     "httpx>=0.28.1",
