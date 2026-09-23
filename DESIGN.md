@@ -174,6 +174,16 @@ Order of trust for a track's artist + title:
    ("Arcana- Innocent Child" splits, the German compound "sang- und klanglos" does not); and
    invisible bidi/zero-width marks are stripped before anything else ("In The Nursery ‎– …",
    whose U+200E hid the separator).
+5c. **Video facts are not audio facts** (2026-09-23). "(1080p)", "HD 1080p", "Full HD" and
+   the label words in other languages ("Oficial") describe the upload and are dropped —
+   "(Remaster)", "(2012 Remaster)", "(Remastered 2023)" describe the recording and stay, so
+   "(Remastered 1080p)" keeps its audio half. A trailing run of noise words is judged as a
+   whole and only dropped if one of them labels a video: "Full HD" goes, "Life Is Full" stays.
+5d. **A publisher suffix after a slash goes** (2026-09-23): "U-Gra (Tagelharpa playthrough) /
+   Napalm Records". A slash is not a separator like "|" — real titles contain one ("Intro /
+   Outro", "AC/DC", "24/7") — so the segment must name a publisher (Records, Recordings,
+   Entertainment, Productions, …) before it is cut. Checked against the library:
+   "Hexentanz / Henkersmahlzeit / Gebt Acht!" and "Auschwitz / Birkenau" stay whole.
 6. **Guest credits live in the title, never in the artist field** (2026-09-23):
    `Feuerschwanz ft. Melissa Bonny` / `Ding` → `Feuerschwanz` / `Ding ft. Melissa Bonny`,
    applied to all three sources (video title, YouTube Music, MusicBrainz artist-credit).
@@ -269,13 +279,6 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    at the mapping boundary; German/360°/unbracketed video labels; partial labels keep
    their meaning ("(Official Live Video)" → "(Live)"), and brackets are only treated as
    labels if they contain a marker word ("(Music of the Night)" stays).
-5c. **Third lookup strategy: split the title** (2026-09-23). When the uploader stood in as the
-   artist (`artist == channel`) and the normal and swapped queries found nothing, the real
-   artist is often glued to the title with no punctuation ("Assemblage 23 Lullaby",
-   "Joachim Witt Gloria"). Every split is tried and `pick_recording` must confirm *both*
-   halves, so a query for the right words cannot return a wrong band. Unbracketed trailing
-   video labels are dropped first ("Gloria Offizielles Musikvideo"), else the title half
-   never matches.
 5. ✅ MusicBrainz enrichment (album + recording level) with provenance and cover art.
    *Done 2026-09-22:* Vol. 1 13/13 recordings (incl. the reversed "Lullaby of Woe" via a
    swapped query; the credit "DOMINUM feat. Feuerschwanz" picked because the
@@ -287,6 +290,13 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    confirms the artist but gets no recording id; MB answers 503 even to the first
    request, so retry/backoff is mandatory; our own saved cover is upgraded when a better
    source appears, a user's cover never is. Cache: `~/.cache/ytalbum/musicbrainz.sqlite3`.
+5b. **Third lookup strategy: split the title** (2026-09-23). When the uploader stood in as the
+   artist (`artist == channel`) and the normal and swapped queries found nothing, the real
+   artist is often glued to the title with no punctuation ("Assemblage 23 Lullaby",
+   "Joachim Witt Gloria"). Every split is tried and `pick_recording` must confirm *both*
+   halves, so a query for the right words cannot return a wrong band. Unbracketed trailing
+   video labels are dropped first ("Gloria Offizielles Musikvideo"), else the title half
+   never matches.
 6. ✅ Artist search (channel releases/playlists tab, Topic channel, YT playlist search).
    *Done 2026-09-22:* `ytalbum search "Faun"` → YouTube Music album search → dominant
    uploading channel whose name contains the artist → its Releases tab; grouped as Albums
@@ -334,6 +344,22 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    class, so it shows up as another browser window. No manifest key changes it — the class
    comes from the browser process, and `--class` is only honoured by a process of its own,
    so the launcher pairs it with a profile directory of its own.
+
+10. ✅ Finding things in the library (2026-09-23). The grid sorts artist → year → name, so a
+   discography reads chronologically while compilations, which have no year, keep their
+   natural order. A filter over album, artist **and song** titles: `/api/tracks` serves every
+   track as compact rows (video id, artist, title, downloaded, trim points) with a version
+   taken from the plan files' mtimes, so the page fetches it once and again only when an
+   album changes — 95 KB and 11 ms for 1338 tracks, and typing costs no request. Matching
+   folds case, accents and punctuation, plus what NFD cannot: ð/þ/ø/æ never decompose
+   ("njord" → *Njǫrð*), and a German keyboard writes "knueppel" for *Knüppel*. Folding records
+   where each folded character came from, so the match is highlighted in the original text.
+   An input's value cannot be highlighted character by character (no CSS, no Custom Highlight
+   API, and mirroring text behind a transparent input breaks on scroll, fonts and IME), so a
+   matching field in the album editor is tinted whole. **▶ Play** fills the existing queue
+   from the filter — the matching songs of each album, or all of an album that matched by
+   name. Deliberately not built: shuffle, repeat, reordering, persistence. The player is here
+   to check downloads, not to replace a music player.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

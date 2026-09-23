@@ -28,6 +28,8 @@ Comes with a command line and a small web app for the library.
   or you), and anything you edit yourself is never overwritten by a later update.
 - **Re-runs are cheap.** An update checks each album with a single request and only does
   real work when the playlist actually changed.
+- **You can find what you have.** Filter the library by album, artist **or song** — matches
+  are highlighted, and one button plays them, across albums.
 
 ## Install
 
@@ -91,9 +93,7 @@ idle minutes.
 | ![Album view](docs/screenshots/album.jpg) | ![Channel listing](docs/screenshots/search.jpg) |
 | **Album view:** cover, editable fields, where each value came from, trim points and per-track delete. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
 | ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
-| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library, filtered to one artist:** covers, track counts, MusicBrainz badge, and "check for new albums" for that artist alone. Press <kbd>/</kbd> to filter the library — by album, artist **or song**, with the matched
-part highlighted; opening an album tints the fields that matched. **▶ Play** next to the
-filter plays what it found, across albums. |
+| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library, filtered to one artist:** covers, track counts, MusicBrainz badge, and "check for new albums" for that artist alone. |
 
 The compilations throughout these screenshots are
 [**My Dark Lullabies**](https://www.youtube.com/@MyDarkLullabies) — *"a curated collection
@@ -171,6 +171,16 @@ No manifest setting changes this; the class comes from the browser process. `yta
 install` writes a launcher that starts the browser with `--class=ytalbum` and a profile
 directory of its own (the flag is only honoured by a browser process of its own), giving
 the app its own taskbar entry and icon.
+
+**The library view** sorts by artist, then year, then name — a discography reads
+chronologically, and compilations without a year keep their natural order (Vol. 1 … Vol. 20).
+<kbd>/</kbd> jumps to the filter, which searches albums, artists and song titles at once:
+matching text is highlighted, <kbd>Enter</kbd> moves into the results, <kbd>Esc</kbd> clears
+it, and **▶ Play** queues everything it found. Opening an album from a filtered view tints
+the fields that matched — an input's value cannot be highlighted character by character, so
+the whole field is marked instead. Matching ignores case, accents and punctuation, including
+the letters Unicode cannot fold (`njord` finds *Njǫrð*) and umlauts typed the German way
+(`knueppel` finds *Knüppel*).
 
 **Safety:** localhost only by default; writing calls need the header `X-Ytalbum: 1` and a
 JSON content type (so other websites cannot use it through your browser); the `Host` header
@@ -300,7 +310,7 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 224 tests, offline, ~11 s
+uv run pytest        # 260 tests, offline, ~12 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/`, so they
