@@ -59,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--library", type=Path)
     u.add_argument("--dry-run", action="store_true", help="only report what changed")
     u.add_argument("--no-mb", action="store_true", help="skip the MusicBrainz lookup")
+    u.add_argument("--deep", action="store_true", help="read every album fully, even unchanged ones")
 
     sv = sub.add_parser("serve", help="web UI for the library (also installable as an app)")
     sv.add_argument("--library", type=Path)
@@ -97,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                 return exit_code(_service(cfg, None).download_existing(args.album_dir))
             case "update":
                 library = _library(args, cfg, required=True)
-                return 2 if library is None else exit_code(_service(cfg, library).update_all(report_only=args.dry_run))
+                return 2 if library is None else exit_code(_service(cfg, library).update_all(report_only=args.dry_run, deep=args.deep))
             case "serve":
                 return _serve(args, cfg)
             case "prune":

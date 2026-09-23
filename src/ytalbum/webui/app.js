@@ -798,7 +798,8 @@ $("#open").addEventListener("submit", async (ev) => {
     $("#results").hidden = false;
   }
 });
-$("#update").addEventListener("click", (e) => submit("update", {}, e.currentTarget));
+// plain click: cheap check (one request per album); with shift: read every album fully
+$("#update").addEventListener("click", (e) => submit("update", { deep: e.shiftKey }, e.currentTarget));
 
 if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
 poll();

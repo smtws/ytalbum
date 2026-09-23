@@ -122,6 +122,7 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         skipped=skipped,
         provenance=album_prov,
         auto={"kind": kind, "album": album, "albumartist": albumartist, "year": year},
+        source_state={"ids": [e.video_id for e in collection.entries], "modified": collection.modified},
     )
     return refresh_derived(plan)
 
@@ -176,6 +177,7 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
     merged.cover_fallback_url = fresh.cover_fallback_url or merged.cover_fallback_url
     merged.mbid = fresh.mbid or merged.mbid
     merged.skipped = fresh.skipped
+    merged.source_state = fresh.source_state or merged.source_state
 
     fresh_by_id = {t.video_id: t for t in fresh.tracks}
     listed = set(fresh_by_id) | {s["video_id"] for s in fresh.skipped}  # skipped videos are still in the source

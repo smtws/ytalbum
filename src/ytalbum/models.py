@@ -81,6 +81,7 @@ class Collection:
     thumbnail: str | None
     fetched_at: str
     entries: list[Entry]
+    modified: str | None = None  # when YouTube last changed the playlist (YYYYMMDD)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -140,6 +141,8 @@ class AlbumPlan:
     mbid: str | None = None  # MusicBrainz release id
     cover_fallback_url: str | None = None  # tried when cover_url fails (e.g. no Cover Art Archive image)
     cover_fetched: dict[str, str] = field(default_factory=dict)  # {url, sha1} of the cover.* we saved
+    # what the source looked like last time: lets an update skip it after one cheap request
+    source_state: dict[str, Any] = field(default_factory=dict)  # {"ids": [...], "modified": "YYYYMMDD"}
     schema: int = PLAN_SCHEMA
 
     @property

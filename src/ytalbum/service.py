@@ -183,18 +183,51 @@ class Service:
                 break
         return outcomes
 
-    def update_all(self, report_only: bool = False) -> list[Outcome]:
+    def update_all(self, report_only: bool = False, deep: bool = False) -> list[Outcome]:
+        """Check every album. Unchanged, complete albums cost one request instead of one per video."""
         albums = list(iter_plans(self.library)) if self.library and self.library.exists() else []
         if not albums:
             self.log(f"no albums in {self.library}")
         outcomes: list[Outcome] = []
-        for i, (_, plan) in enumerate(albums, 1):
+        skipped = 0
+        for i, (album_dir, plan) in enumerate(albums, 1):
             self.log(f"=== [{i}/{len(albums)}] {plan.albumartist} — {plan.album}")
+            if not deep and (unchanged := self._unchanged(plan)):
+                skipped += 1
+                self.log(f"  unchanged ({unchanged}) — nothing to do")
+                outcomes.append(Outcome("ok", plan, album_dir, "unchanged"))
+                continue
             outcomes.append(self._guarded(lambda: self.fetch(plan.source_url, report_only=report_only)))
             if outcomes[-1].blocked:
                 self.log(f"stopping: YouTube is blocking requests; {len(albums) - i} album(s) not checked")
                 break
+        if skipped:
+            self.log(f"{skipped} of {len(albums)} albums were unchanged")
         return outcomes
+
+    def _unchanged(self, plan: AlbumPlan) -> str | None:
+        """One cheap request: is this album still exactly what the source lists, and complete?
+
+        Returns a short reason when it can be skipped, else None (then it is read in full).
+        """
+        known = plan.source_state or {}
+        if not known.get("ids"):
+            return None  # never recorded (older album): read it properly
+        waiting = [t for t in plan.tracks if t.in_source and t.state != "done" and not t.error_kind]
+        if waiting:
+            return None  # something is still missing here
+        try:
+            now = self.yt.source_state(plan.source_url)
+        except Cancelled:
+            raise
+        except Exception as e:
+            self.log(f"  could not check quickly ({e}); reading it in full")
+            return None
+        if not now or now["ids"] != known["ids"]:
+            return None
+        if now.get("modified") != known.get("modified"):
+            return None  # the playlist itself changed (or we never recorded a date): read it once
+        return f"{len(now['ids'])} videos, unchanged since {now.get('modified') or 'last time'}"
 
     def _guarded(self, action: Callable[[], Outcome]) -> Outcome:
         try:

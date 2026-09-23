@@ -201,6 +201,17 @@ class YouTube:
             log.info("album %s: %s", browse_id, _short_error(e))
             return None
 
+    def source_state(self, url: str) -> dict[str, Any] | None:
+        """One cheap request: which videos the source lists now, and when it last changed."""
+        self.check()
+        with YoutubeDL(self._params(extract_flat="in_playlist")) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not info:
+            return None
+        if info.get("_type") != "playlist":
+            return {"ids": [info["id"]], "modified": info.get("upload_date")}
+        return {"ids": [e["id"] for e in info.get("entries") or [] if e.get("id")], "modified": info.get("modified_date")}
+
     def playlist_details(self, url: str) -> dict[str, Any] | None:
         """One cheap flat request: how many entries a playlist has, plus a thumbnail."""
         self.check()
@@ -260,6 +271,7 @@ class YouTube:
             thumbnail=playlist_thumbnail(info, entries),
             fetched_at=fetched_at,
             entries=entries,
+            modified=info.get("modified_date"),
         )
 
     def _inspect(self, position: int, flat: dict[str, Any], blocked: threading.Event | None = None) -> Entry:
