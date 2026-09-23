@@ -144,10 +144,19 @@ function schedulePoll(ms) {
 
 // -- library ---------------------------------------------------------------------
 
+let gridShows = "";
+
 function renderLibrary() {
   $("#libpath").textContent = state.library || "";
   const grid = $("#grid");
-  fill(grid, state.albums.map(card));
+  const signature = JSON.stringify(state.albums);
+  if (signature !== gridShows) {
+    // rebuilding throws away the focused card, which would break arrow-key navigation
+    const focused = document.activeElement?.closest?.("#grid .card")?.dataset.id;
+    gridShows = signature;
+    fill(grid, state.albums.map(card));
+    if (focused) grid.querySelector(`.card[data-id="${CSS.escape(focused)}"]`)?.focus();
+  }
   $("#empty").hidden = state.albums.length > 0;
 }
 
