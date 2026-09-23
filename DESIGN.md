@@ -164,6 +164,16 @@ Order of trust for a track's artist + title:
 5. Label / lyrics / fan channels (Napalm Records, "Common Sense", "dernachtwaechter")
    are never the artist. Reverse order ("Lullaby of Woe - Ashley Serena") is only fixable
    by a lookup (MB recording search both ways) or the user.
+5b. **When the uploader stands in as the artist, the title usually still names the real one**
+   (2026-09-23, found by auditing the library for `artist == channel`). Rules, each general and
+   each from a real case: a credit at the end ("No Sound But The Wind **by The Editors**") is
+   read only when nothing else names an artist — a song may simply contain the word ("Killed by
+   Death"); a title that repeats our own artist loses it ("Metallica: Nothing Else Matters");
+   `'single quotes'` delimit a title like double ones ("NEBELUNG 'Mittwinter'"); a colon
+   separates; a dash separates without a leading space only when what follows starts a name
+   ("Arcana- Innocent Child" splits, the German compound "sang- und klanglos" does not); and
+   invisible bidi/zero-width marks are stripped before anything else ("In The Nursery ‎– …",
+   whose U+200E hid the separator).
 6. **Guest credits live in the title, never in the artist field** (2026-09-23):
    `Feuerschwanz ft. Melissa Bonny` / `Ding` → `Feuerschwanz` / `Ding ft. Melissa Bonny`,
    applied to all three sources (video title, YouTube Music, MusicBrainz artist-credit).

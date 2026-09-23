@@ -7,7 +7,17 @@ import copy
 from collections import Counter
 
 from .models import AlbumPlan, Collection, Entry, Kind, PlanTrack, Provenance
-from .titles import NOISE_WORDS, channel_artist, key, move_feat, parse_video_title, split_feat, strip_self_feat
+from .titles import (
+    NOISE_WORDS,
+    channel_artist,
+    key,
+    move_feat,
+    parse_video_title,
+    split_feat,
+    strip_leading_artist,
+    strip_self_feat,
+    title_by_artist,
+)
 
 MIN_TRACK_SECONDS = 30  # shorter entries are intro cards, not songs (DESIGN.md §3.4)
 
@@ -60,7 +70,9 @@ def named_artist(entry: Entry, collection: Collection) -> str | None:
     """
     if entry.music.artist:
         return split_feat(entry.music.artist)[0]
-    parsed, _ = parse_video_title(entry.title, entry.channel)
+    parsed, title = parse_video_title(entry.title, entry.channel)
+    if not parsed and (credited := title_by_artist(title)):
+        return credited[0]  # "… by The Editors": the title names them after all
     return _without_collection_title(split_feat(parsed)[0], collection.title) if parsed else None
 
 
@@ -120,12 +132,16 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
     for number, entry in enumerate(entries, start=1):
         artist, artist_prov = track_artist(entry)
         title, title_prov = track_title(entry)
+        named = entry.music.artist or parse_video_title(entry.title, entry.channel)[0]
+        if not named and (credited := title_by_artist(title)):
+            # the uploader is not the artist, the title credits them: "… by The Editors"
+            artist, title, named = credited[0], credited[1], credited[0]
         if kind != Kind.COMPILATION:
             # the album's own artist, not the channel handle or the album title read as a name
             # (the guest credit stays on for move_feat, which puts it into the title below)
-            named = entry.music.artist or parse_video_title(entry.title, entry.channel)[0]
             stripped = _without_collection_title(artist, collection.title) if named else None
             artist, artist_prov = (stripped, artist_prov) if stripped else (albumartist, Provenance.PLAYLIST)
+        title = strip_leading_artist(artist, title)  # "Metallica: Nothing Else Matters"
         artist, title = move_feat(artist, title)  # guests belong in the title
         title = strip_self_feat(artist, title)
         tracks.append(

@@ -23,9 +23,40 @@ MARKER_WORDS = {
     "clip", "visualizer", "visualiser", "lyric", "lyrics", "audio", "mv", "hd", "hq", "4k", "8k",
 }
 _BRACKETS = re.compile(r"\s*[(\[【]([^()\[\]【】]*)[)\]】]")
-_SEPARATOR = re.compile(r"\s+[-–—~]{1,2}\s+")
-_QUOTED = re.compile(r'^(?P<artist>[^"“”„]+?)\s*["“„](?P<title>[^"“”]+)["”“](?P<rest>.*)$')
+# A dash separates when spaced on both sides, or - "Arcana- Innocent Child" - when what
+# follows it starts a name: a German compound ellipsis continues in lowercase ("sang- und
+# klanglos") and must stay whole. A colon separates too ("Metallica: Nothing Else Matters").
+_SEPARATOR = re.compile(r"(?:\s+[-–—~]{1,2}\s+|[-–—~]{1,2}\s+(?=[A-ZÀ-ÖØ-Þ])|\s*:\s+)")
+_QUOTED = re.compile(r'^(?P<artist>[^"“”„\']+?)\s*["“„\'](?P<title>[^"“”\']+)["”“\'](?P<rest>.*)$')
 _LEADING_QUOTED = re.compile(r'^["“„](?P<title>[^"“”]+)["”“](?P<rest>.*)$')
+_INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")  # bidi/zero-width marks
+_BY = re.compile(r"^(?P<title>.+?)\s+by\s+(?P<artist>[^()\[\]]+)$", re.I)
+
+
+def clean_text(text: str) -> str:
+    """NFC, and without the invisible marks YouTube titles carry ('In The Nursery \u200e- …')."""
+    return _INVISIBLE.sub("", unicodedata.normalize("NFC", text))
+
+
+def title_by_artist(title: str) -> tuple[str, str] | None:
+    """'No Sound But The Wind by The Editors' -> ('The Editors', 'No Sound But The Wind').
+
+    Only for titles that name no artist otherwise - plenty of songs have 'by' in them.
+    """
+    m = _BY.match(title.strip())
+    return (m["artist"].strip(), m["title"].strip()) if m else None
+
+
+def strip_leading_artist(artist: str, title: str) -> str:
+    """'Metallica: Nothing Else Matters' with artist Metallica -> 'Nothing Else Matters'."""
+    if not artist or not title:
+        return title
+    parts = _SEPARATOR.split(title, maxsplit=1)
+    if len(parts) == 2 and parts[1].strip() and key(parts[0]).startswith(key(artist)):
+        return parts[1].strip()
+    return title
+
+
 _CHANNEL_NOISE = re.compile(r"(\s*-\s*topic|vevo|\s*official)$", re.I)
 
 
@@ -90,7 +121,7 @@ def channel_artist(channel: str | None) -> str | None:
     """'Mantus - Topic' -> 'Mantus', 'LACRIMOSAofficial' -> 'LACRIMOSA', 'SabatonVEVO' -> 'Sabaton'."""
     if not channel:
         return None
-    name = unicodedata.normalize("NFC", channel).strip()
+    name = clean_text(channel).strip()
     while (stripped := _CHANNEL_NOISE.sub("", name).strip()) != name:
         name = stripped
     return name or None
@@ -98,7 +129,7 @@ def channel_artist(channel: str | None) -> str | None:
 
 def clean_title(title: str) -> str:
     """Drop '| Label' suffixes, noise brackets like '(Official Video)', stray quotes and spacing."""
-    title = unicodedata.normalize("NFC", title).split(" | ")[0]
+    title = clean_text(title).split(" | ")[0]
     title = _BRACKETS.sub(_clean_group, title)
     parts = _SEPARATOR.split(title)
     while len(parts) > 1 and _is_noise(parts[-1]):  # "Song – Official Lyric Video"
@@ -114,7 +145,7 @@ def clean_title(title: str) -> str:
 def parse_video_title(title: str, channel: str | None) -> tuple[str | None, str]:
     """Return (artist or None, song title). None means the title names no artist."""
     ch = channel_artist(channel)
-    text = unicodedata.normalize("NFC", title).split(" | ")[0]
+    text = clean_text(title).split(" | ")[0]
 
     parts = _SEPARATOR.split(text, maxsplit=1)
     # '"Mad World" (feat. Gary Jules) - Official Music Video': what follows the dash only

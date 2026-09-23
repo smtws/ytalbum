@@ -5,7 +5,16 @@ import pytest
 
 from ytalbum.models import Collection
 from ytalbum.plan import build_plan
-from ytalbum.titles import channel_artist, clean_title, move_feat, parse_video_title, split_feat, strip_self_feat
+from ytalbum.titles import (
+    channel_artist,
+    clean_title,
+    move_feat,
+    parse_video_title,
+    split_feat,
+    strip_leading_artist,
+    strip_self_feat,
+    title_by_artist,
+)
 
 FIXTURES = Path(__file__).parent.parent / "design-fixtures"
 
@@ -180,3 +189,62 @@ def test_video_label_after_the_dash_is_not_a_title(title, channel, parsed):
 )
 def test_strip_self_feat(artist, title, kept):
     assert strip_self_feat(artist, title) == kept
+
+
+# -- shapes found in the library, where the uploader stood in as the artist -----------------
+
+
+@pytest.mark.parametrize(
+    ("title", "channel", "parsed"),
+    [
+        ("NEBELUNG 'Mittwinter'", "ToTSweden", ("NEBELUNG", "Mittwinter")),  # single quotes
+        ("Fever Ray 'If I Had A Heart'", "Fever Ray", ("Fever Ray", "If I Had A Heart")),
+        ("In The Nursery ‎– Compulsion", "Zoo", ("In The Nursery", "Compulsion")),  # bidi mark
+        ("Arcana- Innocent Child", "Angelheart", ("Arcana", "Innocent Child")),  # dash, no space
+        ("Metallica: Nothing Else Matters", "Metallica", ("Metallica", "Nothing Else Matters")),
+    ],
+)
+def test_the_artist_hidden_in_the_title_is_found(title, channel, parsed):
+    assert parse_video_title(title, channel) == parsed
+
+
+def test_a_german_compound_ellipsis_is_not_a_separator():
+    # "sang- und klanglos" is one word pair; a lowercase continuation never starts a title
+    assert clean_title("Niemals sang- und klanglos") == "Niemals sang- und klanglos"
+    assert parse_video_title("Versengold - Niemals sang- und klanglos", "Versengold") == (
+        "Versengold",
+        "Niemals sang- und klanglos",
+    )
+
+
+def test_title_by_artist_reads_the_credit_at_the_end():
+    assert title_by_artist("No Sound But The Wind by The Editors") == ("The Editors", "No Sound But The Wind")
+    assert title_by_artist("Tyrs Återkomst (The Return of Tyr) by Hindarfjäll") == (
+        "Hindarfjäll",
+        "Tyrs Återkomst (The Return of Tyr)",
+    )
+    assert title_by_artist("Nothing Else Matters") is None
+
+
+def test_by_is_only_read_as_a_credit_when_nothing_else_names_the_artist():
+    # a song may simply contain the word; the plan only applies it to channel-only entries
+    made = {
+        "source_url": "u", "source_id": "PLx", "is_playlist": True, "title": "Mix",
+        "channel": "Some Channel", "thumbnail": None, "fetched_at": "2026-09-23T00:00:00",
+        "entries": [
+            {"video_id": "a" * 11, "position": 1, "title": "Motörhead - Killed by Death", "duration": 200},
+            {"video_id": "b" * 11, "position": 2, "title": "No Sound But The Wind by The Editors", "duration": 200},
+        ],
+    }
+    plan = build_plan(Collection.from_dict(made))
+    assert (plan.tracks[0].artist, plan.tracks[0].title) == ("Motörhead", "Killed by Death")
+    assert (plan.tracks[1].artist, plan.tracks[1].title) == ("The Editors", "No Sound But The Wind")
+
+
+def test_strip_leading_artist():
+    assert strip_leading_artist("Metallica", "Metallica: Nothing Else Matters") == "Nothing Else Matters"
+    assert (
+        strip_leading_artist("Ye Banished Privateers", "Ye Banished Privateers & Umeå Musiksällskap: Annabel")
+        == "Annabel"
+    )
+    assert strip_leading_artist("Sabaton", "Bismarck") == "Bismarck"  # nothing to strip
