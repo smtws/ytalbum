@@ -161,7 +161,9 @@ function card(a) {
   const play = a.done ? h("span", { class: "card-play", role: "button", tabindex: "0", title: "Play album", "aria-label": `Play ${a.album}`,
     onclick: (e) => { e.stopPropagation(); playAlbum(a.id, 0); },
     onkeydown: (e) => { if (e.key === "Enter") { e.stopPropagation(); e.preventDefault(); playAlbum(a.id, 0); } } }, "▶") : null;
-  return h("button", { class: "card", type: "button", onclick: () => openAlbum(a.id), title: `${a.albumartist} — ${a.album}` },
+  return h("button", { class: `card${a.id === lastAlbumId ? " current" : ""}`, type: "button", "data-id": a.id,
+      onclick: () => openAlbum(a.id), title: `${a.albumartist} — ${a.album}`,
+      "aria-keyshortcuts": "Enter P" },
     h("div", { class: "cover-wrap" }, cover, play),
     h("div", { class: "meta" },
       h("div", { class: "title" }, a.album),
@@ -169,11 +171,36 @@ function card(a) {
       h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null)));
 }
 
+// grid: arrows move, Enter opens, P plays
+$("#grid").addEventListener("keydown", (e) => {
+  const card = e.target.closest(".card");
+  if (!card) return;
+  const cards = [...document.querySelectorAll("#grid .card")];
+  const index = cards.indexOf(card);
+  const perRow = Math.max(1, cards.filter((c) => c.offsetTop === cards[0].offsetTop).length);
+  const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: perRow, ArrowUp: -perRow, Home: -index, End: cards.length - 1 - index }[e.key];
+  if (step !== undefined) {
+    e.preventDefault();
+    cards[Math.min(Math.max(index + step, 0), cards.length - 1)].focus();
+  } else if (e.key.toLowerCase() === "p") {
+    e.preventDefault();
+    playAlbum(card.dataset.id, 0);
+  }
+});
+
 // -- one album: view and edit ---------------------------------------------------------
 
 let currentAlbum = null;
+let lastAlbumId = (() => { try { return localStorage.getItem("ytalbum-last"); } catch { return null; } })();
+
+function markAlbum(id) {
+  lastAlbumId = id;
+  try { localStorage.setItem("ytalbum-last", id); } catch { /* private mode */ }
+  for (const card of document.querySelectorAll("#grid .card")) card.classList.toggle("current", card.dataset.id === id);
+}
 
 async function openAlbum(id) {
+  markAlbum(id);
   try {
     currentAlbum = await api(`/api/album?id=${encodeURIComponent(id)}`);
   } catch (e) {
@@ -239,7 +266,11 @@ function renderAlbum() {
   const gone = p.tracks.filter((t) => !t.in_source);
   fill(panel,
     h("div", { class: "panel-head" },
-      h("div", {}, h("h2", {}, `${p.albumartist} — ${p.album}`), h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.folder}`)),
+      h("div", { class: "album-head" },
+        h("img", { class: "album-cover", src: `/api/cover?id=${encodeURIComponent(p.source_id)}&t=${p.tracks.filter((t) => t.state === "done").length}`,
+          alt: "", title: "Play album", onclick: () => playAlbum(p.source_id, 0), onerror: (e) => { e.currentTarget.hidden = true; } }),
+        h("div", {}, h("h2", {}, `${p.albumartist} — ${p.album}`, p.year ? h("span", { class: "muted" }, ` (${p.year})`) : null),
+          h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.tracks.length} tracks · ${p.folder}`))),
       h("button", { class: "quiet", type: "button", onclick: () => { panel.hidden = true; currentAlbum = null; } }, "Close")),
     h("form", { id: "albumform", onsubmit: saveAlbum },
       h("div", { class: "fields" }, field("Album artist", "albumartist", p.albumartist), field("Album", "album", p.album), field("Year", "year", p.year, "number")),
@@ -556,6 +587,7 @@ const fmt = (sec) => (Number.isFinite(sec) ? `${Math.floor(sec / 60)}:${String(M
 const isPlaying = (albumId, videoId) => qi >= 0 && queue[qi].album === albumId && queue[qi].video_id === videoId;
 
 async function playAlbum(albumId, start = 0) {
+  markAlbum(albumId);
   let plan;
   try {
     plan = currentAlbum?.source_id === albumId ? currentAlbum : await api(`/api/album?id=${encodeURIComponent(albumId)}`);
