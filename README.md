@@ -278,6 +278,12 @@ a measurement contradicted the plan.
 Please respect MusicBrainz' [rate limits](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)
 (ytalbum does) and download only what you are allowed to.
 
+**If this saved you time, give it to the projects underneath it, not to me.** Half the names
+in your library come from MusicBrainz, whose non-profit [MetaBrainz Foundation](https://metabrainz.org/donate)
+runs on donations; and nothing here works for a week without
+[yt-dlp](https://github.com/yt-dlp/yt-dlp), which keeps up with YouTube so that this tool
+does not have to. This repository takes no donations and has no sponsor button.
+
 ## Licence
 
 [MIT](LICENSE) for this code.
