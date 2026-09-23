@@ -1,0 +1,41 @@
+name: Wrong artist, title or album
+description: ytalbum named something wrong, filed it in the wrong folder, or picked the wrong MusicBrainz match
+labels: [naming]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These reports are the most useful ones this project gets — each has so far uncovered a
+        rule that was wrong for a whole class of videos.
+  - type: input
+    id: source
+    attributes:
+      label: The source
+      description: The playlist, video or channel URL you gave it (or the artist you searched for).
+      placeholder: https://www.youtube.com/playlist?list=…
+    validations:
+      required: true
+  - type: textarea
+    id: got
+    attributes:
+      label: What ytalbum made of it
+      description: The artist/title/album it chose, or the folder it created. Paste the line as it appears.
+      placeholder: |
+        xxFEUERSCHWANZxx — Das Elfte Gebot
+        03  Feuerschwanz ft. Melissa Bonny - Ding (SEEED Cover)
+    validations:
+      required: true
+  - type: textarea
+    id: want
+    attributes:
+      label: What it should have been
+      placeholder: |
+        Feuerschwanz — Das Elfte Gebot
+        03  Feuerschwanz - Ding (SEEED Cover) ft. Melissa Bonny
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Whether MusicBrainz was on, whether the value was one you had edited, the video's exact title if it differs from the source.

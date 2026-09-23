@@ -1,5 +1,8 @@
 <h1><img src="src/ytalbum/webui/icon.svg" alt="" height="30" align="top"> ytalbum</h1>
 
+[![tests](https://github.com/smtws/ytalbum/actions/workflows/tests.yml/badge.svg)](https://github.com/smtws/ytalbum/actions/workflows/tests.yml)
+[![licence: MIT](https://img.shields.io/badge/licence-MIT-6b4fd8)](LICENSE)
+
 Turn YouTube playlists into properly tagged albums: correct artist and title per track,
 album art, MusicBrainz data where it exists, and the audio copied without re-encoding.
 Comes with a command line and a small web app for the library.
@@ -293,3 +296,7 @@ uv run pytest        # 224 tests, offline, ~11 s
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/`, so they
 need no network and no credentials. Every bug found in real use has a fixture and a test.
+The same suite runs on every push via GitHub Actions.
+
+Bug reports are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for what makes one useful
+and what this project does with pull requests.

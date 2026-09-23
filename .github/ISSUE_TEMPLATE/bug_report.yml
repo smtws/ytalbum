@@ -1,0 +1,30 @@
+name: Something broke
+description: A crash, a failed download, a web UI problem
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did and what came out. Paste the error or the job log if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Output of `ytalbum config` (it prints no secrets), plus your OS. Say whether it worked before.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before reporting
+      options:
+        - label: The bot check is not the cause (the run does not say "Sign in to confirm you're not a bot")
+        - label: ffmpeg and a JavaScript runtime are installed (`ytalbum config` shows both)
