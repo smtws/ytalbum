@@ -20,7 +20,7 @@ from typing import Any
 from .mb import MusicBrainzAPI, MusicBrainzError
 from .models import AlbumPlan, Kind, PlanTrack, Provenance
 from .plan import refresh_derived
-from .titles import key, move_feat
+from .titles import channel_artist, key, move_feat
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +108,26 @@ def pick_recording(artist: str, title: str, recordings: list[dict[str, Any]]) ->
     return min(ok, key=rank)
 
 
+def uploader_stood_in(t: PlanTrack) -> bool:
+    """Nothing named the artist, so the channel did - a name MusicBrainz will not know."""
+    return bool(t.channel) and key(t.artist) == key(channel_artist(t.channel) or "")
+
+
+def split_lookup(title: str, mb: MusicBrainzAPI) -> tuple[str, str, dict[str, Any]] | None:
+    """'Assemblage 23 Lullaby' -> artist 'Assemblage 23', title 'Lullaby'.
+
+    Where no punctuation separates the two, try every split and let MusicBrainz decide: a
+    candidate counts only if it matches both halves (`pick_recording` checks artist and
+    title), so a wrong band cannot come back from a query for the right words.
+    """
+    words = title.split()
+    for i in range(1, len(words)):
+        artist, rest = " ".join(words[:i]), " ".join(words[i:])
+        if rec := pick_recording(artist, rest, mb.search_recordings(artist, core(rest) or rest)):
+            return artist, rest, rec
+    return None
+
+
 def enrich_track(t: PlanTrack, mb: MusicBrainzAPI) -> bool:
     rec = pick_recording(t.artist, t.title, mb.search_recordings(t.artist, core(t.title) or t.title))
     title_source = t.title
@@ -116,6 +136,8 @@ def enrich_track(t: PlanTrack, mb: MusicBrainzAPI) -> bool:
         if swapped_artist and swapped_title:
             rec = pick_recording(swapped_artist, swapped_title, mb.search_recordings(swapped_artist, swapped_title))
             title_source = swapped_title
+    if rec is None and uploader_stood_in(t) and (found := split_lookup(t.title, mb)):
+        _, title_source, rec = found
     if rec is None:
         return False
 

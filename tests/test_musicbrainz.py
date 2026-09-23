@@ -7,9 +7,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from ytalbum.enrich import core, enrich, feat_text, kept_suffixes, pick_recording
+from ytalbum.enrich import core, credit_phrase, enrich, feat_text, kept_suffixes, pick_recording, split_lookup, uploader_stood_in
 from ytalbum.mb import MusicBrainz, MusicBrainzError, phrase
-from ytalbum.models import Collection, Kind, Provenance
+from ytalbum.models import Collection, Kind, PlanTrack, Provenance
 from ytalbum.plan import build_plan
 
 FIXTURES = Path(__file__).parent.parent / "design-fixtures"
@@ -218,3 +218,30 @@ def test_release_tracks_keep_their_length_too():
     plan = plan_for("legends_olak_collection.json")
     enrich(plan, RecordedMB())
     assert all(t.mb_length and t.mb_length > 60 for t in plan.tracks)
+
+
+# -- when the uploader stood in as the artist, the title carries the real one --------------
+
+
+def test_split_lookup_finds_the_artist_glued_to_the_title():
+    """'Assemblage 23 Lullaby': no punctuation separates them, so every split is tried."""
+    mb = RecordedMB()
+    found = split_lookup("Assemblage 23 Lullaby", mb)
+    assert found is not None
+    artist, title, rec = found
+    assert (artist, title) == ("Assemblage 23", "Lullaby")
+    assert credit_phrase(rec["artist-credit"]) == "Assemblage 23"
+    assert mb.asked[0].startswith("recording?")  # the first split was asked first
+
+
+def test_split_lookup_refuses_what_musicbrainz_cannot_confirm():
+    # both halves must match a recording; a query for the right words is not enough
+    assert split_lookup("Symphonic Gothic Metal Ballad", RecordedMB()) is None
+
+
+def test_only_a_channel_name_triggers_the_split():
+    t = PlanTrack(video_id="a" * 11, number=1, artist="Luewemi", title="Assemblage 23 Lullaby", filename="", provenance={})
+    t.channel = "Luewemi"
+    assert uploader_stood_in(t) is True
+    t.channel = "Some Other Channel"  # a real artist name: the normal lookup applies
+    assert uploader_stood_in(t) is False

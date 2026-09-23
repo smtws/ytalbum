@@ -15,12 +15,13 @@ NOISE_WORDS = {
     "official", "music", "video", "videoclip", "clip", "lyric", "lyrics", "with",
     "visualizer", "visualiser", "audio", "hd", "hq", "4k", "8k", "upgrade", "upgraded",
     "new", "premiere", "explicit", "mv", "360", "grad", "degree",
-    "offizielles", "offizielle", "offizieller", "offiziell",
+    "offizielles", "offizielle", "offizieller", "offiziell", "musikvideo", "musikclip",
 }
 # ...but only when the group clearly labels the video (so "(Music of the Night)" stays intact)
 MARKER_WORDS = {
     "official", "offizielles", "offizielle", "offizieller", "offiziell", "video", "videoclip",
     "clip", "visualizer", "visualiser", "lyric", "lyrics", "audio", "mv", "hd", "hq", "4k", "8k",
+    "musikvideo", "musikclip",
 }
 _BRACKETS = re.compile(r"\s*[(\[【]([^()\[\]【】]*)[)\]】]")
 # A dash separates when spaced on both sides, or - "Arcana- Innocent Child" - when what
@@ -135,6 +136,7 @@ def clean_title(title: str) -> str:
     while len(parts) > 1 and _is_noise(parts[-1]):  # "Song – Official Lyric Video"
         parts.pop()
     title = " - ".join(parts) if len(parts) > 1 else parts[0]
+    title = _drop_noise_tail(title)  # "Gloria Offizielles Musikvideo", with no bracket or dash
     title = title.replace("@", "")  # "(feat. @handle)" -> "(feat. handle)"
     title = re.sub(r"\s+", " ", title).strip(" -–—~")
     if len(title) > 1 and title[0] in "\"“„'" and title[-1] in "\"”“'":
@@ -183,6 +185,20 @@ def _clean_group(m: re.Match[str]) -> str:
         return ""
     opening, closing = m[0].strip()[0], m[0].strip()[-1]
     return f" {opening}{' '.join(kept)}{closing}"
+
+
+def _drop_noise_tail(title: str) -> str:
+    """Trailing video-label words that carry no punctuation: 'Gloria Offizielles Musikvideo'.
+
+    Only dropped while one of them is a marker word, so "Video Killed the Radio Star" and a
+    song that merely ends in "New" keep their words.
+    """
+    words = title.split()
+    while len(words) > 1 and re.sub(r"\W", "", words[-1]).casefold() in NOISE_WORDS:
+        if not any(re.sub(r"\W", "", w).casefold() in MARKER_WORDS for w in words[-1:]):
+            break
+        words.pop()
+    return " ".join(words) if words else title
 
 
 def _is_noise(group: str) -> bool:

@@ -269,6 +269,13 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    at the mapping boundary; German/360°/unbracketed video labels; partial labels keep
    their meaning ("(Official Live Video)" → "(Live)"), and brackets are only treated as
    labels if they contain a marker word ("(Music of the Night)" stays).
+5c. **Third lookup strategy: split the title** (2026-09-23). When the uploader stood in as the
+   artist (`artist == channel`) and the normal and swapped queries found nothing, the real
+   artist is often glued to the title with no punctuation ("Assemblage 23 Lullaby",
+   "Joachim Witt Gloria"). Every split is tried and `pick_recording` must confirm *both*
+   halves, so a query for the right words cannot return a wrong band. Unbracketed trailing
+   video labels are dropped first ("Gloria Offizielles Musikvideo"), else the title half
+   never matches.
 5. ✅ MusicBrainz enrichment (album + recording level) with provenance and cover art.
    *Done 2026-09-22:* Vol. 1 13/13 recordings (incl. the reversed "Lullaby of Woe" via a
    swapped query; the credit "DOMINUM feat. Feuerschwanz" picked because the
