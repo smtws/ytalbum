@@ -112,6 +112,7 @@ Library/
 | `ytalbum delete <album-folder>` | Delete an album, or one track with `--track <video-id>` (asks first, `--yes` skips). |
 | `ytalbum serve` | Web UI. `--host 0.0.0.0` exposes it to the network (**no login!**), `--port`, `--idle-exit SECONDS`. |
 | `ytalbum service install\|status\|restart\|uninstall` | Run the web UI on demand via a systemd **user** socket: the first request starts it, it stops itself when idle. `restart` refuses while a job runs unless given `--force`. |
+| `ytalbum app install\|status\|uninstall` | Desktop launcher (Linux) that opens the UI in a window of its own instead of another browser window. `--remove-profile` on uninstall also drops the app's browser profile. |
 | `ytalbum repair` | One-off, offline: performer-only artist names, one spelling per artist, duplicate tracks removed — renames and retags, no downloads. |
 | `ytalbum config` | Show or change settings: `--library`, `--cookies-from-browser BROWSER[:PROFILE]`, `--cookies-file FILE`. |
 
@@ -122,6 +123,14 @@ requests, `130` interrupted.
 
 `ytalbum serve` listens on `127.0.0.1:8765`, serves the app and a small JSON API. The app
 is a single HTML page with no build step, and it can be installed as a PWA.
+
+Installing it from the browser works, but the window keeps the browser's window class
+(Chrome reports `WM_CLASS = "crx_<app-id>", "Google-chrome"`), and desktops group the
+taskbar by that class — so it appears as another browser window, with the browser's icon.
+No manifest setting changes this; the class comes from the browser process. `ytalbum app
+install` writes a launcher that starts the browser with `--class=ytalbum` and a profile
+directory of its own (the flag is only honoured by a browser process of its own), giving
+the app its own taskbar entry and icon.
 
 **Safety:** localhost only by default; writing calls need the header `X-Ytalbum: 1` and a
 JSON content type (so other websites cannot use it through your browser); the `Host` header

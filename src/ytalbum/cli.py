@@ -76,6 +76,12 @@ def main(argv: list[str] | None = None) -> int:
     sd.add_argument("--port", type=int, default=8765)
     sd.add_argument("--idle-exit", type=int, default=900, metavar="SECONDS")
 
+    ap = sub.add_parser("app", help="desktop launcher with its own window, not another browser window")
+    ap.add_argument("action", choices=("install", "uninstall", "status"))
+    ap.add_argument("--port", type=int, default=None, help="port of the web UI (default: the installed service's)")
+    ap.add_argument("--browser", help="which Chromium-based browser to use")
+    ap.add_argument("--remove-profile", action="store_true", help="uninstall: also delete the app's browser profile")
+
     c = sub.add_parser("config", help="show or set configuration")
     c.add_argument("--library", type=Path, help="set the library root")
     c.add_argument("--cookies-from-browser", metavar="BROWSER[:PROFILE]", help="use a browser's YouTube login (for age-restricted videos); 'none' to unset")
@@ -108,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
                 return _prune(args, cfg)
             case "service":
                 return _systemd(args, cfg)
+            case "app":
+                return _app(args)
             case "delete":
                 return _delete(args, cfg)
             case "repair":
@@ -247,6 +255,25 @@ def _systemd(args: argparse.Namespace, cfg: config_mod.Config) -> int:
                 print(line)
         print(systemd.status())
     except (ValueError, RuntimeError) as e:
+        print(e, file=sys.stderr)
+        return 2
+    return 0
+
+
+def _app(args: argparse.Namespace) -> int:
+    from . import desktop, systemd
+
+    url = f"http://127.0.0.1:{args.port or systemd.installed_port()}/"
+    try:
+        if args.action == "install":
+            for line in desktop.install(url, args.browser):
+                print(line)
+            print("ready: 'ytalbum' is in the menu — its window is its own, not the browser's")
+        elif args.action == "uninstall":
+            for line in desktop.uninstall(keep_profile=not args.remove_profile):
+                print(line)
+        print(desktop.status(url))
+    except (OSError, RuntimeError) as e:
         print(e, file=sys.stderr)
         return 2
     return 0
