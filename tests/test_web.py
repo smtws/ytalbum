@@ -13,7 +13,7 @@ from test_incremental import JPEG, FakeYouTube, opus_template, vol1  # noqa: F40
 from ytalbum.config import Config
 from ytalbum.download import load_plan, run
 from ytalbum.models import Provenance
-from ytalbum.plan import build_plan
+from ytalbum.plan import build_plan, refresh_derived
 from ytalbum.service import Service, apply_user_edits
 from ytalbum.web import App
 
@@ -223,3 +223,36 @@ def test_albums_sort_naturally():
     # mixed spellings and case still land in the right place
     mixed = ["Vol.9 - a", "Vol. 10 - b", "vol. 2 - c"]
     assert [m.split(" - ")[0] for m in sorted(mixed, key=natural_key)] == ["vol. 2", "Vol.9", "Vol. 10"]
+
+
+def test_library_grid_sorts_by_artist_then_year_then_name(tmp_path, opus_template, monkeypatch):
+    """Artist, then chronological; albums without a year keep their natural order."""
+    made = [
+        ("Sabaton", "The Great War", 2019),
+        ("Sabaton", "Attero Dominatus", 2006),
+        ("Sabaton", "Carolus Rex", 2012),
+        ("My Dark Lullabies", "Vol. 10 - b", None),
+        ("My Dark Lullabies", "Vol. 2 - a", None),
+        ("My Dark Lullabies", "Vol. 1 - c", None),
+        ("Mono Inc.", "Ravenblack", 2023),
+        ("Mono Inc.", "Terlingua", None),  # no year: after the dated ones
+    ]
+    plan = build_plan(vol1())
+    for artist, album, year in made:
+        p = build_plan(vol1())
+        p.source_id, p.albumartist, p.album, p.year = f"{artist}-{album}", artist, album, year
+        refresh_derived(p)  # folder and filenames follow the changed fields
+        run(p, tmp_path / p.folder, FakeYouTube(opus_template))
+
+    app = App(Config(library_root=tmp_path), tmp_path)
+    got = [(a["albumartist"], a["album"]) for a in app.albums() if (a["albumartist"], a["album"]) != (plan.albumartist, plan.album)]
+    assert got == [
+        ("Mono Inc.", "Ravenblack"),  # dated first
+        ("Mono Inc.", "Terlingua"),
+        ("My Dark Lullabies", "Vol. 1 - c"),  # all undated: natural order, unchanged
+        ("My Dark Lullabies", "Vol. 2 - a"),
+        ("My Dark Lullabies", "Vol. 10 - b"),
+        ("Sabaton", "Attero Dominatus"),  # 2006, 2012, 2019 - not alphabetical
+        ("Sabaton", "Carolus Rex"),
+        ("Sabaton", "The Great War"),
+    ]
