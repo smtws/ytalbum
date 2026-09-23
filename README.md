@@ -92,7 +92,8 @@ idle minutes.
 | **Album view:** cover, editable fields, where each value came from, trim points and per-track delete. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
 | ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
 | **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library, filtered to one artist:** covers, track counts, MusicBrainz badge, and "check for new albums" for that artist alone. Press <kbd>/</kbd> to filter the library — by album, artist **or song**, with the matched
-part highlighted; opening an album tints the fields that matched. |
+part highlighted; opening an album tints the fields that matched. **▶ Play** next to the
+filter plays what it found, across albums. |
 
 The compilations throughout these screenshots are
 [**My Dark Lullabies**](https://www.youtube.com/@MyDarkLullabies) — *"a curated collection
@@ -184,7 +185,7 @@ network.
 |---|---|
 | `GET /api/state` | Library (albums with progress), recent jobs, settings, whether something is running. |
 | `GET /api/album?id=<source-id>` | The full plan of one album. |
-| `GET /api/tracks` | Artist and title of every track, by album, with a version that changes when any plan does — what the library filter searches. |
+| `GET /api/tracks` | Every track by album as compact rows (video id, artist, title, downloaded, trim points), with a version that changes when any plan does — what the library filter searches and plays. |
 | `GET /api/cover?id=<source-id>` | The album's cover image. |
 | `GET /api/thumb?u=<url>` | A thumbnail, fetched by the server (allow-listed hosts only, cached). |
 | `GET /api/audio?id=<source-id>&v=<video-id>` | The track's audio, with `Range` support so players can seek. |

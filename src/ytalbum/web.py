@@ -239,15 +239,28 @@ class App:
         stamp = "".join(f"{p}:{p.stat().st_mtime_ns}" for p in files)
         return hashlib.sha1(stamp.encode()).hexdigest()[:12]
 
+    #: one track in the index: video id, artist, title, downloaded, trim start, trim end
+    TRACK_FIELDS = ("video_id", "artist", "title", "done", "trim_start", "trim_end")
+
     def track_index(self) -> dict[str, Any]:
-        """Artist and title of every track, by album — the UI filters songs with it.
+        """Every track by album, as compact rows — the UI filters and plays songs with it.
 
         Sent once and re-fetched only when `library_version` changes, so typing costs nothing.
+        Rows are lists, not objects: the field names would otherwise repeat 1300 times.
         """
         version = self.library_version()
         if self._track_index["version"] != version:
-            albums = {p.source_id: [[t.artist, t.title] for t in p.tracks] for _, p in iter_plans(self.library)} if self.library.exists() else {}
-            self._track_index = {"version": version, "albums": albums}
+            albums = (
+                {
+                    plan.source_id: [
+                        [t.video_id, t.artist, t.title, int(t.state == "done"), t.trim_start, t.trim_end] for t in plan.tracks
+                    ]
+                    for _, plan in iter_plans(self.library)
+                }
+                if self.library.exists()
+                else {}
+            )
+            self._track_index = {"version": version, "fields": list(self.TRACK_FIELDS), "albums": albums}
         return self._track_index
 
     def albums(self) -> list[dict[str, Any]]:

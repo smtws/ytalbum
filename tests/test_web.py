@@ -262,7 +262,10 @@ def test_track_index_lets_the_ui_filter_by_song(library, opus_template):
     app = App(Config(library_root=library), library)
     index = app.track_index()
     plan = load_plan(next(library.glob("*/*/.ytalbum.json")).parent)
-    assert index["albums"][plan.source_id] == [[t.artist, t.title] for t in plan.tracks]
+    assert index["fields"] == ["video_id", "artist", "title", "done", "trim_start", "trim_end"]
+    assert index["albums"][plan.source_id] == [
+        [t.video_id, t.artist, t.title, int(t.state == "done"), t.trim_start, t.trim_end] for t in plan.tracks
+    ]
     assert index["version"] and app.track_index()["version"] == index["version"]  # cached
 
 
@@ -275,7 +278,7 @@ def test_track_index_version_follows_the_plans(library, opus_template):
     save_plan(plan, album_dir)
     after = app.track_index()
     assert after["version"] != before["version"]  # the UI refetches only when this changes
-    assert after["albums"][plan.source_id][0][1] == "Renamed by hand"
+    assert after["albums"][plan.source_id][0][2] == "Renamed by hand"  # [video_id, artist, title, …]
 
 
 def test_state_carries_the_track_index_version(library):

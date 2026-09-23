@@ -230,10 +230,14 @@ function marked(text) {
 
 // An album matches by its own name, or because a song in it does — "pers" finds Perséfone
 // inside Vol. 3, not only "Nocturnal Whispers".
+const TRACK = { id: 0, artist: 1, title: 2, done: 3, start: 4, end: 5 }; // rows from /api/tracks
+
+function matchingRows(a, terms) {
+  return (trackIndex.albums[a.id] || []).filter((r) => hits(terms, `${r[TRACK.artist]} ${r[TRACK.title]}`));
+}
+
 function matchingTracks(a, terms) {
-  return (trackIndex.albums[a.id] || [])
-    .filter(([artist, title]) => hits(terms, `${artist} ${title}`))
-    .map(([artist, title]) => `${artist} — ${title}`);
+  return matchingRows(a, terms).map((r) => `${r[TRACK.artist]} — ${r[TRACK.title]}`);
 }
 
 function shownAlbums() {
@@ -279,6 +283,7 @@ function renderLibrary() {
     if (focused) grid.querySelector(`.card[data-id="${CSS.escape(focused)}"]`)?.focus();
   }
   $("#empty").hidden = shownAlbums().length > 0;
+  renderPlayMatches();
 }
 
 function card(a) {
@@ -308,6 +313,33 @@ function card(a) {
       h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null),
       songs));
 }
+
+// Play what the filter found: the matching songs of each album, or all of an album that
+// matched by name — the same thing the cards show.
+function playMatches() {
+  const terms = fold(libFilter).split(" ").filter(Boolean);
+  const wanted = [];
+  for (const a of shownAlbums()) {
+    const rows = a.matches ? matchingRows(a, terms) : trackIndex.albums[a.id] || [];
+    for (const r of rows) {
+      if (!r[TRACK.done]) continue;
+      wanted.push({ album: a.id, video_id: r[TRACK.id], title: r[TRACK.title], artist: r[TRACK.artist],
+        albumName: a.album, start: r[TRACK.start], end: r[TRACK.end] });
+    }
+  }
+  if (!wanted.length) return toast("Nothing downloaded among the matches", "blocked");
+  queue = wanted;
+  playIndex(0);
+}
+
+function renderPlayMatches() {
+  const n = libFilter ? shownAlbums().reduce((sum, a) => sum + (a.matches?.length ?? (trackIndex.albums[a.id] || []).filter((r) => r[TRACK.done]).length), 0) : 0;
+  const button = $("#play-matches");
+  button.hidden = !n;
+  button.textContent = `▶ Play ${n} track${n > 1 ? "s" : ""}`;
+}
+
+$("#play-matches").addEventListener("click", playMatches);
 
 $("#libfilter").addEventListener("input", (e) => {
   libFilter = e.target.value.trim();
