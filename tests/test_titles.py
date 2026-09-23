@@ -5,7 +5,7 @@ import pytest
 
 from ytalbum.models import Collection
 from ytalbum.plan import build_plan
-from ytalbum.titles import channel_artist, clean_title, parse_video_title
+from ytalbum.titles import channel_artist, clean_title, move_feat, parse_video_title, split_feat
 
 FIXTURES = Path(__file__).parent.parent / "design-fixtures"
 
@@ -90,3 +90,61 @@ def test_decomposed_unicode_is_composed():
 )
 def test_meaningful_brackets_and_segments_survive(title):
     assert clean_title(title) == title
+
+
+# -- guest credits belong in the title, not in the artist field -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("artist", "main", "guests"),
+    [
+        ("Feuerschwanz ft. Melissa Bonny", "Feuerschwanz", "ft. Melissa Bonny"),
+        ("DOMINUM feat. Feuerschwanz", "DOMINUM", "feat. Feuerschwanz"),
+        ("Van Canto featuring Victor Smolski", "Van Canto", "featuring Victor Smolski"),
+        ("Eluveitie (feat. Anna Murphy)", "Eluveitie", "feat. Anna Murphy"),
+        ("Sabaton", "Sabaton", None),  # nothing to move
+        ("Simon & Garfunkel", "Simon & Garfunkel", None),  # a duo is not a guest credit
+        ("feat. Melissa Bonny", "feat. Melissa Bonny", None),  # no main artist left: leave it alone
+    ],
+)
+def test_split_feat(artist, main, guests):
+    assert split_feat(artist) == (main, guests)
+
+
+def test_move_feat_matches_the_users_example():
+    assert move_feat("Feuerschwanz ft. Melissa Bonny", "Ding (SEEED Cover)") == (
+        "Feuerschwanz",
+        "Ding (SEEED Cover) ft. Melissa Bonny",
+    )
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["The Dead Don't Die (feat. Feuerschwanz)", "Ding feat. Melissa Bonny", "Song (feat. X) [Live]"],
+)
+def test_move_feat_does_not_name_the_guest_twice(title):
+    assert move_feat("DOMINUM feat. Feuerschwanz", title) == ("DOMINUM", title)
+
+
+def test_plan_moves_the_guest_credit_into_the_title():
+    collection = Collection.from_dict(
+        {
+            "source_url": "https://www.youtube.com/playlist?list=PLx",
+            "source_id": "PLx",
+            "is_playlist": True,
+            "title": "Metalfest",
+            "channel": "Metalfest",
+            "thumbnail": None,
+            "fetched_at": "2026-09-23T00:00:00",
+            "entries": [
+                {
+                    "video_id": "aaaaaaaaaaa",
+                    "position": 1,
+                    "title": "Feuerschwanz ft. Melissa Bonny - Ding (SEEED Cover)",
+                    "duration": 200,
+                }
+            ],
+        }
+    )
+    t = build_plan(collection).tracks[0]
+    assert (t.artist, t.title) == ("Feuerschwanz", "Ding (SEEED Cover) ft. Melissa Bonny")

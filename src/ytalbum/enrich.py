@@ -20,7 +20,7 @@ from typing import Any
 from .mb import MusicBrainzAPI, MusicBrainzError
 from .models import AlbumPlan, Kind, PlanTrack, Provenance
 from .plan import refresh_derived
-from .titles import key
+from .titles import key, move_feat
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +124,8 @@ def enrich_track(t: PlanTrack, mb: MusicBrainzAPI) -> bool:
     title = rec["title"] + extra
     if feat_text(title_source) and len(ac) == 1:  # MB has no guest credit: keep ours
         title += "".join(f" {g}" for g in re.findall(r"\([^)]*feat[^)]*\)", title_source, re.I))
-    _set(t, "artist", credit_phrase(ac))
+    artist, title = move_feat(credit_phrase(ac), title)  # "A feat. B" - "Song" -> "A" - "Song feat. B"
+    _set(t, "artist", artist)
     if length := rec.get("length"):
         t.mb_length = round(length / 1000, 1)  # lets the UI suggest where the song ends
     if extra:
@@ -201,8 +202,9 @@ def enrich_release(plan: AlbumPlan, mb: MusicBrainzAPI) -> bool:
         next_number = max((int(m["position"]) for m in matches.values()), default=0) + 1
         for i, t in enumerate(plan.tracks):
             if m := matches.get(i):
-                _set(t, "title", m["title"])
-                _set(t, "artist", credit_phrase(m.get("artist-credit") or release["artist-credit"]))
+                artist, title = move_feat(credit_phrase(m.get("artist-credit") or release["artist-credit"]), m["title"])
+                _set(t, "title", title)
+                _set(t, "artist", artist)
                 t.number, t.disc, t.mbid = int(m["position"]), int(m["disc"]), m["recording"]["id"]
                 if length := m.get("length") or m["recording"].get("length"):
                     t.mb_length = round(int(length) / 1000, 1)

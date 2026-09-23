@@ -38,6 +38,33 @@ def natural_key(text: str) -> list[object]:
     return [(1, int(p), "") if p.isdigit() else (0, 0, re.sub(r"\W+", " ", p).strip().casefold()) for p in parts]
 
 
+_FEAT_WORD = re.compile(r"\b(?:feat\.?|ft\.?|featuring)\s", re.I)
+_FEAT_TAIL = re.compile(r"\s*[(\[]?\s*\b(feat\.?|ft\.?|featuring)\s+(?P<guests>[^)\]]+?)\s*[)\]]?\s*$", re.I)
+
+
+def split_feat(artist: str) -> tuple[str, str | None]:
+    """'Feuerschwanz ft. Melissa Bonny' -> ('Feuerschwanz', 'ft. Melissa Bonny').
+
+    Guest credits belong in the title; the artist field stays the performer, so the library
+    does not grow an entry per collaboration.
+    """
+    m = _FEAT_TAIL.search(artist)
+    if not m or not m["guests"].strip():
+        return artist, None
+    main = artist[: m.start()].strip(" -–—,&")
+    return (main or artist), (None if not main else f"{m[1]} {m['guests'].strip()}")
+
+
+def move_feat(artist: str, title: str) -> tuple[str, str]:
+    """Take a guest credit out of the artist and append it to the title, once."""
+    main, guests = split_feat(artist)
+    if not guests:
+        return artist, title
+    if _FEAT_WORD.search(title):  # the title already names them, anywhere in it
+        return main, title
+    return main, f"{title} {guests}"
+
+
 def key(s: str) -> str:
     """Comparison key: case- and punctuation-insensitive."""
     return re.sub(r"\W+", "", s.casefold())

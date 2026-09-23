@@ -46,7 +46,8 @@ def test_vol1_all_tracks_identified():
     stats = enrich(plan, RecordedMB())
     assert stats == {"release": 0, "tracks": 13, "looked_up": 13}
     got = [(t.artist, t.title) for t in plan.tracks]
-    assert got[1] == ("DOMINUM feat. Feuerschwanz", "The Dead Don’t Die")  # guest credit picked via the @handle
+    # guest credit picked via the @handle, and moved out of the artist field into the title
+    assert got[1] == ("DOMINUM", "The Dead Don’t Die feat. Feuerschwanz")
     assert got[2] == ("Mono Inc.", "Heile, heile Segen")  # MB spelling
     assert got[10] == ("Ashley Serena", "Lullaby of Woe")  # reversed title fixed by the swapped query
     assert all(t.mbid and t.provenance == {"artist": Provenance.MB, "title": Provenance.MB} for t in plan.tracks)

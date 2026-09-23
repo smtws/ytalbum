@@ -23,7 +23,7 @@ from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
 from .plan import build_plan, merge_plans, refresh_derived, renumber
 from .search import SearchResult, search_artist
-from .titles import key as text_key
+from .titles import key as text_key, move_feat
 from .youtube import BOT_CHECK, Cancelled, YouTube, channel_base_url
 
 log = logging.getLogger(__name__)
@@ -306,7 +306,7 @@ class Service:
         """
         outcomes = []
         for album_dir, plan in list(iter_plans(self.library)) if self.library and self.library.exists() else []:
-            before = (plan.albumartist, [t.artist for t in plan.tracks], len(plan.tracks))
+            before = (plan.albumartist, [(t.artist, t.title) for t in plan.tracks], len(plan.tracks))
             seen: set[str] = set()  # the same video listed twice in a playlist is one track
             unique = [t for t in plan.tracks if not (t.video_id in seen or seen.add(t.video_id))]
             if len(unique) != len(plan.tracks):
@@ -316,12 +316,18 @@ class Service:
             for t in plan.tracks:
                 if t.provenance.get("artist") == Provenance.YT_MUSIC and ", " in t.artist:
                     t.artist = t.auto["artist"] = t.artist.split(", ")[0]  # writers and producers
+                if Provenance.USER in (t.provenance.get("artist"), t.provenance.get("title")):
+                    continue  # the user decided how this one reads
+                artist, title = move_feat(t.artist, t.title)  # guests belong in the title
+                if artist != t.artist:
+                    t.artist, t.title = artist, title
+                    t.auto.update(artist=artist, title=title)
             if plan.kind != Kind.COMPILATION and plan.provenance.get("albumartist") in (Provenance.YT_MUSIC, Provenance.YT_TITLE):
                 names = [t.artist for t in plan.tracks]
                 if names:
                     plan.albumartist = plan.auto["albumartist"] = max(set(names), key=names.count)
             self._harmonize_artist(plan)
-            if before == (plan.albumartist, [t.artist for t in plan.tracks], len(plan.tracks)):
+            if before == (plan.albumartist, [(t.artist, t.title) for t in plan.tracks], len(plan.tracks)):
                 continue
             self.log(f"=== {plan.albumartist} — {plan.album}")
             save_plan(plan, album_dir)
