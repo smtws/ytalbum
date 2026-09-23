@@ -126,6 +126,14 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
     return refresh_derived(plan)
 
 
+def renumber(plan: AlbumPlan) -> AlbumPlan:
+    """Close the gaps after a deletion (single-disc albums only)."""
+    if all(t.disc == 1 for t in plan.tracks):
+        for number, t in enumerate(plan.tracks, 1):
+            t.number = number
+    return plan
+
+
 def wanted_folder(plan: AlbumPlan) -> str:
     """Where the album belongs, relative to the library root, given its (edited) fields."""
     return f"{safe_name(plan.albumartist)}/{safe_name(plan.album)}"

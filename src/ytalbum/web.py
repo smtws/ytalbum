@@ -415,6 +415,20 @@ class App:
                 if start is not None and end is not None and end <= start:
                     raise ValueError("the end must come after the start")
                 return self.jobs.submit("trim", f"Trim all tracks from {channel}", lambda s: s.trim_channel(channel, start, end))
+            case "delete_track":
+                source_id, video_id = str(body.get("id", "")), str(body.get("video_id", ""))
+                found = self.album(source_id)
+                if not found or not video_id:
+                    raise ValueError("unknown album or track")
+                track = next((t for t in found[1].tracks if t.video_id == video_id), None)
+                label = f"{track.artist} - {track.title}" if track else video_id
+                return self.jobs.submit("delete", f"Delete {label}", lambda s: s.delete_track(source_id, video_id))
+            case "delete_album":
+                source_id = str(body.get("id", ""))
+                found = self.album(source_id)
+                if not found:
+                    raise ValueError("unknown album")
+                return self.jobs.submit("delete", f"Delete album {found[1].album}", lambda s: s.delete_album(source_id))
             case "edit":
                 source_id = str(body.get("id", ""))
                 if not self.album(source_id):

@@ -232,7 +232,9 @@ function renderAlbum() {
           : t.error_kind === "no_audio_stream" ? h("button", { class: "quiet small", type: "button", title: t.error || "", onclick: (e) => askAudioChoice(p, t, e.currentTarget) }, "no audio — choose")
           : t.state === "failed" ? h("span", { class: "badge bad", title: t.error || "" }, "failed") : h("span", { class: "badge" }, "pending"),
         t.ext === "m4a" ? h("span", { class: "badge", title: "audio taken from the video stream (copied, not re-encoded)" }, "m4a") : null,
-        t.in_source ? null : h("span", { class: "badge", title: "no longer in the source playlist" }, "gone"))));
+        t.in_source ? null : h("span", { class: "badge", title: "no longer in the source playlist" }, "gone"),
+        h("button", { class: "quiet small danger-text", type: "button", title: "Delete this track (file is removed)",
+          onclick: (e) => deleteTrack(p, t, e.currentTarget) }, "✕"))));
   const skipped = (p.skipped || []).map((s) => h("li", { class: "muted" }, `${s.title} — ${s.reason}`));
   const gone = p.tracks.filter((t) => !t.in_source);
   fill(panel,
@@ -246,9 +248,23 @@ function renderAlbum() {
       h("div", { class: "actions" },
         h("button", { type: "submit" }, "Save changes (rename + retag + trim)"),
         h("button", { class: "quiet", type: "button", onclick: (e) => submit("fetch", { urls: [p.source_url] }, e.currentTarget) }, "Re-check source"),
+        h("button", { class: "danger", type: "button", onclick: (e) => deleteAlbum(p, e.currentTarget) }, "Delete album"),
         gone.length ? h("button", { class: "danger", type: "button", onclick: (e) => pruneAlbum(p, gone, e.currentTarget) }, `Remove ${gone.length} track${gone.length > 1 ? "s" : ""} no longer in the playlist`) : null,
         h("a", { href: p.source_url, target: "_blank", rel: "noopener" }, "open on YouTube"))));
   panel.hidden = false;
+}
+
+function deleteTrack(plan, track, button) {
+  const message = `Delete “${track.artist} – ${track.title}”?\n\nThe file is removed and the remaining tracks are renumbered.\nIf the video is still in the playlist, a later update fetches it again.`;
+  if (confirm(message)) submit("delete_track", { id: plan.source_id, video_id: track.video_id }, button);
+}
+
+function deleteAlbum(plan, button) {
+  const n = plan.tracks.length;
+  const message = `Delete the album “${plan.albumartist} — ${plan.album}”?\n\n${n} track(s), the cover and the album data are removed from\n${plan.folder}\n\nFiles you put there yourself are kept.`;
+  if (confirm(message)) {
+    submit("delete_album", { id: plan.source_id }, button).then(() => { $("#album").hidden = true; currentAlbum = null; });
+  }
 }
 
 function pruneAlbum(p, gone, button) {

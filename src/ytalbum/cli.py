@@ -50,6 +50,11 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("album_dir", type=Path)
     pr.add_argument("--yes", action="store_true", help="do not ask")
 
+    dl = sub.add_parser("delete", help="delete an album (or one track) — files are removed")
+    dl.add_argument("album_dir", type=Path)
+    dl.add_argument("--track", metavar="VIDEO_ID", help="delete only this track")
+    dl.add_argument("--yes", action="store_true", help="do not ask")
+
     u = sub.add_parser("update", help="re-check every album in the library against its source")
     u.add_argument("--library", type=Path)
     u.add_argument("--dry-run", action="store_true", help="only report what changed")
@@ -99,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
                 return _prune(args, cfg)
             case "service":
                 return _systemd(args, cfg)
+            case "delete":
+                return _delete(args, cfg)
     except NotSupported as e:
         print(f"not supported: {e}", file=sys.stderr)
         return 2
@@ -236,6 +243,36 @@ def _systemd(args: argparse.Namespace, cfg: config_mod.Config) -> int:
         print(e, file=sys.stderr)
         return 2
     return 0
+
+
+def _delete(args: argparse.Namespace, cfg: config_mod.Config) -> int:
+    from .download import load_plan
+
+    plan = load_plan(args.album_dir)
+    if not plan:
+        print(f"no plan in {args.album_dir}", file=sys.stderr)
+        return 2
+    if args.track:
+        track = next((t for t in plan.tracks if t.video_id == args.track), None)
+        if not track:
+            print(f"no track {args.track} in this album", file=sys.stderr)
+            return 2
+        what = f"the track “{track.artist} - {track.title}”"
+    else:
+        what = f"the album “{plan.albumartist} — {plan.album}” with {len(plan.tracks)} track(s)"
+    print(f"about to delete {what} in {args.album_dir}")
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print("add --yes to confirm", file=sys.stderr)
+            return 2
+        if input("delete? [y/N] ").strip().lower() not in ("y", "yes", "j", "ja"):
+            return 0
+    library = args.album_dir.resolve().parents[1]
+    service = _service(cfg, library)
+    outcome = service.delete_track(plan.source_id, args.track) if args.track else service.delete_album(plan.source_id)
+    if outcome.message:
+        print(outcome.message, file=sys.stderr)
+    return exit_code(outcome)
 
 
 def _serve(args: argparse.Namespace, cfg: config_mod.Config) -> int:

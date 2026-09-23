@@ -6,6 +6,7 @@ anything is downloaded, and `on_track(track, what)` per track.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import threading
@@ -15,11 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
-from .download import find_plan, iter_plans, load_plan, relocate, run, save_plan
+from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, relocate, run, save_plan
+from .trim import ORIGINALS, original_path
 from .enrich import enrich
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, PlanTrack, Provenance, SourceRef
-from .plan import build_plan, merge_plans, refresh_derived
+from .plan import build_plan, merge_plans, refresh_derived, renumber
 from .search import SearchResult, search_artist
 from .youtube import BOT_CHECK, Cancelled, YouTube, channel_base_url
 
@@ -246,6 +248,55 @@ class Service:
                 t.number = number
         save_plan(plan, album_dir)
         return self.execute(plan, album_dir)  # renames/retags only (tracktotal changed)
+
+    # -- deleting (always asked for explicitly) -------------------------------------------
+
+    def delete_track(self, source_id: str, video_id: str) -> Outcome:
+        """Delete one track: its files go, and it leaves the album.
+
+        Nothing is remembered — if the video is still in the source, the next fetch
+        brings it back.
+        """
+        found = self.find_album(source_id)
+        if not found:
+            return Outcome("failed", message=f"unknown album {source_id}")
+        album_dir, plan = found
+        track = next((t for t in plan.tracks if t.video_id == video_id), None)
+        if not track:
+            return Outcome("failed", message="no such track")
+        for path in (_inside(album_dir, track.filename), original_path(album_dir, track)):
+            if path and path.exists():
+                path.unlink()
+        self.log(f"removed {track.number:02d} {track.artist} - {track.title}")
+        plan.tracks.remove(track)
+        renumber(plan)
+        save_plan(plan, album_dir)
+        return self.execute(plan, album_dir)  # renames and retags the rest
+
+    def delete_album(self, source_id: str) -> Outcome:
+        """Delete everything ytalbum put into this album folder, then the folder if it is empty."""
+        found = self.find_album(source_id)
+        if not found:
+            return Outcome("failed", message=f"unknown album {source_id}")
+        album_dir, plan = found
+        for track in plan.tracks:
+            for path in (_inside(album_dir, track.filename), original_path(album_dir, track)):
+                if path and path.exists():
+                    path.unlink()
+        for path in [*album_dir.glob("cover.*"), album_dir / PLAN_FILE]:
+            path.unlink(missing_ok=True)
+        for folder in (album_dir / ORIGINALS, album_dir / PARTS_DIR):
+            if folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
+        left = sorted(p.name for p in album_dir.iterdir()) if album_dir.exists() else []
+        if left:
+            self.log(f"kept {album_dir}: it still holds {len(left)} file(s) that are not ours ({', '.join(left[:3])})")
+        else:
+            album_dir.rmdir()
+            with contextlib.suppress(OSError):
+                album_dir.parent.rmdir()  # the artist folder, only when empty
+            self.log(f"deleted {album_dir}")
+        return Outcome("ok", plan, album_dir)
 
     # -- edits (web UI) ----------------------------------------------------------------
 
