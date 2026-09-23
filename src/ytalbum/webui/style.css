@@ -31,7 +31,9 @@ input[type=text], input[type=number] { width: 100%; border: 1px solid var(--line
 .open { display: flex; gap: .5rem; flex: 1 1 24rem; }
 main { padding: 1rem; max-width: 76rem; margin: 0 auto; display: grid; gap: 1rem; padding-bottom: 12rem; }
 .section-head { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; }
-.artist-actions { display: flex; gap: .4rem; margin-left: auto; flex-wrap: wrap; }
+.libfilter { margin-left: auto; width: min(18rem, 45vw); padding: .3rem .6rem; font-size: .85rem; }
+.libfilter::-webkit-search-cancel-button { cursor: pointer; }
+.artist-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
 .artist-actions button { padding: .3rem .6rem; font-size: .8rem; }
 .card .artist.link { cursor: pointer; border-radius: 4px; padding: .1rem .2rem; margin: -.1rem -.2rem; }
 .card .artist.link:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }

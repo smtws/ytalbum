@@ -146,9 +146,33 @@ function schedulePoll(ms) {
 
 let gridShows = "";
 let artistFilter = null;
+let libFilter = "";
+
+// ignore case, accents and punctuation, so "njord" finds "Dreams of Njǫrð".
+// NFD handles the combining marks; these letters are separate characters and never decompose.
+const LETTERS = { ð: "d", þ: "th", ø: "o", æ: "ae", œ: "oe", ß: "ss", ł: "l", đ: "d", ŋ: "n", ʒ: "z" };
+const fold = (s) =>
+  (s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[ðþøæœßłđŋʒ]/g, (c) => LETTERS[c])
+    .replace(/[^\p{L}\p{N}]+/gu, " ");
+
+// German keyboards without umlauts write "knueppel" for "Knüppel", which folding to
+// "knuppel" would miss — so each album is matched against both spellings.
+const germanise = (s) => (s || "").toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue");
+
+function matchesFilter(a) {
+  if (!libFilter) return true;
+  const text = `${a.albumartist} ${a.album} ${a.year || ""}`;
+  const hays = [fold(text), fold(germanise(text))];
+  return fold(libFilter).split(" ").filter(Boolean).every((term) => hays.some((h) => h.includes(term)));
+}
 
 function shownAlbums() {
-  return artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums;
+  const byArtist = artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums;
+  return byArtist.filter(matchesFilter);
 }
 
 function showArtist(name) {
@@ -160,9 +184,14 @@ function showArtist(name) {
 }
 
 function renderLibrary() {
-  $("#libpath").textContent = artistFilter ? `${shownAlbums().length} albums` : state.library || "";
+  const shown = shownAlbums().length;
+  const all = (artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums).length;
+  $("#libpath").textContent = libFilter ? `${shown} of ${all} albums` : artistFilter ? `${all} albums` : state.library || "";
+  $("#empty").textContent = libFilter
+    ? `Nothing in the library matches “${libFilter}”.`
+    : "Nothing here yet. Paste a playlist URL or type an artist above.";
   const grid = $("#grid");
-  const signature = JSON.stringify(shownAlbums()) + artistFilter;
+  const signature = JSON.stringify(shownAlbums()) + artistFilter + libFilter;
   if (signature !== gridShows) {
     // rebuilding throws away the focused card, which would break arrow-key navigation
     const focused = document.activeElement?.closest?.("#grid .card")?.dataset.id;
@@ -193,6 +222,20 @@ function card(a) {
         onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, a.albumartist),
       h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null)));
 }
+
+$("#libfilter").addEventListener("input", (e) => {
+  libFilter = e.target.value.trim();
+  renderLibrary();
+});
+// Enter jumps into the results; Escape clears the filter before anything else closes
+$("#libfilter").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("#grid").querySelector(".card")?.focus();
+  else if (e.key === "Escape" && libFilter) {
+    e.stopPropagation();
+    e.target.value = libFilter = "";
+    renderLibrary();
+  }
+});
 
 // grid: arrows move, Enter opens, P plays
 $("#grid").addEventListener("keydown", (e) => {
@@ -621,6 +664,14 @@ $("#artist-new").addEventListener("click", async (e) => {
     fill($("#results"), h("p", { class: "muted" }, `Looking for albums by “${artistFilter}” …`));
     $("#results").hidden = false;
   }
+});
+
+// "/" jumps to the library filter, the way it does in most things that have one
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.target?.closest?.("input, select, textarea")) return;
+  e.preventDefault();
+  $("#libfilter").focus();
+  $("#libfilter").select();
 });
 
 // Escape closes whichever panel is open, and the album editor gives focus back to its tile
