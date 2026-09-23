@@ -189,9 +189,8 @@ function card(a) {
     h("div", { class: "cover-wrap" }, cover, play),
     h("div", { class: "meta" },
       h("div", { class: "title" }, a.album),
-      h("div", { class: "artist" },
-        h("span", { class: "link", role: "button", tabindex: "-1", title: `Show only ${a.albumartist}`,
-          onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, a.albumartist)),
+      h("div", { class: "artist link", role: "button", tabindex: "-1", title: `Show only ${a.albumartist}`,
+        onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, a.albumartist),
       h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null)));
 }
 
@@ -302,7 +301,11 @@ function renderAlbum() {
       h("div", { class: "album-head" },
         h("img", { class: "album-cover", src: `/api/cover?id=${encodeURIComponent(p.source_id)}&t=${p.tracks.filter((t) => t.state === "done").length}`,
           alt: "", title: "Play album", onclick: () => playAlbum(p.source_id, 0), onerror: (e) => { e.currentTarget.hidden = true; } }),
-        h("div", {}, h("h2", {}, `${p.albumartist} — ${p.album}`, p.year ? h("span", { class: "muted" }, ` (${p.year})`) : null),
+        h("div", {}, h("h2", {},
+          h("span", { class: "link", role: "button", tabindex: "0", title: `Show all albums by ${p.albumartist}`,
+            onclick: () => { const name = p.albumartist; closeAlbum(); showArtist(name); },
+            onkeydown: (e) => { if (e.key === "Enter") { const name = p.albumartist; closeAlbum(); showArtist(name); } } }, p.albumartist),
+          ` — ${p.album}`, p.year ? h("span", { class: "muted" }, ` (${p.year})`) : null),
           h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.tracks.length} tracks · ${p.folder}`))),
       h("button", { class: "quiet", type: "button", onclick: () => closeAlbum() }, "Close")),
     h("form", { id: "albumform", onsubmit: saveAlbum },
