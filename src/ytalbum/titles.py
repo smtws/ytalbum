@@ -28,6 +28,16 @@ _QUOTED = re.compile(r'^(?P<artist>[^"“”„]+?)\s*["“„](?P<title>[^"“�
 _CHANNEL_NOISE = re.compile(r"(\s*-\s*topic|vevo|\s*official)$", re.I)
 
 
+def natural_key(text: str) -> list[object]:
+    """Sort key that reads digit runs as numbers: Vol. 2 before Vol. 10.
+
+    Punctuation and spacing inside the words are ignored, so "Vol.9" and "Vol. 10" are
+    ordered by their number, not by the dot.
+    """
+    parts = re.split(r"(\d+)", text or "")
+    return [(1, int(p), "") if p.isdigit() else (0, 0, re.sub(r"\W+", " ", p).strip().casefold()) for p in parts]
+
+
 def key(s: str) -> str:
     """Comparison key: case- and punctuation-insensitive."""
     return re.sub(r"\W+", "", s.casefold())

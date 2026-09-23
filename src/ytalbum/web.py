@@ -39,6 +39,7 @@ from .models import AlbumPlan
 from .service import Outcome, Service, _inside, channel_base_url
 from .youtube import Cancelled, YouTube
 from .tag import image_mime
+from .titles import natural_key
 
 log = logging.getLogger(__name__)
 
@@ -249,7 +250,7 @@ class App:
                     "needs_choice": sum(t.error_kind == "no_audio_stream" for t in plan.tracks),
                 }
             )
-        return sorted(out, key=lambda a: (a["albumartist"].casefold(), a["album"].casefold()))
+        return sorted(out, key=lambda a: (natural_key(a["albumartist"]), natural_key(a["album"])))
 
     def album(self, source_id: str) -> tuple[Path, AlbumPlan] | None:
         return next(((d, p) for d, p in iter_plans(self.library) if p.source_id == source_id), None) if self.library.exists() else None

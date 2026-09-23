@@ -213,3 +213,13 @@ def test_details_ignores_foreign_urls_and_oversized_requests(server):
     app.details._youtube = lambda: pytest.fail("must not fetch")
     assert c.post("/api/details", json={"refs": [{"id": "x", "url": "https://evil.example/p"}]}, headers=HDR).json() == {}
     assert c.post("/api/details", json={"refs": [{"id": str(i), "url": "https://www.youtube.com/playlist?list=x"} for i in range(201)]}, headers=HDR).status_code == 400
+
+
+def test_albums_sort_naturally():
+    from ytalbum.titles import natural_key
+
+    volumes = [f"Vol. {n} - x" for n in (1, 2, 10, 11, 20, 3)]
+    assert [v.split(" - ")[0] for v in sorted(volumes, key=natural_key)] == ["Vol. 1", "Vol. 2", "Vol. 3", "Vol. 10", "Vol. 11", "Vol. 20"]
+    # mixed spellings and case still land in the right place
+    mixed = ["Vol.9 - a", "Vol. 10 - b", "vol. 2 - c"]
+    assert [m.split(" - ")[0] for m in sorted(mixed, key=natural_key)] == ["vol. 2", "Vol.9", "Vol. 10"]
