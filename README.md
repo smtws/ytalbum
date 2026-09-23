@@ -1,44 +1,240 @@
 # ytalbum
 
-Turn a YouTube playlist into a properly tagged Opus album. Design and status: [DESIGN.md](DESIGN.md).
+Turn YouTube playlists into properly tagged albums: correct artist and title per track,
+album art, MusicBrainz data where it exists, and the audio copied without re-encoding.
+Comes with a command line and a small web app for the library.
+
+![The library in the web UI](docs/screenshots/library.jpg)
+
+## What it does
+
+- **You give it a URL or a name.** A playlist, a video, a channel, or just an artist name.
+- **It works out what kind of thing that is:** an official album, an artist's playlist, a
+  curated compilation (14 songs by 14 bands), or a single.
+- **It finds the real artist and title per track.** YouTube Music's own fields first, then
+  the video title (stripping "(Official Video)", label suffixes and the like), then
+  MusicBrainz — which also fixes reversed "Song - Artist" titles and adds guest credits.
+- **It downloads the best audio YouTube has** (Opus, usually 130–160 kbps) and never
+  re-encodes it.
+- **It tags everything**, embeds the cover and files it as
+  `Album artist/Album/Album artist - Album - 07 - [Track artist - ]Title.opus`.
+- **Every value knows where it came from** (MusicBrainz, YouTube Music, the video title,
+  or you), and anything you edit yourself is never overwritten by a later update.
+- **Re-runs are cheap.** An update checks each album with a single request and only does
+  real work when the playlist actually changed.
+
+## Quick start
 
 ```sh
 uv sync
-uv run ytalbum config --library ~/Music/YouTube   # once; or pass --library per run
-uv run ytalbum fetch  <playlist-or-video-url>     # plan + download + tag
-uv run ytalbum fetch  <channel-url>               # list its releases/playlists, pick (--pick 1,3-5 / --all)
-uv run ytalbum search "Artist"                   # find the artist's albums/playlists, pick which to fetch
-uv run ytalbum prune <album-folder> [--yes]        # delete tracks no longer in the playlist (asks first)
-uv run ytalbum update [--dry-run]                 # re-check every album in the library, fetch what's new
-uv run ytalbum fetch  <url> --dry-run             # just show what would be written
-uv run ytalbum plan   <url>                       # write .ytalbum.json into the album folder, edit it …
-uv run ytalbum download <album-folder>            # … then download from the edited plan
-uv run ytalbum serve                              # web UI on http://localhost:8765 (--host 0.0.0.0 for the LAN, no login!)
-uv run ytalbum service install|status|restart|uninstall                    # web UI on demand: systemd user socket on :8765, stops after 15 idle min
-uv run pytest                                     # offline tests (fixtures in design-fixtures/)
+uv run ytalbum config --library ~/Music/YouTube        # once
+uv run ytalbum fetch "https://www.youtube.com/playlist?list=…"
+uv run ytalbum serve                                   # web UI on http://localhost:8765
 ```
 
-MusicBrainz is used to correct names, years, covers and tracklists when it knows the
-music (`--no-mb` or `musicbrainz = false` in the config to skip); nothing is dropped when
-it does not. Responses are cached in `~/.cache/ytalbum/`.
+Needs [ffmpeg](https://ffmpeg.org/) and a JavaScript runtime for yt-dlp
+([deno](https://deno.com/) or [Node](https://nodejs.org/) ≥ 20). `ytalbum config` shows
+what it found.
 
-Re-running `fetch` or `download` resumes: finished tracks are skipped, failed ones retried.
-YouTube throttles heavy use with a bot check ("Sign in to confirm you're not a bot").
-ytalbum then stops, changes nothing, and asks you to run it again later (exit code 3).
+**YouTube's bot check.** After a few hundred requests YouTube starts refusing everything
+("Sign in to confirm you're not a bot"). A logged-in browser session avoids that:
 
-Age-restricted videos are skipped unless cookies are configured:
-`ytalbum config --cookies-from-browser firefox` (or `--cookies-file cookies.txt`).
+```sh
+uv run ytalbum config --cookies-from-browser firefox   # or chrome, or --cookies-file cookies.txt
+```
 
-Some streams (e.g. age-restricted videos, even with a login) need a proof-of-origin token
-like a browser has. Set up the token generator once (Node ≥ 20, versions must match the
-installed plugin, currently 2.0.0); `ytalbum config` shows it as "po tokens". ytalbum then
-starts a local token server (127.0.0.1:4416) whenever it reads or downloads, and the server
-stops itself after 5 idle minutes (`pot_mode = "script"` or `"off"` in the config to change;
-log in `~/.cache/ytalbum/pot-server.log`):
+**Proof-of-origin tokens.** Some videos only hand out their audio streams when the client
+presents a token. Set the generator up once (versions must match the installed
+`bgutil-ytdlp-pot-provider`, currently 2.0.0):
 
 ```sh
 git clone --single-branch --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git .pot-provider
 (cd .pot-provider/server && npm ci && npx tsc)
 ```
 
-Needs `ffmpeg` and a JavaScript runtime for yt-dlp (deno or node; `ytalbum config` shows which one is used).
+ytalbum finds it, starts a local token server when it needs one and stops it after five
+idle minutes.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Album view](docs/screenshots/album.jpg) | ![Search results](docs/screenshots/search.jpg) |
+| **Album view:** cover, editable fields, where each value came from, trim points, per-track delete — and the player with trim handles on its position bar. | **Search:** albums, singles, channel playlists and other playlists, with track counts filled in afterwards and "in library" markers. |
+| ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
+| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests. | **Library:** covers, progress, MusicBrainz badge; click an artist to see only their albums. |
+
+## How it works
+
+```
+URL ─► resolve ─► inspect ─► classify ─► enrich ─► plan ─► [you edit] ─► download ─► tag
+```
+
+Each album folder holds a **plan** (`.ytalbum.json`): what the source listed, what each
+track should be called, where every value came from, what has been downloaded, and which
+trim points apply. The plan is the only state — delete it and the album is just files;
+keep it and everything is repeatable.
+
+- **Your edits win.** The plan records the value ytalbum derived. A value that differs from
+  it is yours and survives every update; untouched values follow better data when it
+  appears.
+- **Nothing is decided on half-knowledge.** If any video can't be read (bot check, network),
+  the run changes nothing at all instead of classifying or renaming from a partial view.
+- **Trimming is non-destructive.** The untouched original goes to `.originals/`, cuts are
+  made from it with `ffmpeg -c copy`, and clearing the trim restores it byte for byte.
+
+More detail, including what was measured and deliberately rejected, is in
+[DESIGN.md](DESIGN.md).
+
+### On disk
+
+```
+Library/
+└── My Dark Lullabies/
+    └── Vol. 1 - Heavy Sleeping/
+        ├── My Dark Lullabies - Vol. 1 - Heavy Sleeping - 01 - Enemy Inside - Lullaby.opus
+        ├── …
+        ├── cover.jpg              # replace it with your own and ytalbum keeps it
+        ├── .ytalbum.json          # the plan
+        └── .originals/            # only when trims are in use
+```
+
+## Command line
+
+| Command | What it does |
+|---|---|
+| `ytalbum fetch <url>` | Plan and download a playlist, video or channel. `--dry-run` prints the plan only, `--pick 1,3-5` / `--all` choose from a channel, `--no-mb` skips MusicBrainz, `--library PATH` overrides the library. |
+| `ytalbum search <artist>` | Find an artist's albums, singles and playlists and pick from them (`--pick`, `--all`, `--dry-run`). |
+| `ytalbum plan <url>` | Write the plan into the album folder without downloading, for editing by hand. |
+| `ytalbum download <album-folder>` | Run an (edited) plan: fetch what is missing, rename, retag, trim. |
+| `ytalbum update` | Re-check every album against its source. `--dry-run` only reports, `--deep` reads every album fully instead of skipping unchanged ones. |
+| `ytalbum prune <album-folder>` | Delete tracks that are no longer in the source playlist (asks first, `--yes` skips). |
+| `ytalbum delete <album-folder>` | Delete an album, or one track with `--track <video-id>` (asks first, `--yes` skips). |
+| `ytalbum serve` | Web UI. `--host 0.0.0.0` exposes it to the network (**no login!**), `--port`, `--idle-exit SECONDS`. |
+| `ytalbum service install\|status\|restart\|uninstall` | Run the web UI on demand via a systemd **user** socket: the first request starts it, it stops itself when idle. `restart` refuses while a job runs unless given `--force`. |
+| `ytalbum config` | Show or change settings: `--library`, `--cookies-from-browser BROWSER[:PROFILE]`, `--cookies-file FILE`. |
+
+Exit codes: `0` fine, `1` something failed, `2` wrong usage, `3` YouTube is blocking
+requests, `130` interrupted.
+
+## Web UI and HTTP API
+
+`ytalbum serve` listens on `127.0.0.1:8765`, serves the app and a small JSON API. The app
+is a single HTML page with no build step, and it can be installed as a PWA.
+
+**Safety:** localhost only by default; writing calls need the header `X-Ytalbum: 1` and a
+JSON content type (so other websites cannot use it through your browser); the `Host` header
+must be ours (DNS rebinding); files are only ever served by album and video id, never by a
+path from the request; strict CSP, and thumbnails are fetched by the server so the page
+never talks to Google. There is **no authentication** — do not expose it to an untrusted
+network.
+
+### Reading
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/state` | Library (albums with progress), recent jobs, settings, whether something is running. |
+| `GET /api/album?id=<source-id>` | The full plan of one album. |
+| `GET /api/cover?id=<source-id>` | The album's cover image. |
+| `GET /api/thumb?u=<url>` | A thumbnail, fetched by the server (allow-listed hosts only, cached). |
+| `GET /api/audio?id=<source-id>&v=<video-id>` | The track's audio, with `Range` support so players can seek. |
+| `GET /api/job?id=<n>` | One job with its full log and result. |
+
+### Writing (POST, JSON body, header `X-Ytalbum: 1`)
+
+| Endpoint | Body | Effect |
+|---|---|---|
+| `/api/open` | `{q}` | A URL or an artist name: preview, channel listing or search (read-only lane). |
+| `/api/fetch` | `{urls: […]}` | Plan and download those sources. |
+| `/api/update` | `{artist?, deep?}` | Re-check the library, or one artist's albums. |
+| `/api/edit` | `{id, edits}` | Album and track fields, trim points, audio choice; renames and retags. |
+| `/api/trim_channel` | `{channel, start, end}` | The same trim for every track from one uploader. |
+| `/api/prune` | `{id}` | Delete tracks that left the playlist. |
+| `/api/delete_track` | `{id, video_id}` | Delete one track. |
+| `/api/delete_album` | `{id}` | Delete an album (files ytalbum owns; anything else is kept). |
+| `/api/details` | `{refs: [{id, url}]}` | Ask for track counts and covers of search hits; a background runner fills them in. |
+| `/api/cancel` | `{id}` | Cancel a job; it stops at the next point where nothing is half-done. |
+| `/api/settings` | see below | Change settings at runtime. |
+
+Jobs run in two lanes: everything that changes the library runs strictly one at a time,
+while searches and previews run alongside.
+
+## Configuration
+
+`~/.config/ytalbum/config.toml` (or `$XDG_CONFIG_HOME`), all keys optional:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `library_root` | – | Where albums are stored. |
+| `cookies_from_browser` | – | `firefox`, `chrome`, `chrome:Profile 1`, … |
+| `cookies_file` | – | An exported `cookies.txt` instead. |
+| `musicbrainz` | `true` | Look up names, years, covers, tracklists. |
+| `concurrency` | `2` | Parallel YouTube requests. More trips the bot check sooner. |
+| `pot_mode` | `"server"` | Token helper: `server` (started on demand), `script`, `off`. |
+| `pot_port`, `pot_idle` | `4416`, `300` | Token server port and idle timeout in seconds. |
+| `pot_provider_home` | `.pot-provider/server` | Where the token generator is built. |
+| `js_runtime`, `js_runtime_path` | autodetect | deno, node, bun or quickjs for yt-dlp. |
+
+## Limits
+
+- **YouTube decides the quality.** Opus at 130–160 kbps, lossy, and from whatever the
+  uploader provided. No setting can make that better, and FLAC it will never be.
+- **Some videos have no audio-only stream** (old or low-quality uploads, and age-restricted
+  ones without an age-verified account). ytalbum says so and offers to copy the audio out
+  of the combined video into an `.m4a` — your choice, never automatic.
+- **The bot check** can stop any run. ytalbum then changes nothing and asks you to try
+  later; a browser login makes it rare.
+- **It only knows its own library.** Music you already own elsewhere is invisible to it, so
+  it cannot warn you about duplicates.
+- **No authentication** in the web UI (see above).
+
+## Where this comes from
+
+The repository has three generations, all in its history:
+
+1. **v1** (Sept 2025, branch history): a Tkinter desktop app with a large search engine —
+   seven strategies, Google and YouTube Music scraping. It never produced a finished album.
+2. **v2** (`pwa` branch): a FastAPI + Vue rewrite, search only, abandoned mid-way. Its
+   central number, the "track count", was read from a yt-dlp field that actually reports the
+   size of the surrounding list — the bug that sent the project into a fix/break loop.
+3. **v3** (`v3` branch, this code): rebuilt from scratch on 22 September 2026 after an
+   analysis of both predecessors. [DESIGN.md](DESIGN.md) records that analysis, the verified
+   facts about yt-dlp and YouTube, every decision, and the ideas that were measured and
+   dropped (automatic intro detection, for one).
+
+### A note on how it was written
+
+This project doubles as an evaluation of what an autonomous coding AI can do. All three
+generations were written by AI assistants; v3 was built in a single day-long session with
+[Claude Code](https://claude.com/claude-code) (Claude Opus 5), with the repository owner
+directing the work, testing in the real world and correcting course.
+
+Whether that is visible in the result is for you to judge. What the session enforced, and
+what is worth copying regardless of who writes the code, is written down in DESIGN.md §10:
+fix wrong data where it enters instead of patching symptoms, capture a fixture and write a
+test before fixing, never tune heuristics to a single example, and verify against reality
+rather than assumptions — several features in this tool exist in the shape they do because
+a measurement contradicted the plan.
+
+## Built on
+
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) ·
+[MusicBrainz](https://musicbrainz.org/) and the [Cover Art Archive](https://coverartarchive.org/) ·
+[bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) ·
+[mutagen](https://mutagen.readthedocs.io/) ·
+[Pillow](https://python-pillow.org/) ·
+[httpx](https://www.python-httpx.org/) ·
+[ffmpeg](https://ffmpeg.org/) ·
+[uv](https://docs.astral.sh/uv/)
+
+Please respect MusicBrainz' [rate limits](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)
+(ytalbum does) and download only what you are allowed to.
+
+## Tests
+
+```sh
+uv run pytest        # 193 tests, offline, ~10 s
+```
+
+They run against recorded YouTube and MusicBrainz responses in `design-fixtures/`, so they
+need no network and no credentials. Every bug found in real use has a fixture and a test.
