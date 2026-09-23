@@ -361,6 +361,15 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    name. Deliberately not built: shuffle, repeat, reordering, persistence. The player is here
    to check downloads, not to replace a music player.
 
+11. ✅ "No audio-only stream" is not a property of the video (2026-09-23, from real use).
+   DOMINUM "One of Us" failed with it and a plain re-fetch got the full-quality Opus
+   (`ext=opus`, `audio_choice=best`); Skeeter Davis' 1963 upload fails every time and really
+   offers only *360p video, AAC*. Identical symptom, opposite cause — and the old dialog
+   pushed the user toward an `.m4a` that is audibly worse than a file that was available.
+   So the download asks a second time (after making sure the token server is up) before
+   raising `NoAudioStream`, and the dialog now says the failure can be temporary and to
+   re-check the source first. Only a video that refuses twice is treated as having no audio.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

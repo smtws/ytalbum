@@ -240,9 +240,11 @@ while searches and previews run alongside.
 
 - **YouTube decides the quality.** Opus at 130–160 kbps, lossy, and from whatever the
   uploader provided. No setting can make that better, and FLAC it will never be.
-- **Some videos have no audio-only stream** (old or low-quality uploads, and age-restricted
-  ones without an age-verified account). ytalbum says so and offers to copy the audio out
-  of the combined video into an `.m4a` — your choice, never automatic.
+- **Some videos have no audio-only stream** (old or low-quality uploads). YouTube also
+  withholds the audio formats now and then for videos that do have them, which looks
+  identical — so ytalbum asks twice before believing it, and the dialog says to re-check the
+  source before accepting the fallback: copying the audio out of the combined video into an
+  `.m4a` is your choice, never automatic.
 - **The bot check** can stop any run. ytalbum then changes nothing and asks you to try
   later; a browser login makes it rare.
 - **It only knows its own library.** Music you already own elsewhere is invisible to it, so

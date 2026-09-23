@@ -35,7 +35,11 @@ class NotSupported(Exception):
 
 
 class NoAudioStream(Exception):
-    """YouTube offers no audio-only stream for this video (old/low-quality upload, or age-gated)."""
+    """Twice in a row, YouTube offered no audio-only stream — usually an old upload.
+
+    Once is not enough to conclude it: the audio formats are withheld now and then, and the
+    next attempt gets them (see `download_audio`).
+    """
 
     def __init__(self, description: str) -> None:
         super().__init__(description)
@@ -318,15 +322,24 @@ class YouTube:
             noplaylist=True,
             overwrites=True,
         )
-        try:
-            with YoutubeDL(params) as ydl:
-                ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
-        except DownloadCancelled as e:
-            raise Cancelled() from e
-        except DownloadError as e:
-            if "Requested format is not available" in str(e):
+        for attempt in (1, 2):
+            try:
+                with YoutubeDL(params) as ydl:
+                    ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+                break
+            except DownloadCancelled as e:
+                raise Cancelled() from e
+            except DownloadError as e:
+                if "Requested format is not available" not in str(e):
+                    raise
+                # The audio-only formats are sometimes simply not offered for a moment (a
+                # missing proof-of-origin token, a client that got a thin format list); a
+                # second ask usually gets them. Only a video that truly has none fails twice.
+                if attempt == 1:
+                    log.info("no audio-only format for %s — asking once more", video_id)
+                    self.ensure_pot_server()
+                    continue
                 raise NoAudioStream(self.describe_combined(video_id)) from e
-            raise
         path = dest_dir / f"{video_id}.{codec}"
         if not path.exists():
             raise RuntimeError(f"download produced no {path.name}")

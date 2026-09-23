@@ -558,11 +558,15 @@ function askAudioChoice(plan, track, button) {
   const message = [
     `“${track.artist} – ${track.title}”`,
     "",
-    "YouTube has no audio-only stream for this video — usually an old or low-quality upload.",
-    `All it offers is: ${detail || "a combined video stream"}.`,
+    `Twice in a row, all YouTube offered was: ${detail || "a combined video stream"}.`,
+    "Usually that means an old or low-quality upload that never had a separate audio track.",
+    "",
+    "But it can also be temporary — YouTube sometimes withholds the audio formats for a while.",
+    "If this is a normal, recent video, close this and press “Re-check source” first:",
+    "a later attempt often gets the full-quality Opus.",
     "",
     "OK: take the audio out of that video. It is copied, not re-encoded, and saved as .m4a —",
-    "the best quality available here, but audibly below your other tracks.",
+    "the best available here, but audibly below your other tracks, and the choice sticks.",
     "",
     "Cancel: leave the track out. You can decide later; nothing is lost.",
   ].join("\n");
