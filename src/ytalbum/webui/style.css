@@ -31,6 +31,7 @@ input[type=text], input[type=number] { width: 100%; border: 1px solid var(--line
 .open { display: flex; gap: .5rem; flex: 1 1 24rem; }
 main { padding: 1rem; max-width: 76rem; margin: 0 auto; display: grid; gap: 1rem; padding-bottom: 12rem; }
 .section-head { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; }
+mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 .1em; }
 .matchline { margin-top: .25rem; font-size: .75rem; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .libfilter { margin-left: auto; width: min(18rem, 45vw); padding: .3rem .6rem; font-size: .85rem; }
 .libfilter::-webkit-search-cancel-button { cursor: pointer; }

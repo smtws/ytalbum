@@ -166,20 +166,67 @@ async function loadTracks() {
 // ignore case, accents and punctuation, so "njord" finds "Dreams of Njǫrð".
 // NFD handles the combining marks; these letters are separate characters and never decompose.
 const LETTERS = { ð: "d", þ: "th", ø: "o", æ: "ae", œ: "oe", ß: "ss", ł: "l", đ: "d", ŋ: "n", ʒ: "z" };
-const fold = (s) =>
-  (s || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[ðþøæœßłđŋʒ]/g, (c) => LETTERS[c])
-    .replace(/[^\p{L}\p{N}]+/gu, " ");
+
+// Folds one character at a time and remembers where each folded character came from, so a
+// match can be pointed back at the original text ("ü" -> "ue" is two characters from one).
+function foldMap(text, german) {
+  let folded = "";
+  const from = [];
+  for (let i = 0; i < (text || "").length; i++) {
+    let c = text[i].normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (german && (c === "a" || c === "o" || c === "u") && text[i].normalize("NFD").length > 1) c += "e";
+    c = c.replace(/[ðþøæœßłđŋʒ]/g, (x) => LETTERS[x]).replace(/[^\p{L}\p{N}]+/gu, " ");
+    for (const _ of c) from.push(i);
+    folded += c;
+  }
+  return { folded, from };
+}
+
+const fold = (s) => foldMap(s, false).folded;
 
 // German keyboards without umlauts write "knueppel" for "Knüppel", which folding to
-// "knuppel" would miss — so each album is matched against both spellings.
-const germanise = (s) => (s || "").toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue");
+// "knuppel" would miss — so every string is matched (and highlighted) in both spellings.
+const maps = (text) => [foldMap(text, false), foldMap(text, true)];
+const hits = (terms, text) => {
+  const both = maps(text);
+  return terms.every((term) => both.some((m) => m.folded.includes(term)));
+};
 
-const hays = (text) => [fold(text), fold(germanise(text))];
-const hits = (terms, text) => terms.every((term) => hays(text).some((h) => h.includes(term)));
+// Where each term sits in the original string, as [start, end) ranges, merged and sorted.
+function matchRanges(text, terms) {
+  const ranges = [];
+  for (const m of maps(text)) {
+    for (const term of terms) {
+      for (let at = m.folded.indexOf(term); at !== -1; at = m.folded.indexOf(term, at + 1)) {
+        ranges.push([m.from[at], m.from[at + term.length - 1] + 1]);
+      }
+    }
+  }
+  ranges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const merged = [];
+  for (const r of ranges) {
+    const last = merged.at(-1);
+    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+    else merged.push([...r]);
+  }
+  return merged;
+}
+
+// The matched part of a string, wrapped in <mark>; plain text when nothing is being filtered.
+function marked(text) {
+  const terms = libFilter ? fold(libFilter).split(" ").filter(Boolean) : [];
+  const ranges = terms.length ? matchRanges(text, terms) : [];
+  if (!ranges.length) return text;
+  const out = [];
+  let at = 0;
+  for (const [from, to] of ranges) {
+    if (from > at) out.push(text.slice(at, from));
+    out.push(h("mark", {}, text.slice(from, to)));
+    at = to;
+  }
+  if (at < text.length) out.push(text.slice(at));
+  return out;
+}
 
 // An album matches by its own name, or because a song in it does — "pers" finds Perséfone
 // inside Vol. 3, not only "Nocturnal Whispers".
@@ -247,7 +294,7 @@ function card(a) {
   // when the album is only here because a song matched, name the song rather than count it
   const songs = a.matches?.length
     ? h("div", { class: "matchline", title: a.matches.slice(0, 8).join("\n") },
-        `♪ ${a.matches[0]}${a.matches.length > 1 ? `  +${a.matches.length - 1}` : ""}`)
+        "♪ ", marked(a.matches[0]), a.matches.length > 1 ? `  +${a.matches.length - 1}` : "")
     : null;
   return h("button", { class: `card${a.id === lastAlbumId ? " current" : ""}`, type: "button", "data-id": a.id,
       onclick: () => openAlbum(a.id),
@@ -255,9 +302,9 @@ function card(a) {
       "aria-keyshortcuts": "Enter P" },
     h("div", { class: "cover-wrap" }, cover, play),
     h("div", { class: "meta" },
-      h("div", { class: "title" }, a.album),
+      h("div", { class: "title" }, marked(a.album)),
       h("div", { class: "artist link", role: "button", tabindex: "-1", title: `Show only ${a.albumartist}`,
-        onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, a.albumartist),
+        onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, marked(a.albumartist)),
       h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null),
       songs));
 }
