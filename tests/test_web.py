@@ -11,7 +11,7 @@ from mutagen.oggopus import OggOpus
 from test_incremental import JPEG, FakeYouTube, opus_template, vol1
 
 from ytalbum.config import Config
-from ytalbum.download import load_plan, run
+from ytalbum.download import load_plan, run, save_plan
 from ytalbum.models import Provenance
 from ytalbum.plan import build_plan, refresh_derived
 from ytalbum.service import Service, apply_user_edits
@@ -256,3 +256,28 @@ def test_library_grid_sorts_by_artist_then_year_then_name(tmp_path, opus_templat
         ("Sabaton", "Carolus Rex"),
         ("Sabaton", "The Great War"),
     ]
+
+
+def test_track_index_lets_the_ui_filter_by_song(library, opus_template):
+    app = App(Config(library_root=library), library)
+    index = app.track_index()
+    plan = load_plan(next(library.glob("*/*/.ytalbum.json")).parent)
+    assert index["albums"][plan.source_id] == [[t.artist, t.title] for t in plan.tracks]
+    assert index["version"] and app.track_index()["version"] == index["version"]  # cached
+
+
+def test_track_index_version_follows_the_plans(library, opus_template):
+    app = App(Config(library_root=library), library)
+    before = app.track_index()
+    album_dir = next(library.glob("*/*/.ytalbum.json")).parent
+    plan = load_plan(album_dir)
+    plan.tracks[0].title = "Renamed by hand"
+    save_plan(plan, album_dir)
+    after = app.track_index()
+    assert after["version"] != before["version"]  # the UI refetches only when this changes
+    assert after["albums"][plan.source_id][0][1] == "Renamed by hand"
+
+
+def test_state_carries_the_track_index_version(library):
+    app = App(Config(library_root=library), library)
+    assert app.state()["tracks_version"] == app.track_index()["version"]

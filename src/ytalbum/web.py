@@ -34,7 +34,7 @@ import httpx
 
 from . import config as config_mod
 from .config import Config
-from .download import COVER_STEM, iter_plans
+from .download import COVER_STEM, PLAN_FILE, iter_plans
 from .models import AlbumPlan
 from .service import Outcome, Service, _inside, channel_base_url
 from .tag import image_mime
@@ -229,8 +229,26 @@ class App:
         self._service_factory = service_factory or (lambda job: Service(cfg, self.library, log=lambda s: _append(job, s), on_track=lambda t, what: _append(job, f"{what}: {t.number:02d} {t.artist} - {t.title}"), cancel=job.cancel))
         self.jobs = Jobs(self._service_factory)
         self.details = Details(lambda: YouTube(self.cfg))
+        self._track_index: dict[str, Any] = {"version": "", "albums": {}}
 
     # read side
+
+    def library_version(self) -> str:
+        """Changes whenever any plan file does — cheap enough to compute on every poll."""
+        files = sorted(self.library.rglob(PLAN_FILE)) if self.library.exists() else []
+        stamp = "".join(f"{p}:{p.stat().st_mtime_ns}" for p in files)
+        return hashlib.sha1(stamp.encode()).hexdigest()[:12]
+
+    def track_index(self) -> dict[str, Any]:
+        """Artist and title of every track, by album — the UI filters songs with it.
+
+        Sent once and re-fetched only when `library_version` changes, so typing costs nothing.
+        """
+        version = self.library_version()
+        if self._track_index["version"] != version:
+            albums = {p.source_id: [[t.artist, t.title] for t in p.tracks] for _, p in iter_plans(self.library)} if self.library.exists() else {}
+            self._track_index = {"version": version, "albums": albums}
+        return self._track_index
 
     def albums(self) -> list[dict[str, Any]]:
         out = []
@@ -370,6 +388,7 @@ class App:
             "busy": self.jobs.busy(),
             "busy_write": self.jobs.busy("write"),
             "musicbrainz": self.cfg.musicbrainz,
+            "tracks_version": self.library_version(),
         }
 
     # write side (each returns a queued job)
@@ -537,6 +556,8 @@ class _Handler(BaseHTTPRequestHandler):
         match url.path:
             case "/api/state":
                 return self._json(self.app.state())
+            case "/api/tracks":
+                return self._json(self.app.track_index())
             case "/api/album":
                 found = self.app.album(q.get("id", ""))
                 return self._json(found[1].to_dict()) if found else self._error(HTTPStatus.NOT_FOUND, "no such album")

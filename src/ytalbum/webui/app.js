@@ -107,6 +107,7 @@ async function poll() {
   try {
     const prevBusy = state.busy;
     state = await api("/api/state");
+    if (state.tracks_version && state.tracks_version !== trackIndex.version) loadTracks();
     renderLibrary();
     renderJobs();
     renderSettings();
@@ -147,6 +148,20 @@ function schedulePoll(ms) {
 let gridShows = "";
 let artistFilter = null;
 let libFilter = "";
+let trackIndex = { version: null, albums: {} }; // artist+title per album, for filtering by song
+
+async function loadTracks() {
+  const wanted = state.tracks_version;
+  try {
+    const got = await api("/api/tracks");
+    if (got.version !== trackIndex.version) {
+      trackIndex = got;
+      renderLibrary();
+    }
+  } catch {
+    trackIndex = { version: wanted, albums: {} }; // do not hammer the server on a failure
+  }
+}
 
 // ignore case, accents and punctuation, so "njord" finds "Dreams of Njǫrð".
 // NFD handles the combining marks; these letters are separate characters and never decompose.
@@ -163,16 +178,28 @@ const fold = (s) =>
 // "knuppel" would miss — so each album is matched against both spellings.
 const germanise = (s) => (s || "").toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue");
 
-function matchesFilter(a) {
-  if (!libFilter) return true;
-  const text = `${a.albumartist} ${a.album} ${a.year || ""}`;
-  const hays = [fold(text), fold(germanise(text))];
-  return fold(libFilter).split(" ").filter(Boolean).every((term) => hays.some((h) => h.includes(term)));
+const hays = (text) => [fold(text), fold(germanise(text))];
+const hits = (terms, text) => terms.every((term) => hays(text).some((h) => h.includes(term)));
+
+// An album matches by its own name, or because a song in it does — "pers" finds Perséfone
+// inside Vol. 3, not only "Nocturnal Whispers".
+function matchingTracks(a, terms) {
+  return (trackIndex.albums[a.id] || [])
+    .filter(([artist, title]) => hits(terms, `${artist} ${title}`))
+    .map(([artist, title]) => `${artist} — ${title}`);
 }
 
 function shownAlbums() {
   const byArtist = artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums;
-  return byArtist.filter(matchesFilter);
+  if (!libFilter) return byArtist.map((a) => ({ ...a, matches: null }));
+  const terms = fold(libFilter).split(" ").filter(Boolean);
+  const out = [];
+  for (const a of byArtist) {
+    const own = hits(terms, `${a.albumartist} ${a.album} ${a.year || ""}`);
+    const songs = matchingTracks(a, terms);
+    if (own || songs.length) out.push({ ...a, matches: own ? null : songs });
+  }
+  return out;
 }
 
 function showArtist(name) {
@@ -186,12 +213,17 @@ function showArtist(name) {
 function renderLibrary() {
   const shown = shownAlbums().length;
   const all = (artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums).length;
-  $("#libpath").textContent = libFilter ? `${shown} of ${all} albums` : artistFilter ? `${all} albums` : state.library || "";
+  const songMatches = shownAlbums().reduce((n, a) => n + (a.matches?.length || 0), 0);
+  $("#libpath").textContent = libFilter
+    ? `${shown} of ${all} albums` + (songMatches ? `, ${songMatches} track${songMatches > 1 ? "s" : ""}` : "")
+    : artistFilter
+      ? `${all} albums`
+      : state.library || "";
   $("#empty").textContent = libFilter
     ? `Nothing in the library matches “${libFilter}”.`
     : "Nothing here yet. Paste a playlist URL or type an artist above.";
   const grid = $("#grid");
-  const signature = JSON.stringify(shownAlbums()) + artistFilter + libFilter;
+  const signature = JSON.stringify(shownAlbums()) + artistFilter + libFilter + trackIndex.version;
   if (signature !== gridShows) {
     // rebuilding throws away the focused card, which would break arrow-key navigation
     const focused = document.activeElement?.closest?.("#grid .card")?.dataset.id;
@@ -212,15 +244,22 @@ function card(a) {
   const play = a.done ? h("span", { class: "card-play", role: "button", tabindex: "0", title: "Play album", "aria-label": `Play ${a.album}`,
     onclick: (e) => { e.stopPropagation(); playAlbum(a.id, 0); },
     onkeydown: (e) => { if (e.key === "Enter") { e.stopPropagation(); e.preventDefault(); playAlbum(a.id, 0); } } }, "▶") : null;
+  // when the album is only here because a song matched, name the song rather than count it
+  const songs = a.matches?.length
+    ? h("div", { class: "matchline", title: a.matches.slice(0, 8).join("\n") },
+        `♪ ${a.matches[0]}${a.matches.length > 1 ? `  +${a.matches.length - 1}` : ""}`)
+    : null;
   return h("button", { class: `card${a.id === lastAlbumId ? " current" : ""}`, type: "button", "data-id": a.id,
-      onclick: () => openAlbum(a.id), title: `${a.albumartist} — ${a.album}`,
+      onclick: () => openAlbum(a.id),
+      title: a.matches?.length ? `${a.albumartist} — ${a.album}\n${a.matches.slice(0, 8).join("\n")}` : `${a.albumartist} — ${a.album}`,
       "aria-keyshortcuts": "Enter P" },
     h("div", { class: "cover-wrap" }, cover, play),
     h("div", { class: "meta" },
       h("div", { class: "title" }, a.album),
       h("div", { class: "artist link", role: "button", tabindex: "-1", title: `Show only ${a.albumartist}`,
         onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, a.albumartist),
-      h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null)));
+      h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null),
+      songs));
 }
 
 $("#libfilter").addEventListener("input", (e) => {
