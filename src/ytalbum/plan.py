@@ -7,7 +7,7 @@ import copy
 from collections import Counter
 
 from .models import AlbumPlan, Collection, Entry, Kind, PlanTrack, Provenance
-from .titles import NOISE_WORDS, channel_artist, key, move_feat, parse_video_title, strip_self_feat
+from .titles import NOISE_WORDS, channel_artist, key, move_feat, parse_video_title, split_feat, strip_self_feat
 
 MIN_TRACK_SECONDS = 30  # shorter entries are intro cards, not songs (DESIGN.md §3.4)
 
@@ -51,6 +51,28 @@ def track_title(entry: Entry) -> tuple[str, Provenance]:
     return parse_video_title(entry.title, entry.channel)[1], Provenance.YT_TITLE
 
 
+def named_artist(entry: Entry, collection: Collection) -> str | None:
+    """The artist a title actually names, or None when only the channel is left to go by.
+
+    On an artist's own channel the video titles carry the album around ("Feuerschwanz
+    Methämmer - Song by Song - …", "Das Elfte Gebot - Unboxing"), which otherwise counts as
+    a second and third artist and turns the playlist into a compilation of its own channel.
+    """
+    if entry.music.artist:
+        return split_feat(entry.music.artist)[0]
+    parsed, _ = parse_video_title(entry.title, entry.channel)
+    return _without_collection_title(split_feat(parsed)[0], collection.title) if parsed else None
+
+
+def _without_collection_title(artist: str, playlist_title: str) -> str | None:
+    """'Feuerschwanz Methämmer' in the playlist "Methämmer" is Feuerschwanz; "Methämmer" is nobody."""
+    words = re.findall(r"\w+", playlist_title or "")
+    if not words:
+        return artist
+    tail = r"\W*".join(map(re.escape, words))  # the words with any spacing/punctuation between
+    return re.sub(rf"\W*\b{tail}\s*$", "", artist, flags=re.I).strip(" -–—:|") or None
+
+
 # -- stage 3: classify ---------------------------------------------------------------
 
 
@@ -59,7 +81,7 @@ def classify(collection: Collection) -> Kind:
         return Kind.SINGLE
     if collection.source_id.startswith("OLAK5uy_"):
         return Kind.OFFICIAL_ALBUM
-    artists = {_key(track_artist(e)[0]) for e in usable_entries(collection)}
+    artists = {_key(a) for e in usable_entries(collection) if (a := named_artist(e, collection))}
     return Kind.ARTIST_PLAYLIST if len(artists) <= 1 else Kind.COMPILATION
 
 
@@ -77,7 +99,8 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         album_prov = {"albumartist": Provenance.PLAYLIST, "album": Provenance.PLAYLIST}
         year = None
     else:
-        albumartist, prov = _most_common([track_artist(e) for e in entries]) or (
+        named = [(a, track_artist(e)[1]) for e in entries if (a := named_artist(e, collection))]
+        albumartist, prov = _most_common(named) or (
             collection.channel or "Unknown Artist",
             Provenance.PLAYLIST,
         )
@@ -97,6 +120,12 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
     for number, entry in enumerate(entries, start=1):
         artist, artist_prov = track_artist(entry)
         title, title_prov = track_title(entry)
+        if kind != Kind.COMPILATION:
+            # the album's own artist, not the channel handle or the album title read as a name
+            # (the guest credit stays on for move_feat, which puts it into the title below)
+            named = entry.music.artist or parse_video_title(entry.title, entry.channel)[0]
+            stripped = _without_collection_title(artist, collection.title) if named else None
+            artist, artist_prov = (stripped, artist_prov) if stripped else (albumartist, Provenance.PLAYLIST)
         artist, title = move_feat(artist, title)  # guests belong in the title
         title = strip_self_feat(artist, title)
         tracks.append(

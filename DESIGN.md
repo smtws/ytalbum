@@ -153,6 +153,14 @@ Order of trust for a track's artist + title:
    *only* a video label (`"Mad World" (feat. Gary Jules) - Official Music Video`), the whole
    text is the song and the artist comes from the channel (added 2026-09-23; v2 handled this
    shape with ~40 literal suffix strings, which is exactly the tuning this rule replaces).
+4b. **A playlist on the artist's own channel is not a compilation of that channel** (2026-09-23).
+   Its video titles carry the album around — "Feuerschwanz Methämmer - Song by Song - …",
+   "Das Elfte Gebot - Unboxing" — which counted as two more artists, so `classify` said
+   compilation and the *channel handle* became the album artist (`xxFEUERSCHWANZxx`).
+   `named_artist()` is what classification and the album artist now count: the artist a title
+   names, with the guest credit removed (§5.6) and a trailing copy of the playlist title
+   stripped; an entry that names none (only the channel is left) counts for nothing.
+   Fixtures `artist_channel_playlist{,2}.json`.
 5. Label / lyrics / fan channels (Napalm Records, "Common Sense", "dernachtwaechter")
    are never the artist. Reverse order ("Lullaby of Woe - Ashley Serena") is only fixable
    by a lookup (MB recording search both ways) or the user.

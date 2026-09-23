@@ -139,3 +139,39 @@ def test_unknown_plan_schema_is_refused(vol1):
     d = build_plan(vol1).to_dict() | {"schema": 99}
     with pytest.raises(ValueError, match="schema"):
         AlbumPlan.from_dict(d)
+
+
+# -- a playlist on the artist's own channel is not a compilation of that channel -----------
+
+
+@pytest.fixture
+def methaemmer():
+    return load_collection("artist_channel_playlist.json")
+
+
+@pytest.fixture
+def elfte_gebot():
+    return load_collection("artist_channel_playlist2.json")
+
+
+def test_album_title_glued_to_the_artist_is_not_a_second_artist(methaemmer):
+    # titles on the band's channel read "Feuerschwanz Methämmer - Song by Song - …"
+    assert classify(methaemmer) == Kind.ARTIST_PLAYLIST
+    plan = build_plan(methaemmer)
+    assert plan.albumartist == "Feuerschwanz"  # not the channel handle "xxFEUERSCHWANZxx"
+    assert {t.artist for t in plan.tracks} == {"Feuerschwanz"}
+    assert plan.tracks[5].title == "Song by Song - Schubsetanz"  # the album name is not the artist
+
+
+def test_playlist_title_as_artist_and_a_guest_credit_are_not_extra_artists(elfte_gebot):
+    # "Das Elfte Gebot - Unboxing" names no artist; "FEUERSCHWANZ ft. Melissa Bonny" is one
+    assert classify(elfte_gebot) == Kind.ARTIST_PLAYLIST
+    plan = build_plan(elfte_gebot)
+    assert plan.albumartist == "FEUERSCHWANZ"  # the library harmonises the spelling later
+    assert {t.artist for t in plan.tracks} == {"FEUERSCHWANZ"}
+    assert plan.tracks[2].title == "Ding (SEEED Cover) ft. Melissa Bonny"
+    assert plan.tracks[8].title == "Unboxing"
+
+
+def test_a_real_compilation_still_is_one(vol1):
+    assert classify(vol1) == Kind.COMPILATION  # 13 bands, no channel of their own
