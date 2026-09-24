@@ -370,6 +370,20 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    raising `NoAudioStream`, and the dialog now says the failure can be temporary and to
    re-check the source first. Only a video that refuses twice is treated as having no audio.
 
+12. ✅ Two things real use turned up on 2026-09-24.
+   **An album of unusable videos is not an album.** Heavysaurus' eight *Folge* Hörspiele are
+   YouTube Music Premium exclusives: all ~31 entries per album answer "only available to
+   Music Premium members" (confirmed with the owner's own cookies). That reason is permanent,
+   so the §3.8 guard — which holds a run back when entries fail *temporarily* — let them
+   through one by one, and a plan with zero tracks was written: eight folders under "Unknown
+   Artist", cover art and nothing else. A source whose every video is unusable now reports and
+   writes nothing.
+   **A disc split survives an update.** `merge_plans` took `disc` from the fresh plan, and a
+   YouTube playlist is always flat, so splitting an album into media by hand would be undone
+   by the next update. A flat source now says nothing about media; only a fresh plan that has
+   discs of its own (a matched release) may change them, and a video that appears later joins
+   the last disc.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

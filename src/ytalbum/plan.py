@@ -260,6 +260,20 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
             placed.add(f.video_id)
             ordered.append(by_id[f.video_id])
     rest = sorted((t for t in merged.tracks if t.video_id not in fresh_by_id), key=lambda t: (t.disc, t.number))
+    # A flat source says nothing about a disc split this album already has - YouTube playlists
+    # have no media - so a split (by hand, or from a release MusicBrainz matched earlier)
+    # survives an update, and only a fresh plan that has discs of its own may change them.
+    split = max((t.disc for t in merged.tracks), default=1) > 1 and max((f.disc for f in fresh.tracks), default=1) == 1
+    if split:
+        last_disc = max(t.disc for t in merged.tracks)
+        next_number = max((t.number for t in merged.tracks if t.disc == last_disc), default=0)
+        for t in ordered:
+            if t.video_id not in known:  # a video that appeared since joins the last disc
+                next_number += 1
+                t.disc, t.number = last_disc, next_number
+        merged.tracks = sorted(ordered + rest, key=lambda t: (t.disc, t.number))
+        return refresh_derived(merged)
+
     for number, t in enumerate(ordered, 1):
         fresh_track = fresh_by_id[t.video_id]
         t.number, t.disc = (fresh_track.number, fresh_track.disc) if len(ordered) == len(fresh.tracks) else (number, fresh_track.disc)

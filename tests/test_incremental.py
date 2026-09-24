@@ -344,3 +344,41 @@ def test_a_video_listed_twice_becomes_one_track():
 
     merged = merge_plans(build_plan(vol1()), plan)
     assert len(merged.tracks) == 13 and len({t.filename for t in merged.tracks}) == 13
+
+
+def test_a_disc_split_survives_an_update():
+    """YouTube playlists are flat, so a fresh listing must not undo a split into media."""
+    plan = build_plan(vol1())
+    for t in plan.tracks[6:]:  # pretend the album is a 2-CD release
+        t.disc = 2
+    for disc in (1, 2):
+        for n, t in enumerate([x for x in plan.tracks if x.disc == disc], 1):
+            t.number = n
+    merged = merge_plans(plan, build_plan(vol1()))
+    assert [(t.disc, t.number) for t in merged.tracks] == [(1, n) for n in range(1, 7)] + [(2, n) for n in range(1, 8)]
+    assert merged.tracks[6].filename.count(" - 2-01 - ") == 1  # and the disc reaches the file name
+
+
+def test_a_new_video_joins_the_last_disc():
+    plan = build_plan(vol1())
+    for t in plan.tracks[6:]:
+        t.disc = 2
+    for disc in (1, 2):
+        for n, t in enumerate([x for x in plan.tracks if x.disc == disc], 1):
+            t.number = n
+    known = {t.video_id for t in plan.tracks}
+    plan.tracks = [t for t in plan.tracks if t.video_id != sorted(known)[0]]  # pretend we missed one
+
+    merged = merge_plans(plan, build_plan(vol1()))
+    new = next(t for t in merged.tracks if t.video_id == sorted(known)[0])
+    assert (new.disc, new.number) == (2, max(t.number for t in merged.tracks if t.disc == 2))
+
+
+def test_musicbrainz_discs_still_win():
+    """A fresh plan that has media of its own (a matched release) sets them."""
+    plan = build_plan(vol1())
+    fresh = build_plan(vol1())
+    for t in fresh.tracks[10:]:
+        t.disc = 2
+    merged = merge_plans(plan, fresh)
+    assert {t.disc for t in merged.tracks} == {1, 2}

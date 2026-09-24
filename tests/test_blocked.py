@@ -117,3 +117,25 @@ def test_download_stops_at_the_first_bot_check(tmp_path):
     saved = load_plan(tmp_path / plan.folder)
     assert saved.tracks[0].error == BOT_CHECK
     assert all(t.state == "pending" for t in saved.tracks[1:])
+
+
+PREMIUM = "This video is only available to Music Premium members"
+
+
+def test_an_album_of_unusable_videos_is_not_written(tmp_path):
+    """Heavysaurus' Hörspiel albums (2026-09-23): every entry Premium-only, so there is no
+    album to write — the old code left an empty folder named "Unknown Artist"."""
+    collection = vol1()
+    for e in collection.entries:
+        e.skipped, e.transient = PREMIUM, False
+
+    class OnlyPremium:
+        def fetch(self, url):
+            return collection
+
+    service = Service(Config(library_root=tmp_path), tmp_path, yt=OnlyPremium(), mb=None)
+    outcome = service.fetch("https://www.youtube.com/playlist?list=PL1")
+    assert outcome.status == "failed"
+    assert "nothing to download" in outcome.message and PREMIUM in outcome.message
+    assert list(tmp_path.rglob("*.ytalbum.json")) == []  # and nothing on disk
+    assert list(tmp_path.iterdir()) == []

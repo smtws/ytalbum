@@ -10,6 +10,7 @@ import contextlib
 import json
 import logging
 import threading
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -122,6 +123,15 @@ class Service:
             return Outcome("blocked" if reason == BOT_CHECK else "incomplete", message=msg)
 
         plan = build_plan(collection)
+        if collection.entries and not plan.tracks:
+            # every video unusable for a reason that will not pass (Music Premium only, private,
+            # removed): there is no album here, and writing one leaves an empty folder behind
+            reasons = Counter(s["reason"] for s in plan.skipped)
+            listed = ", ".join(f"{n}× {reason}" for reason, n in reasons.most_common(2))
+            msg = f"nothing to download in “{plan.album}”: all {len(collection.entries)} videos are unusable ({listed}). Nothing was written."
+            self.log(msg)
+            return Outcome("failed", plan, message=msg)
+
         if mb := self.mb:
             stats = enrich(plan, mb, progress=lambda m: (self.check(), self.log(f"  {m}")))
             self.log("MusicBrainz: " + ("release matched" if stats["release"] else f"{stats['tracks']}/{stats['looked_up']} tracks matched"))
