@@ -21,7 +21,7 @@ from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, re
 from .enrich import enrich
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
-from .plan import build_plan, drop_album_prefix, merge_plans, refresh_derived, renumber
+from .plan import build_plan, drop_album_name, merge_plans, refresh_derived, renumber
 from .search import SearchResult, search_artist
 from .titles import key as text_key
 from .titles import move_feat, strip_self_feat
@@ -135,6 +135,11 @@ class Service:
         if mb := self.mb:
             stats = enrich(plan, mb, progress=lambda m: (self.check(), self.log(f"  {m}")))
             self.log("MusicBrainz: " + ("release matched" if stats["release"] else f"{stats['tracks']}/{stats['looked_up']} tracks matched"))
+            # enrichment keeps bracket groups MusicBrainz lacks, which puts a live album's own
+            # name back into every track ("Louder Than Hell (Live in Hamburg)") - so the
+            # album-wide judgement is made again, on the final titles
+            if dropped := drop_album_name(plan.album, plan.tracks):
+                self.log(f"  {dropped} track title(s) lost the repeated album name")
 
         if dry or self.library is None:
             self.on_plan(plan)
@@ -335,7 +340,7 @@ class Service:
                     t.artist, t.title = artist, title
                     t.auto.update(artist=artist, title=title)
             editable = [t for t in plan.tracks if t.provenance.get("title") != Provenance.USER]
-            if dropped := drop_album_prefix(plan.album, editable):
+            if dropped := drop_album_name(plan.album, editable):
                 self.log(f"{dropped} track title(s) lost the repeated album name")
             if plan.kind != Kind.COMPILATION and plan.provenance.get("albumartist") in (Provenance.YT_MUSIC, Provenance.YT_TITLE):
                 names = [t.artist for t in plan.tracks]

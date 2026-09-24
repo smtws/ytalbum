@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from ytalbum.models import Collection, PlanTrack
-from ytalbum.plan import build_plan, drop_album_prefix
+from ytalbum.plan import build_plan, drop_album_name
 from ytalbum.titles import (
     channel_artist,
     clean_title,
@@ -307,7 +307,7 @@ def test_audio_play_parts_lose_the_repeated_release_name():
         "Folge 1: Der Kuss des Kometen",
         ["1 - Der Kuss des Kometen (Intro)"] + [f"1 - Der Kuss des Kometen (Teil {n:02d})" for n in range(1, 30)],
     )
-    assert drop_album_prefix(album, tracks) == 30
+    assert drop_album_name(album, tracks) == 30
     assert [t.title for t in tracks][:3] == ["Intro", "Teil 01", "Teil 02"]
     assert tracks[0].auto["title"] == "Intro"  # the derived value moves too, or a merge undoes it
 
@@ -317,7 +317,7 @@ def test_case_and_number_prefixes_do_not_matter():
         "Folge 8: beim Lass Knacken-Festival",
         [f"8 - Beim Lass Knacken-Festival (Teil {n:02d})" for n in range(1, 6)],
     )
-    assert drop_album_prefix(album, tracks) == 5
+    assert drop_album_name(album, tracks) == 5
     assert [t.title for t in tracks] == [f"Teil {n:02d}" for n in range(1, 6)]
 
 
@@ -327,10 +327,41 @@ def test_a_lone_title_track_keeps_its_name():
         "Carolus Rex",
         ["Carolus Rex (Swedish version)", "The Lion From the North", "Gott mit uns", "A Lifetime of War"],
     )
-    assert drop_album_prefix(album, tracks) == 0
+    assert drop_album_name(album, tracks) == 0
     assert tracks[0].title == "Carolus Rex (Swedish version)"
 
 
 def test_a_single_word_album_never_strips():
     album, tracks = album_with("Methämmer", ["Methämmer", "Methämmer (live)", "Methämmer (radio edit)"])
-    assert drop_album_prefix(album, tracks) == 0
+    assert drop_album_name(album, tracks) == 0
+
+
+def test_the_release_name_is_taken_out_wherever_it_sits():
+    """Folge 4-8 put it in the middle and the number at the end: 'Kapitel 01: <name> (Folge 4)'."""
+    album, tracks = album_with(
+        "Folge 4: Die Hexenmeister des Metal",
+        ["Intro: Die Hexenmeister des Metal (Folge 4)"]
+        + [f"Kapitel {n:02d}: Die Hexenmeister des Metal (Folge 4)" for n in range(1, 6)],
+    )
+    assert drop_album_name(album, tracks) == 6
+    assert [t.title for t in tracks] == ["Intro"] + [f"Kapitel {n:02d}" for n in range(1, 6)]
+
+
+def test_sharp_s_survives_the_comparison():
+    """casefold() maps 'ß' to 'ss', which silently stopped Folge 2 from matching."""
+    album, tracks = album_with(
+        "Folge 2: Auf großer Tour", [f"2 - Auf großer Tour (Teil {n:02d})" for n in range(1, 5)]
+    )
+    assert drop_album_name(album, tracks) == 4
+    assert [t.title for t in tracks] == [f"Teil {n:02d}" for n in range(1, 5)]
+
+
+def test_no_empty_brackets_are_left_behind():
+    """A live album names itself inside the brackets: '(Live in Hamburg)' must go whole."""
+    album, tracks = album_with(
+        "Live in Hamburg",
+        ["Louder Than Hell (Live in Hamburg)", "Funeral Song (Live in Hamburg)", "Seligkeit (Live in Hamburg)"],
+    )
+    assert drop_album_name(album, tracks) == 3
+    assert [t.title for t in tracks] == ["Louder Than Hell", "Funeral Song", "Seligkeit"]
+    assert not any("()" in t.title for t in tracks)

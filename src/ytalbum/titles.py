@@ -56,27 +56,44 @@ def title_by_artist(title: str) -> tuple[str, str] | None:
     return (m["artist"].strip(), m["title"].strip()) if m else None
 
 
-def strip_album_prefix(album: str, title: str) -> str:
-    """'Folge 1: Der Kuss des Kometen' + '1 - Der Kuss des Kometen (Teil 01)' -> 'Teil 01'.
+def strip_album_name(album: str, title: str) -> str:
+    """Take the release name out of a track title, wherever the shop put it.
 
-    YouTube Music repeats the release name in every track of an audio play. Only a run of at
-    least two words is matched, so a single-word album keeps its title track ("Methämmer"),
-    and nothing is cut when the rest would be empty (a track named after its album).
+    "1 - Der Kuss des Kometen (Teil 01)" -> "Teil 01"
+    "Kapitel 01: Die Hexenmeister des Metal (Folge 4)" -> "Kapitel 01"
+
+    Only a run of at least two words counts, so a single-word album keeps its title track,
+    and a title that would end up empty is left alone. Whether this is applied at all is an
+    album-wide decision (`drop_album_name`) - alone it would turn "Carolus Rex (Swedish
+    version)" into "Swedish version".
     """
-    words = [w.casefold() for w in re.findall(r"\w+", album or "")]
-    title_words = [w.casefold() for w in re.findall(r"\w+", title or "")]
+    # NB not casefolded: casefold() maps "ß" to "ss", and the pattern is matched (case
+    # insensitively) against the original title, where the "ß" is still there
+    words = re.findall(r"\w+", album or "")
+    if len(words) < 2 or not title:
+        return title
+    vocabulary = _words_of(album)
+    rest = title
     for n in range(len(words), 1, -1):
-        run = words[-n:]
-        start = 1 if title_words[:1] and title_words[0].isdigit() and run[0] != title_words[0] else 0
-        if title_words[start : start + len(run)] != run:
-            continue
-        pattern = r"^\W*" + (r"\d+\W+" if start else "") + r"\W*".join(map(re.escape, run))
-        rest = re.sub(pattern, "", title, flags=re.I).strip(" -–—:|,.")
-        if not rest:
-            return title  # the track is the album's title track
-        inner = _BRACKETS.fullmatch(rest)
-        return (inner[1] if inner else rest).strip()
-    return title
+        run = r"\b" + r"\W+".join(map(re.escape, words[-n:])) + r"\b"  # \b: a bare "4" must not match inside "04"
+        if re.search(run, rest, flags=re.I):
+            rest = re.sub(run, "", rest, flags=re.I)
+            break
+    else:
+        return title
+
+    # "(Folge 4)" after the name is the release again, in brackets
+    # a group that named the release, and the empty pair left when it sat inside one
+    rest = _BRACKETS.sub(lambda m: "" if not _words_of(m[1]) or _words_of(m[1]) <= vocabulary else m[0], rest)
+    rest = re.sub(r"^\W*\d+\W+", " ", rest) if _words_of(rest) - vocabulary else rest  # a leading "2 - "
+    rest = re.sub(r"\s+", " ", rest).strip(" -–—:|,.")
+    inner = _BRACKETS.fullmatch(rest)
+    rest = (inner[1] if inner else rest).strip()
+    return rest or title
+
+
+def _words_of(text: str) -> set[str]:
+    return {w.casefold() for w in re.findall(r"\w+", text or "")}
 
 
 def strip_leading_artist(artist: str, title: str) -> str:
