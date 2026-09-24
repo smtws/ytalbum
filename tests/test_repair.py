@@ -111,3 +111,18 @@ def test_a_harmonised_artist_lands_in_the_right_folder_at_once(tmp_path, opus_te
     assert outcome.plan.albumartist == "Saltatio Mortis"  # the library's spelling wins
     assert outcome.album_dir.parent.name == "Saltatio Mortis"  # and the folder follows immediately
     assert not (tmp_path / "SALTATIO MORTIS").exists()
+
+
+def test_repair_moves_an_album_whose_folder_no_longer_matches(tmp_path, opus_template):
+    """The name was unified earlier without moving the album; repair has to finish the job."""
+    plan = build_plan(vol1())
+    plan.albumartist, plan.provenance["albumartist"] = "Saltatio Mortis", Provenance.MB
+    refresh_derived(plan)
+    stale = tmp_path / "SALTATIO MORTIS" / plan.album
+    run(plan, stale, FakeYouTube(opus_template))
+    save_plan(plan, stale)
+
+    service(tmp_path, opus_template).repair()
+
+    assert (tmp_path / "Saltatio Mortis" / plan.album / ".ytalbum.json").exists()
+    assert not (tmp_path / "SALTATIO MORTIS").exists()

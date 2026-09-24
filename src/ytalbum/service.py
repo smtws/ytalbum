@@ -21,7 +21,7 @@ from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, re
 from .enrich import enrich
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
-from .plan import build_plan, drop_album_name, merge_plans, refresh_derived, renumber
+from .plan import build_plan, drop_album_name, merge_plans, refresh_derived, renumber, wanted_folder
 from .search import SearchResult, search_artist
 from .titles import key as text_key
 from .titles import move_feat, strip_self_feat
@@ -349,7 +349,10 @@ class Service:
                 if names:
                     plan.albumartist = plan.auto["albumartist"] = max(set(names), key=names.count)
             self._harmonize_artist(plan)
-            if before == (plan.albumartist, [(t.artist, t.title) for t in plan.tracks], len(plan.tracks)):
+            # a plan can be right while the folder is not: the album artist was unified
+            # earlier without moving anything (fixed 2026-09-24, but the folders remain)
+            misplaced = album_dir != self.library / wanted_folder(plan)
+            if not misplaced and before == (plan.albumartist, [(t.artist, t.title) for t in plan.tracks], len(plan.tracks)):
                 continue
             self.log(f"=== {plan.albumartist} — {plan.album}")
             save_plan(plan, album_dir)
