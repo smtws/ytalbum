@@ -194,7 +194,9 @@ dl.info dt { font-weight: 600; }
 dl.info dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 40rem) { .setting { grid-template-columns: 1fr; } }
 td.trim { width: 11rem; white-space: nowrap; display: flex; gap: .25rem; align-items: center; }
-input.disc { width: 3.2rem; padding-right: .2rem; }
+.head-actions { display: flex; gap: .4rem; align-items: start; }
+td.disc { width: 4rem; }
+input.disc { width: 100%; }
 td.trim input { width: 4.6rem; }  /* padding and font stay the base ones, or the row's inputs differ in height */
 td.trim button { padding: .1rem .4rem; }
 td.trim .mb-len { font-size: .72rem; }
