@@ -154,14 +154,15 @@ class Service:
             self.log(f"existing album {old_dir.relative_to(self.library)}: {new} new, {gone} no longer in the source")
             if report_only:
                 return Outcome("reported", plan, old_dir)
+            self._harmonize_artist(plan)  # before the folder is chosen, or the album stays put
             album_dir = relocate(old_dir, plan, self.library)
         else:
             if report_only:
                 self.log(f"not in the library yet: {plan.folder}")
                 return Outcome("reported", plan)
+            self._harmonize_artist(plan)
             album_dir = self.library / plan.folder
 
-        self._harmonize_artist(plan)
         self.check()  # last point before anything on disk changes
         self.on_plan(plan)
         if plan_only:
@@ -179,6 +180,7 @@ class Service:
         if best != plan.albumartist:
             self.log(f"artist spelled '{best}' elsewhere in the library — using that")
             plan.albumartist = plan.auto["albumartist"] = best
+            refresh_derived(plan)  # or a new album keeps the folder of the spelling just dropped
 
     def execute(self, plan: AlbumPlan, album_dir: Path) -> Outcome:
         todo = sum(t.state != "done" and t.in_source for t in plan.tracks)

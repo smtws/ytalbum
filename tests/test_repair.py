@@ -89,3 +89,25 @@ def test_compilations_keep_their_curator(tmp_path, opus_template):
     saved = load_plan(tmp_path / plan.folder)
     assert saved.albumartist == "My Dark Lullabies"
     assert saved.tracks[1].artist.startswith("DOMINUM")  # track artists stay as they are
+
+
+def test_a_harmonised_artist_lands_in_the_right_folder_at_once(tmp_path, opus_template):
+    """The spelling was unified but the album stayed in the old folder until the next run."""
+    first = build_plan(vol1())
+    first.albumartist, first.provenance["albumartist"] = "Saltatio Mortis", Provenance.MB
+    refresh_derived(first)
+    run(first, tmp_path / first.folder, FakeYouTube(opus_template))
+    save_plan(first, tmp_path / first.folder)
+
+    shouting = vol1()
+    shouting.source_id = shouting.source_url = "PL-second"
+    for e in shouting.entries:
+        e.video_id = "x" + e.video_id[1:]
+        e.music.artist = "SALTATIO MORTIS"
+    service = Service(Config(library_root=tmp_path, musicbrainz=False), tmp_path, yt=FakeYouTube(opus_template))
+    service.yt.fetch = lambda url: shouting
+
+    outcome = service.fetch("https://www.youtube.com/playlist?list=PL-second")
+    assert outcome.plan.albumartist == "Saltatio Mortis"  # the library's spelling wins
+    assert outcome.album_dir.parent.name == "Saltatio Mortis"  # and the folder follows immediately
+    assert not (tmp_path / "SALTATIO MORTIS").exists()
