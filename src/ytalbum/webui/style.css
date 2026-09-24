@@ -39,6 +39,7 @@ mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: in
 .libfilter::-webkit-search-cancel-button { cursor: pointer; }
 .artist-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
 .artist-actions button { padding: .3rem .6rem; font-size: .8rem; }
+.card { scroll-margin-top: 5.5rem; }
 .card .artist.link { cursor: pointer; border-radius: 4px; padding: .1rem .2rem; margin: -.1rem -.2rem; }
 .card .artist.link:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 h2 .link { cursor: pointer; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-decoration-line: underline; }
@@ -150,9 +151,12 @@ tr.playing td { background: color-mix(in srgb, var(--accent) 14%, transparent); 
 tr.playing td.num .n { color: var(--accent); font-weight: 700; }
 .grid-wrap { display: flex; gap: .5rem; align-items: start; }
 .grid-wrap .grid { flex: 1; min-width: 0; }
-.rail { position: sticky; top: 4.5rem; display: flex; flex-direction: column; gap: .05rem; padding: .25rem .15rem;
+/* the header is sticky and 65px tall: the rail starts below it and runs to the bottom */
+.rail { position: sticky; top: 4.75rem; height: calc(100vh - 7.5rem); display: flex; flex-direction: column;
+  justify-content: space-evenly; padding: .25rem .15rem;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
-.rail button { padding: .05rem .3rem; font-size: .7rem; line-height: 1.25; background: none; border: 0; color: var(--muted); cursor: pointer; }
+body.has-player .rail { height: calc(100vh - 13.5rem); }
+.rail button { padding: .1rem .3rem; font-size: .7rem; line-height: 1.25; background: none; border: 0; color: var(--muted); cursor: pointer; }
 .rail button:hover, .rail button:focus-visible { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 4px; }
 .to-top { position: fixed; right: 1rem; bottom: 1rem; z-index: 5; width: 2.4rem; height: 2.4rem; padding: 0;
   border-radius: 50%; font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line); color: var(--fg); cursor: pointer; }
