@@ -41,10 +41,15 @@
           <button id="artist-all" class="quiet" type="button">Show all artists</button>
         </span>
       </div>
-      <div id="grid" class="grid"></div>
+      <div class="grid-wrap">
+        <div id="grid" class="grid"></div>
+        <nav id="rail" class="rail" aria-label="Jump to an artist" hidden></nav>
+      </div>
       <p id="empty" class="muted" hidden>Nothing here yet. Paste a playlist URL or type an artist above.</p>
     </section>
   </main>
+
+  <button id="to-top" class="to-top" type="button" title="Back to top" aria-label="Back to top" hidden>↑</button>
 
   <footer id="player" class="player" hidden>
     <img id="p-cover" class="p-cover" alt="">

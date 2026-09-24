@@ -175,6 +175,8 @@ the app its own taskbar entry and icon.
 
 **The library view** sorts by artist, then year, then name — a discography reads
 chronologically, and compilations without a year keep their natural order (Vol. 1 … Vol. 20).
+A rail of initials down the side jumps to the first album of a letter (it appears once three
+or more are in view), and a button returns to the top of a long library.
 <kbd>/</kbd> jumps to the filter, which searches albums, artists and song titles at once:
 matching text is highlighted, <kbd>Enter</kbd> moves into the results, <kbd>Esc</kbd> clears
 it, and **▶ Play** queues everything it found. Opening an album from a filtered view tints

@@ -284,7 +284,44 @@ function renderLibrary() {
   }
   $("#empty").hidden = shownAlbums().length > 0;
   renderPlayMatches();
+  renderRail();
 }
+
+// A rail of the initials in view: 185 albums are a lot of scrolling, and the grid is sorted
+// by artist, so the first album of each letter is a place worth jumping to.
+const initial = (name) => {
+  const c = fold(name).trim()[0] || "#";
+  return /[0-9]/.test(c) ? "#" : c.toUpperCase();
+};
+
+function renderRail() {
+  const rail = $("#rail");
+  const albums = shownAlbums();
+  const letters = [];
+  for (const a of albums) {
+    const letter = initial(a.albumartist);
+    if (letter !== letters.at(-1)?.letter) letters.push({ letter, id: a.id });
+  }
+  rail.hidden = letters.length < 3;  // pointless for a handful of albums
+  if (rail.hidden) return;
+  fill(rail, letters.map(({ letter, id }) =>
+    h("button", { type: "button", title: `Jump to ${letter}`, onclick: () => jumpTo(id) }, letter)));
+}
+
+function jumpTo(id) {
+  const card = $("#grid").querySelector(`.card[data-id="${CSS.escape(id)}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  card.focus({ preventScroll: true });  // arrow keys carry on from there
+}
+
+// back to the top, once there is enough below to lose your place in
+const toTop = $("#to-top");
+toTop.addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  $("#libfilter").focus({ preventScroll: true });
+});
+addEventListener("scroll", () => { toTop.hidden = scrollY < 600; }, { passive: true });
 
 function card(a) {
   const cover = a.cover
