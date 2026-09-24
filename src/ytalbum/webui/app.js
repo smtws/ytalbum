@@ -394,11 +394,8 @@ function markAlbum(id) {
   for (const card of document.querySelectorAll("#grid .card")) card.classList.toggle("current", card.dataset.id === id);
 }
 
-let showDiscs = null; // the disc column: null = automatic (shown when the album has discs)
-
 async function openAlbum(id) {
   markAlbum(id);
-  showDiscs = null;  // back to automatic for the album being opened
   try {
     currentAlbum = await api(`/api/album?id=${encodeURIComponent(id)}`);
   } catch (e) {
@@ -429,7 +426,6 @@ function provBadge(p) {
 
 function renderAlbum() {
   const p = currentAlbum;
-  const discs = showDiscs ?? Math.max(1, ...p.tracks.map((t) => t.disc)) > 1;
   const panel = $("#album");
   const field = (label, name, value, type = "text") =>
     h("label", {}, h("span", {}, label, " ", provBadge(p.provenance[name])), h("input", { type, name, value: value ?? "" }));
@@ -441,11 +437,9 @@ function renderAlbum() {
         h("span", { class: "n" }, t.number)),
       h("td", {}, h("input", { type: "text", name: "artist", value: t.artist, "aria-label": "artist" })),
       h("td", {}, h("input", { type: "text", name: "title", value: t.title, "aria-label": "title" })),
-      discs
-        ? h("td", { class: "disc" },
-            h("input", { type: "number", name: "disc", class: "disc", min: "1", step: "1", value: t.disc,
-              "aria-label": `disc of ${t.title}`, title: "Which disc this track belongs to" }))
-        : null,
+      h("td", { class: "disc" },
+        h("input", { type: "number", name: "disc", class: "disc", min: "1", step: "1", value: t.disc,
+          "aria-label": `disc of ${t.title}`, title: "Which disc this track belongs to" })),
       h("td", { class: "trim" },
         h("input", { type: "text", name: "trim_start", value: asTime(t.trim_start), placeholder: "0:00", "aria-label": "cut from the front", size: 5,
           oninput: (e) => suggestEnd(e.currentTarget, t) }),
@@ -479,13 +473,10 @@ function renderAlbum() {
             onkeydown: (e) => { if (e.key === "Enter") { const name = p.albumartist; closeAlbum(); showArtist(name); } } }, p.albumartist),
           ` — ${p.album}`, p.year ? h("span", { class: "muted" }, ` (${p.year})`) : null),
           h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.tracks.length} tracks · ${p.folder}`))),
-      h("div", { class: "head-actions" },
-        h("button", { class: "quiet", type: "button", title: "Put tracks on separate discs (each disc is numbered from 1 again)",
-          onclick: () => { showDiscs = !discs; renderAlbum(); } }, discs ? "Hide discs" : "Discs…"),
-        h("button", { class: "quiet", type: "button", onclick: () => closeAlbum() }, "Close"))),
+      h("button", { class: "quiet", type: "button", onclick: () => closeAlbum() }, "Close")),
     h("form", { id: "albumform", onsubmit: saveAlbum },
       h("div", { class: "fields" }, field("Album artist", "albumartist", p.albumartist), field("Album", "album", p.album), field("Year", "year", p.year, "number")),
-      h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Artist"), h("th", {}, "Title"), discs ? h("th", { title: "each disc is numbered from 1" }, "disc") : null, h("th", { title: "cut the front / play until — for label idents and previews" }, "trim"), h("th", {}, "from"), h("th", {}, ""))), h("tbody", {}, rows)),
+      h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Artist"), h("th", {}, "Title"), h("th", { title: "each disc is numbered from 1" }, "disc"), h("th", { title: "cut the front / play until — for label idents and previews" }, "trim"), h("th", {}, "from"), h("th", {}, ""))), h("tbody", {}, rows)),
       skipped.length ? h("details", {}, h("summary", { class: "muted" }, `${skipped.length} skipped`), h("ul", {}, skipped)) : null,
       h("div", { class: "actions" },
         h("button", { type: "submit" }, "Save changes (rename + retag + trim)"),
@@ -598,7 +589,7 @@ function saveAlbum(ev) {
       title: tr.querySelector("[name=title]").value,
       trim_start: tr.querySelector("[name=trim_start]").value,
       trim_end: tr.querySelector("[name=trim_end]").value,
-      disc: tr.querySelector("[name=disc]")?.value,
+      disc: tr.querySelector("[name=disc]").value,
     })),
   };
   submit("edit", { id: currentAlbum.source_id, edits }, ev.submitter);

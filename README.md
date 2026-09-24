@@ -251,9 +251,8 @@ while searches and previews run alongside.
   than an album with no tracks, and an album already downloaded is never touched by a later
   update that can no longer read its source.
 - **Multi-disc albums** are supported — file names carry `1-07`, `discnumber` is tagged, and
-  a split survives updates. **Discs…** next to Close in the album view reveals a disc
-  column after the title (it is there anyway when the album has several), and each disc is
-  numbered from 1 again when you change it.
+  a split survives updates. The album view has a disc column after the title, on
+  every album, and each disc is numbered from 1 again when you change it.
 - **The bot check** can stop any run. ytalbum then changes nothing and asks you to try
   later; a browser login makes it rare.
 - **It only knows its own library.** Music you already own elsewhere is invisible to it, so
