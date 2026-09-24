@@ -287,6 +287,17 @@ def merge_plans(existing: AlbumPlan, fresh: AlbumPlan) -> AlbumPlan:
             placed.add(f.video_id)
             ordered.append(by_id[f.video_id])
     rest = sorted((t for t in merged.tracks if t.video_id not in fresh_by_id), key=lambda t: (t.disc, t.number))
+    # The order is the user's when they said so: a YouTube playlist's sequence is often just
+    # the order things were added in, while the album may follow a release or another shop.
+    if merged.provenance.get("order") == Provenance.USER:
+        last = max((t.number for t in merged.tracks), default=0)
+        for t in ordered:
+            if t.video_id not in known:  # a video that appeared since goes to the end
+                last += 1
+                t.number = last
+        merged.tracks = sorted(ordered + rest, key=lambda t: (t.disc, t.number))
+        return refresh_derived(merged)
+
     # A flat source says nothing about a disc split this album already has - YouTube playlists
     # have no media - so a split (by hand, or from a release MusicBrainz matched earlier)
     # survives an update, and only a fresh plan that has discs of its own may change them.

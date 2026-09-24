@@ -250,6 +250,9 @@ while searches and previews run alongside.
   instance) cannot be read without a subscription. ytalbum then writes nothing at all rather
   than an album with no tracks, and an album already downloaded is never touched by a later
   update that can no longer read its source.
+- **The track order is yours if you change it.** Edit the position of a track and the album
+  keeps that order through every later update; a video that appears afterwards joins the end
+  instead of pushing your arrangement around. Until you change it, the source decides.
 - **Multi-disc albums** are supported — file names carry `1-07`, `discnumber` is tagged, and
   a split survives updates. The album view has a disc column after the title, on
   every album, and each disc is numbered from 1 again when you change it.
@@ -320,7 +323,7 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 283 tests, offline, ~12 s
+uv run pytest        # 295 tests, offline, ~12 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/`, so they

@@ -484,7 +484,7 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
                 setattr(plan, name, value)
                 plan.provenance[name] = Provenance.USER
     by_id = {t.video_id: t for t in plan.tracks}
-    discs_changed = False
+    discs_changed = order_changed = False
     for te in edits.get("tracks", []):
         t = by_id.get(te.get("video_id"))
         if not t:
@@ -498,6 +498,10 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
             if start is not None and end is not None and end <= start:
                 raise ValueError(f"{t.title}: the end must come after the start")
             t.trim_start, t.trim_end = start, end
+        if str(te.get("number", "")).strip().isdigit():
+            wanted = max(1, int(te["number"]))
+            order_changed |= wanted != t.number
+            t.number = wanted
         if str(te.get("disc", "")).strip().isdigit():
             disc = max(1, int(te["disc"]))
             discs_changed |= disc != t.disc
@@ -508,8 +512,10 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
                 setattr(t, name, value.strip())
                 t.provenance[name] = Provenance.USER
                 t.mbid = None if name == "title" else t.mbid
-    if discs_changed:
-        renumber_discs(plan)
+    if discs_changed or order_changed:
+        renumber_discs(plan)  # sorts by what was asked for, then counts each disc from 1
+    if order_changed:
+        plan.provenance["order"] = Provenance.USER  # the source may not renumber this album
     return refresh_derived(plan)
 
 

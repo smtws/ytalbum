@@ -9,8 +9,9 @@ from test_incremental import FakeYouTube, opus_template, vol1
 
 from ytalbum.config import Config
 from ytalbum.download import load_plan, run, save_plan
+from ytalbum.models import Provenance
 from ytalbum.plan import build_plan, merge_plans
-from ytalbum.service import Service
+from ytalbum.service import Service, apply_user_edits
 
 
 class CountingYouTube(FakeYouTube):
@@ -187,3 +188,45 @@ def test_an_unreadable_video_still_counts_as_being_in_the_source(tmp_path, opus_
     fresh.skipped = [{"video_id": t.video_id, "title": t.title, "reason": PREMIUM} for t in plan.tracks[2:]]
     merged = merge_plans(plan, fresh)
     assert all(t.in_source for t in merged.tracks)
+
+
+# -- an order the user set belongs to them, not to the playlist -----------------------------
+
+
+def user_ordered(plan, sequence):
+    """Apply a new order the way the UI does: numbers in, renumbered and claimed."""
+    by_id = {t.video_id: t for t in plan.tracks}
+    edits = {"tracks": [{"video_id": vid, "number": n} for n, vid in enumerate(sequence, 1)]}
+    return apply_user_edits(plan, edits), by_id
+
+
+def test_a_user_order_is_kept_when_the_playlist_is_read_again():
+    plan = build_plan(vol1())
+    reversed_ids = [t.video_id for t in reversed(plan.tracks)]
+    apply_user_edits(plan, {"tracks": [{"video_id": v, "number": n} for n, v in enumerate(reversed_ids, 1)]})
+    assert plan.provenance["order"] == Provenance.USER
+    assert [t.video_id for t in plan.tracks] == reversed_ids
+
+    merged = merge_plans(plan, build_plan(vol1()))  # the source still lists its own order
+    assert [t.video_id for t in merged.tracks] == reversed_ids
+    assert [t.number for t in merged.tracks] == list(range(1, len(reversed_ids) + 1))
+
+
+def test_a_video_that_appears_later_goes_to_the_end_of_a_user_order():
+    plan = build_plan(vol1())
+    ids = [t.video_id for t in plan.tracks]
+    apply_user_edits(plan, {"tracks": [{"video_id": v, "number": n} for n, v in enumerate(reversed(ids), 1)]})
+    short = build_plan(vol1())
+    short.tracks = [t for t in short.tracks if t.video_id != ids[0]]
+    plan.tracks = [t for t in plan.tracks if t.video_id != ids[0]]  # we never had it
+
+    merged = merge_plans(plan, build_plan(vol1()))
+    late = next(t for t in merged.tracks if t.video_id == ids[0])
+    assert late.number == len(merged.tracks)  # last, not wherever the playlist puts it
+
+
+def test_without_a_user_order_the_source_still_decides():
+    plan = build_plan(vol1())
+    plan.tracks = list(reversed(plan.tracks))  # reordered by something other than the user
+    merged = merge_plans(plan, build_plan(vol1()))
+    assert [t.video_id for t in merged.tracks] == [t.video_id for t in build_plan(vol1()).tracks]

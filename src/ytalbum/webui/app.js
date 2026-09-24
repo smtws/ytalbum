@@ -431,10 +431,12 @@ function renderAlbum() {
     h("label", {}, h("span", {}, label, " ", provBadge(p.provenance[name])), h("input", { type, name, value: value ?? "" }));
   const rows = p.tracks.map((t) =>
     h("tr", { "data-id": t.video_id, class: isPlaying(p.source_id, t.video_id) ? "playing" : "" },
-      h("td", { class: "num" },
+      h("td", { class: "play" },
         t.state === "done" ? h("button", { class: "row-play", type: "button", title: "Play from here", "aria-label": `Play ${t.title}`,
-          onclick: () => playAlbum(p.source_id, p.tracks.filter((x) => x.state === "done").findIndex((x) => x.video_id === t.video_id)) }, "▶") : null,
-        h("span", { class: "n" }, t.number)),
+          onclick: () => playAlbum(p.source_id, p.tracks.filter((x) => x.state === "done").findIndex((x) => x.video_id === t.video_id)) }, "▶") : null),
+      h("td", { class: "num" },
+        h("input", { type: "number", name: "number", class: "num", min: "1", step: "1", value: t.number,
+          "aria-label": `position of ${t.title}`, title: "Position — change it and the album keeps your order" })),
       h("td", {}, h("input", { type: "text", name: "artist", value: t.artist, "aria-label": "artist" })),
       h("td", {}, h("input", { type: "text", name: "title", value: t.title, "aria-label": "title" })),
       h("td", { class: "disc" },
@@ -476,7 +478,7 @@ function renderAlbum() {
       h("button", { class: "quiet", type: "button", onclick: () => closeAlbum() }, "Close")),
     h("form", { id: "albumform", onsubmit: saveAlbum },
       h("div", { class: "fields" }, field("Album artist", "albumartist", p.albumartist), field("Album", "album", p.album), field("Year", "year", p.year, "number")),
-      h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Artist"), h("th", {}, "Title"), h("th", { title: "each disc is numbered from 1" }, "disc"), h("th", { title: "cut the front / play until — for label idents and previews" }, "trim"), h("th", {}, "from"), h("th", {}, ""))), h("tbody", {}, rows)),
+      h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", { title: "position in the album" }, "#"), h("th", {}, "Artist"), h("th", {}, "Title"), h("th", { title: "each disc is numbered from 1" }, "disc"), h("th", { title: "cut the front / play until — for label idents and previews" }, "trim"), h("th", {}, "from"), h("th", {}, ""))), h("tbody", {}, rows)),
       skipped.length ? h("details", {}, h("summary", { class: "muted" }, `${skipped.length} skipped`), h("ul", {}, skipped)) : null,
       h("div", { class: "actions" },
         h("button", { type: "submit" }, "Save changes (rename + retag + trim)"),
@@ -585,6 +587,7 @@ function saveAlbum(ev) {
     album: form.album.value, albumartist: form.albumartist.value, year: form.year.value,
     tracks: [...form.querySelectorAll("tbody tr")].map((tr) => ({
       video_id: tr.dataset.id,
+      number: tr.querySelector("[name=number]").value,
       artist: tr.querySelector("[name=artist]").value,
       title: tr.querySelector("[name=title]").value,
       trim_start: tr.querySelector("[name=trim_start]").value,

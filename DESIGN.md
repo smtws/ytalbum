@@ -406,6 +406,14 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    wins, then one MusicBrainz confirmed, then mixed case over a shouting channel name. Before
    that, "Lord Of The Lost" beat "Lord of the Lost" because "O" sorts before "o".
 
+14. ✅ The track order can belong to the user (2026-09-24). A YouTube playlist's sequence is
+   often just the order things were added in — the owner of My Dark Lullabies keeps the
+   canonical order on Spotify, and resorting 15 volumes by hand would have been undone by the
+   next update, because `merge_plans` renumbers from the source. Editing a position now sets
+   `provenance["order"] = user` on the album; a merge then keeps the user's numbers and puts a
+   video that appeared since at the end. The position is an input in the album view, and the
+   play button moved into a cell of its own so showing it on hover no longer shifts the row.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a
