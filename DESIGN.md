@@ -396,6 +396,16 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    discs of its own (a matched release) may change them, and a video that appears later joins
    the last disc.
 
+13. ✅ One spelling per artist, chosen by evidence (2026-09-24). The library had "SALTATIO
+   MORTIS" beside "Saltatio Mortis" and three spellings of Lord of the Lost, for three
+   reasons, each fixed: the album artist was unified *after* `relocate` had chosen the folder,
+   so a renamed album stayed put; `_harmonize_artist` renamed without refreshing the derived
+   paths, so a new album kept the folder of the spelling it had just dropped; and `repair`
+   compared names only, skipping albums whose plan was already right but whose folder was not.
+   The spelling itself is now chosen by evidence rather than by alphabet: one the user typed
+   wins, then one MusicBrainz confirmed, then mixed case over a shouting channel name. Before
+   that, "Lord Of The Lost" beat "Lord of the Lost" because "O" sorts before "o".
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

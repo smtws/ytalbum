@@ -126,3 +126,33 @@ def test_repair_moves_an_album_whose_folder_no_longer_matches(tmp_path, opus_tem
 
     assert (tmp_path / "Saltatio Mortis" / plan.album / ".ytalbum.json").exists()
     assert not (tmp_path / "SALTATIO MORTIS").exists()
+
+
+def harmonised(tmp_path, opus_template, library_names, own=("LORD OF THE LOST", Provenance.YT_TITLE)):
+    """Put albums with the given (name, provenance) into a library, then harmonise `own`."""
+    for i, (name, prov) in enumerate(library_names):
+        p = build_plan(vol1())
+        p.source_id, p.album = f"PL{i}", f"Album {i}"
+        p.albumartist, p.provenance["albumartist"] = name, prov
+        refresh_derived(p)
+        run(p, tmp_path / p.folder, FakeYouTube(opus_template))
+        save_plan(p, tmp_path / p.folder)
+    plan = build_plan(vol1())
+    plan.albumartist, plan.provenance["albumartist"] = own
+    service(tmp_path, opus_template)._harmonize_artist(plan)
+    return plan.albumartist
+
+
+def test_a_spelling_musicbrainz_confirmed_beats_one_from_a_video_title(tmp_path, opus_template):
+    names = [("Lord Of The Lost", Provenance.YT_TITLE), ("Lord of the Lost", Provenance.MB)]
+    assert harmonised(tmp_path, opus_template, names) == "Lord of the Lost"
+
+
+def test_a_spelling_the_user_chose_beats_musicbrainz(tmp_path, opus_template):
+    names = [("Lord of the Lost", Provenance.MB), ("LORD of the LOST", Provenance.USER)]
+    assert harmonised(tmp_path, opus_template, names) == "LORD of the LOST"
+
+
+def test_without_either_the_case_rule_still_decides(tmp_path, opus_template):
+    names = [("SCHANDMAUL", Provenance.YT_TITLE), ("Schandmaul", Provenance.YT_MUSIC)]
+    assert harmonised(tmp_path, opus_template, names, own=("SCHANDMAUL", Provenance.YT_TITLE)) == "Schandmaul"

@@ -174,9 +174,22 @@ class Service:
         """One spelling per artist in the library: 'SCHANDMAUL' and 'Schandmaul' are one folder."""
         if plan.provenance.get("albumartist") == Provenance.USER or not self.library or not self.library.exists():
             return
-        known = {p.albumartist for _, p in iter_plans(self.library)} | {plan.albumartist}
-        same = [name for name in known if text_key(name) == text_key(plan.albumartist)]
-        best = min(same, key=lambda n: (n.isupper(), n.islower(), len(n), n))  # mixed case wins
+        seen: dict[str, set[str | None]] = {}  # spelling -> where each one came from
+        for _, other in iter_plans(self.library):
+            seen.setdefault(other.albumartist, set()).add(other.provenance.get("albumartist"))
+        seen.setdefault(plan.albumartist, set()).add(plan.provenance.get("albumartist"))
+        same = [name for name in seen if text_key(name) == text_key(plan.albumartist)]
+        best = min(
+            same,
+            key=lambda n: (
+                Provenance.USER not in seen[n],  # a spelling someone chose themselves
+                Provenance.MB not in seen[n],  # then one MusicBrainz confirmed
+                n.isupper(),  # then mixed case over a shouting channel name
+                n.islower(),
+                len(n),
+                n,
+            ),
+        )
         if best != plan.albumartist:
             self.log(f"artist spelled '{best}' elsewhere in the library — using that")
             plan.albumartist = plan.auto["albumartist"] = best
