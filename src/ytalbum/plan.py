@@ -14,6 +14,7 @@ from .titles import (
     move_feat,
     parse_video_title,
     split_feat,
+    strip_album_prefix,
     strip_leading_artist,
     strip_self_feat,
     title_by_artist,
@@ -158,6 +159,8 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
             )
         )
 
+    drop_album_prefix(album, tracks)
+
     skipped = [
         {"video_id": e.video_id, "title": e.title, "reason": reason} | ({"transient": True} if e.transient else {})
         for e in collection.entries
@@ -179,6 +182,27 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         source_state={"ids": [e.video_id for e in collection.entries], "modified": collection.modified},
     )
     return refresh_derived(plan)
+
+
+PREFIXED_SHARE = 0.8  # a prefix on nearly every track labels the release, not the songs
+
+
+def drop_album_prefix(album: str, tracks: list[PlanTrack]) -> int:
+    """Remove the album's name from the track titles when almost all of them carry it.
+
+    YouTube Music writes "1 - Der Kuss des Kometen (Teil 01)" for every part of an audio play.
+    Judged per album, so a lone title track keeps its name: "Carolus Rex (Swedish version)"
+    stands among fifteen unrelated titles, "Teil 01" among thirty siblings.
+    """
+    shorter = {t.video_id: strip_album_prefix(album, t.title) for t in tracks}
+    hits = [t for t in tracks if shorter[t.video_id] != t.title]
+    if len(hits) < 3 or len(hits) < PREFIXED_SHARE * len(tracks):
+        return 0
+    for t in hits:
+        t.title = shorter[t.video_id]
+        if "title" in t.auto:
+            t.auto["title"] = t.title
+    return len(hits)
 
 
 def renumber(plan: AlbumPlan) -> AlbumPlan:

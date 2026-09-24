@@ -184,6 +184,12 @@ Order of trust for a track's artist + title:
    Outro", "AC/DC", "24/7") — so the segment must name a publisher (Records, Recordings,
    Entertainment, Productions, …) before it is cut. Checked against the library:
    "Hexentanz / Henkersmahlzeit / Gebt Acht!" and "Auschwitz / Birkenau" stay whole.
+5e. **An album name repeated in every track is a label** (2026-09-24). YouTube Music writes
+   "1 - Der Kuss des Kometen (Teil 01)" for all 31 parts of an audio play. Judged per album,
+   never per title: the prefix must appear on at least three tracks and 80% of them, so
+   "Carolus Rex (Swedish version)" among fifteen unrelated titles keeps its name — stripping
+   that one would have left "Swedish version". A single-word album never strips, so a title
+   track survives, and nothing is cut when the remainder would be empty.
 6. **Guest credits live in the title, never in the artist field** (2026-09-23):
    `Feuerschwanz ft. Melissa Bonny` / `Ding` → `Feuerschwanz` / `Ding ft. Melissa Bonny`,
    applied to all three sources (video title, YouTube Music, MusicBrainz artist-credit).

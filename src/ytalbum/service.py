@@ -21,7 +21,7 @@ from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, re
 from .enrich import enrich
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
-from .plan import build_plan, merge_plans, refresh_derived, renumber
+from .plan import build_plan, drop_album_prefix, merge_plans, refresh_derived, renumber
 from .search import SearchResult, search_artist
 from .titles import key as text_key
 from .titles import move_feat, strip_self_feat
@@ -334,6 +334,9 @@ class Service:
                 if (artist, title) != (t.artist, t.title):
                     t.artist, t.title = artist, title
                     t.auto.update(artist=artist, title=title)
+            editable = [t for t in plan.tracks if t.provenance.get("title") != Provenance.USER]
+            if dropped := drop_album_prefix(plan.album, editable):
+                self.log(f"{dropped} track title(s) lost the repeated album name")
             if plan.kind != Kind.COMPILATION and plan.provenance.get("albumartist") in (Provenance.YT_MUSIC, Provenance.YT_TITLE):
                 names = [t.artist for t in plan.tracks]
                 if names:

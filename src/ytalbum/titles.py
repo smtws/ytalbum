@@ -56,6 +56,29 @@ def title_by_artist(title: str) -> tuple[str, str] | None:
     return (m["artist"].strip(), m["title"].strip()) if m else None
 
 
+def strip_album_prefix(album: str, title: str) -> str:
+    """'Folge 1: Der Kuss des Kometen' + '1 - Der Kuss des Kometen (Teil 01)' -> 'Teil 01'.
+
+    YouTube Music repeats the release name in every track of an audio play. Only a run of at
+    least two words is matched, so a single-word album keeps its title track ("Methämmer"),
+    and nothing is cut when the rest would be empty (a track named after its album).
+    """
+    words = [w.casefold() for w in re.findall(r"\w+", album or "")]
+    title_words = [w.casefold() for w in re.findall(r"\w+", title or "")]
+    for n in range(len(words), 1, -1):
+        run = words[-n:]
+        start = 1 if title_words[:1] and title_words[0].isdigit() and run[0] != title_words[0] else 0
+        if title_words[start : start + len(run)] != run:
+            continue
+        pattern = r"^\W*" + (r"\d+\W+" if start else "") + r"\W*".join(map(re.escape, run))
+        rest = re.sub(pattern, "", title, flags=re.I).strip(" -–—:|,.")
+        if not rest:
+            return title  # the track is the album's title track
+        inner = _BRACKETS.fullmatch(rest)
+        return (inner[1] if inner else rest).strip()
+    return title
+
+
 def strip_leading_artist(artist: str, title: str) -> str:
     """'Metallica: Nothing Else Matters' with artist Metallica -> 'Nothing Else Matters'."""
     if not artist or not title:
