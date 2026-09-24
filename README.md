@@ -133,6 +133,7 @@ Library/
 └── My Dark Lullabies/
     └── Vol. 1 - Heavy Sleeping/
         ├── My Dark Lullabies - Vol. 1 - Heavy Sleeping - 01 - Enemy Inside - Lullaby.opus
+        │                                             ↑ "1-01" on an album with several discs
         ├── …
         ├── cover.jpg              # replace it with your own and ytalbum keeps it
         ├── .ytalbum.json          # the plan
@@ -143,17 +144,17 @@ Library/
 
 | Command | What it does |
 |---|---|
-| `ytalbum fetch <url>` | Plan and download a playlist, video or channel. `--dry-run` prints the plan only, `--pick 1,3-5` / `--all` choose from a channel, `--no-mb` skips MusicBrainz, `--library PATH` overrides the library. |
+| `ytalbum fetch <url>` | Plan and download a playlist, video or channel. `--dry-run` prints the plan only, `--pick 1,3-5` / `--all` choose from a channel, `--no-mb` skips MusicBrainz, `--library PATH` overrides the library, `--dump-collection FILE` also saves what YouTube returned (for test fixtures). |
 | `ytalbum search <artist>` | Find an artist's albums, singles and playlists and pick from them (`--pick`, `--all`, `--dry-run`). |
 | `ytalbum plan <url>` | Write the plan into the album folder without downloading, for editing by hand. |
 | `ytalbum download <album-folder>` | Run an (edited) plan: fetch what is missing, rename, retag, trim. |
-| `ytalbum update` | Re-check every album against its source. `--dry-run` only reports, `--deep` reads every album fully instead of skipping unchanged ones. |
+| `ytalbum update` | Re-check every album against its source. `--dry-run` only reports, `--deep` reads every album fully instead of skipping unchanged ones, `--no-mb` skips MusicBrainz. |
 | `ytalbum prune <album-folder>` | Delete tracks that are no longer in the source playlist (asks first, `--yes` skips). |
 | `ytalbum delete <album-folder>` | Delete an album, or one track with `--track <video-id>` (asks first, `--yes` skips). |
 | `ytalbum serve` | Web UI. `--host 0.0.0.0` exposes it to the network (**no login!**), `--port`, `--idle-exit SECONDS`. |
 | `ytalbum service install\|status\|restart\|uninstall` | Run the web UI on demand via a systemd **user** socket: the first request starts it, it stops itself when idle. `restart` refuses while a job runs unless given `--force`. |
 | `ytalbum app install\|status\|uninstall` | Desktop launcher (Linux) that opens the UI in a window of its own instead of another browser window. `--remove-profile` on uninstall also drops the app's browser profile. |
-| `ytalbum repair` | One-off, offline: performer-only artist names, guest credits moved into the title, one spelling per artist, duplicate tracks removed — renames and retags, no downloads. |
+| `ytalbum repair` | One-off, offline: performer-only artist names, guest credits moved into the title, the album's own name removed from its track titles, one spelling per artist, duplicate tracks removed — renames and retags, no downloads. |
 | `ytalbum config` | Show or change settings: `--library`, `--cookies-from-browser BROWSER[:PROFILE]`, `--cookies-file FILE`. |
 
 Exit codes: `0` fine, `1` something failed, `2` wrong usage, `3` YouTube is blocking
@@ -245,6 +246,13 @@ while searches and previews run alongside.
   identical — so ytalbum asks twice before believing it, and the dialog says to re-check the
   source before accepting the fallback: copying the audio out of the combined video into an
   `.m4a` is your choice, never automatic.
+- **Some uploads need a paid tier.** YouTube Music Premium exclusives (audio plays, for
+  instance) cannot be read without a subscription. ytalbum then writes nothing at all rather
+  than an album with no tracks, and an album already downloaded is never touched by a later
+  update that can no longer read its source.
+- **Multi-disc albums** are supported — file names carry `1-07`, `discnumber` is tagged, and
+  a split survives updates — but nothing sets the disc except a matched MusicBrainz release;
+  splitting by hand means editing `disc` in the plan file.
 - **The bot check** can stop any run. ytalbum then changes nothing and asks you to try
   later; a browser login makes it rare.
 - **It only knows its own library.** Music you already own elsewhere is invisible to it, so
@@ -312,7 +320,7 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 260 tests, offline, ~12 s
+uv run pytest        # 276 tests, offline, ~12 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/`, so they
