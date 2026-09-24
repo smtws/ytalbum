@@ -251,8 +251,8 @@ while searches and previews run alongside.
   than an album with no tracks, and an album already downloaded is never touched by a later
   update that can no longer read its source.
 - **Multi-disc albums** are supported — file names carry `1-07`, `discnumber` is tagged, and
-  a split survives updates — but nothing sets the disc except a matched MusicBrainz release;
-  splitting by hand means editing `disc` in the plan file.
+  a split survives updates. The album view shows the disc per track (**Discs…** reveals the
+  column on a single-disc album), and each disc is numbered from 1 again when you change it.
 - **The bot check** can stop any run. ytalbum then changes nothing and asks you to try
   later; a browser login makes it rare.
 - **It only knows its own library.** Music you already own elsewhere is invisible to it, so
@@ -320,7 +320,7 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 276 tests, offline, ~12 s
+uv run pytest        # 280 tests, offline, ~12 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/`, so they

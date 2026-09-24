@@ -394,8 +394,11 @@ function markAlbum(id) {
   for (const card of document.querySelectorAll("#grid .card")) card.classList.toggle("current", card.dataset.id === id);
 }
 
+let showDiscs = null; // the disc column: null = automatic (shown when the album has discs)
+
 async function openAlbum(id) {
   markAlbum(id);
+  showDiscs = null;  // back to automatic for the album being opened
   try {
     currentAlbum = await api(`/api/album?id=${encodeURIComponent(id)}`);
   } catch (e) {
@@ -426,6 +429,7 @@ function provBadge(p) {
 
 function renderAlbum() {
   const p = currentAlbum;
+  const discs = showDiscs ?? Math.max(1, ...p.tracks.map((t) => t.disc)) > 1;
   const panel = $("#album");
   const field = (label, name, value, type = "text") =>
     h("label", {}, h("span", {}, label, " ", provBadge(p.provenance[name])), h("input", { type, name, value: value ?? "" }));
@@ -434,7 +438,11 @@ function renderAlbum() {
       h("td", { class: "num" },
         t.state === "done" ? h("button", { class: "row-play", type: "button", title: "Play from here", "aria-label": `Play ${t.title}`,
           onclick: () => playAlbum(p.source_id, p.tracks.filter((x) => x.state === "done").findIndex((x) => x.video_id === t.video_id)) }, "▶") : null,
-        h("span", { class: "n" }, t.disc > 1 ? `${t.disc}-${t.number}` : t.number)),
+        discs
+          ? h("input", { type: "number", name: "disc", class: "disc", min: "1", step: "1", value: t.disc,
+              "aria-label": `disc of ${t.title}`, title: "Which disc this track belongs to" })
+          : null,
+        h("span", { class: "n" }, discs ? t.number : t.number)),
       h("td", {}, h("input", { type: "text", name: "artist", value: t.artist, "aria-label": "artist" })),
       h("td", {}, h("input", { type: "text", name: "title", value: t.title, "aria-label": "title" })),
       h("td", { class: "trim" },
@@ -477,6 +485,8 @@ function renderAlbum() {
       skipped.length ? h("details", {}, h("summary", { class: "muted" }, `${skipped.length} skipped`), h("ul", {}, skipped)) : null,
       h("div", { class: "actions" },
         h("button", { type: "submit" }, "Save changes (rename + retag + trim)"),
+        h("button", { class: "quiet", type: "button", title: "Put tracks on separate discs (each disc is numbered from 1 again)",
+          onclick: () => { showDiscs = !discs; renderAlbum(); } }, discs ? "Hide discs" : "Discs…"),
         h("button", { class: "quiet", type: "button", onclick: (e) => submit("fetch", { urls: [p.source_url] }, e.currentTarget) }, "Re-check source"),
         h("button", { class: "danger", type: "button", onclick: (e) => deleteAlbum(p, e.currentTarget) }, "Delete album"),
         gone.length ? h("button", { class: "danger", type: "button", onclick: (e) => pruneAlbum(p, gone, e.currentTarget) }, `Remove ${gone.length} track${gone.length > 1 ? "s" : ""} no longer in the playlist`) : null,
@@ -586,6 +596,7 @@ function saveAlbum(ev) {
       title: tr.querySelector("[name=title]").value,
       trim_start: tr.querySelector("[name=trim_start]").value,
       trim_end: tr.querySelector("[name=trim_end]").value,
+      disc: tr.querySelector("[name=disc]")?.value,
     })),
   };
   submit("edit", { id: currentAlbum.source_id, edits }, ev.submitter);

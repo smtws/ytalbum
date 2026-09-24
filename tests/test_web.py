@@ -284,3 +284,26 @@ def test_track_index_version_follows_the_plans(library, opus_template):
 def test_state_carries_the_track_index_version(library):
     app = App(Config(library_root=library), library)
     assert app.state()["tracks_version"] == app.track_index()["version"]
+
+
+def test_the_disc_can_be_edited_and_each_disc_counts_from_one():
+    plan = build_plan(vol1())
+    edits = {"tracks": [{"video_id": t.video_id, "disc": "2"} for t in plan.tracks[6:]]}
+    apply_user_edits(plan, edits)
+    assert [(t.disc, t.number) for t in plan.tracks] == [(1, n) for n in range(1, 7)] + [(2, n) for n in range(1, 8)]
+    assert plan.tracks[6].filename.count(" - 2-01 - ") == 1
+
+
+def test_putting_everything_back_on_one_disc_renumbers_straight_through():
+    plan = build_plan(vol1())
+    apply_user_edits(plan, {"tracks": [{"video_id": t.video_id, "disc": "2"} for t in plan.tracks[6:]]})
+    apply_user_edits(plan, {"tracks": [{"video_id": t.video_id, "disc": "1"} for t in plan.tracks]})
+    assert [(t.disc, t.number) for t in plan.tracks] == [(1, n) for n in range(1, 14)]
+    assert " - 1-01 - " not in plan.tracks[0].filename  # no disc prefix on a single-disc album
+
+
+@pytest.mark.parametrize("value", ["", "0", "-3", "abc", None])
+def test_nonsense_disc_values_are_ignored(value):
+    plan = build_plan(vol1())
+    apply_user_edits(plan, {"tracks": [{"video_id": plan.tracks[0].video_id, "disc": value}]})
+    assert plan.tracks[0].disc == 1

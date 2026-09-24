@@ -466,6 +466,7 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
                 setattr(plan, name, value)
                 plan.provenance[name] = Provenance.USER
     by_id = {t.video_id: t for t in plan.tracks}
+    discs_changed = False
     for te in edits.get("tracks", []):
         t = by_id.get(te.get("video_id"))
         if not t:
@@ -479,13 +480,29 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
             if start is not None and end is not None and end <= start:
                 raise ValueError(f"{t.title}: the end must come after the start")
             t.trim_start, t.trim_end = start, end
+        if str(te.get("disc", "")).strip().isdigit():
+            disc = max(1, int(te["disc"]))
+            discs_changed |= disc != t.disc
+            t.disc = disc
         for name in EDITABLE_TRACK:
             value = te.get(name)
             if isinstance(value, str) and value.strip() and value.strip() != getattr(t, name):
                 setattr(t, name, value.strip())
                 t.provenance[name] = Provenance.USER
                 t.mbid = None if name == "title" else t.mbid
+    if discs_changed:
+        renumber_discs(plan)
     return refresh_derived(plan)
+
+
+def renumber_discs(plan: AlbumPlan) -> AlbumPlan:
+    """Each disc counts from 1, in the order the tracks stand — what a split needs."""
+    plan.tracks.sort(key=lambda t: (t.disc, t.number))
+    counters: dict[int, int] = {}
+    for t in plan.tracks:
+        counters[t.disc] = counters.get(t.disc, 0) + 1
+        t.number = counters[t.disc]
+    return plan
 
 
 def exit_code(outcomes: list[Outcome] | Outcome) -> int:
