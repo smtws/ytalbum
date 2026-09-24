@@ -927,10 +927,53 @@ $("#p-pos").addEventListener("change", (e) => { if (audio.duration) audio.curren
 $("#p-play").addEventListener("click", () => (audio.paused ? audio.play() : audio.pause()));
 $("#p-prev").addEventListener("click", () => (audio.currentTime > 3 ? (audio.currentTime = 0) : playIndex(qi - 1)));
 $("#p-next").addEventListener("click", () => playIndex(qi + 1));
+// Chrome infers play/pause from the audio element; Firefox and the desktop's media keys
+// (MPRIS) only follow explicit handlers and a playback state that is kept current.
 if ("mediaSession" in navigator) {
-  navigator.mediaSession.setActionHandler("previoustrack", () => playIndex(qi - 1));
-  navigator.mediaSession.setActionHandler("nexttrack", () => playIndex(qi + 1));
+  const handlers = {
+    play: () => audio.play(),
+    pause: () => audio.pause(),
+    stop: () => { audio.pause(); audio.currentTime = 0; },
+    previoustrack: () => (audio.currentTime > 3 ? (audio.currentTime = 0) : playIndex(qi - 1)),
+    nexttrack: () => playIndex(qi + 1),
+    seekbackward: (e) => { audio.currentTime = Math.max(0, audio.currentTime - (e.seekOffset || 10)); },
+    seekforward: (e) => { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + (e.seekOffset || 10)); },
+    seekto: (e) => { if (e.seekTime != null) audio.currentTime = e.seekTime; },
+  };
+  for (const [action, handler] of Object.entries(handlers)) {
+    try {
+      navigator.mediaSession.setActionHandler(action, handler);
+    } catch {
+      /* the browser does not know this action */
+    }
+  }
+  audio.addEventListener("play", () => { navigator.mediaSession.playbackState = "playing"; });
+  audio.addEventListener("pause", () => { navigator.mediaSession.playbackState = "paused"; });
+  audio.addEventListener("timeupdate", () => {
+    if (!navigator.mediaSession.setPositionState || !audio.duration) return;
+    navigator.mediaSession.setPositionState({ duration: audio.duration, position: audio.currentTime, playbackRate: audio.playbackRate });
+  });
 }
+
+// Keys in the page itself, which work whatever the desktop does with the media keys.
+document.addEventListener("keydown", (e) => {
+  if (qi < 0 || e.ctrlKey || e.metaKey || e.altKey || e.target?.closest?.("input, select, textarea, [contenteditable]")) return;
+  const step = e.shiftKey ? 30 : 10;
+  const actions = {
+    " ": () => (audio.paused ? audio.play() : audio.pause()),
+    MediaPlayPause: () => (audio.paused ? audio.play() : audio.pause()),
+    ArrowLeft: () => { audio.currentTime = Math.max(0, audio.currentTime - step); },
+    ArrowRight: () => { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + step); },
+    n: () => playIndex(qi + 1),
+    b: () => (audio.currentTime > 3 ? (audio.currentTime = 0) : playIndex(qi - 1)),
+  };
+  // arrows belong to the grid while a card has focus
+  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && e.target?.closest?.("#grid")) return;
+  const act = actions[e.key];
+  if (!act) return;
+  e.preventDefault();
+  act();
+});
 
 // -- trim handles on the player ----------------------------------------------------------
 

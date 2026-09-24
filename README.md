@@ -185,6 +185,12 @@ the whole field is marked instead. Matching ignores case, accents and punctuatio
 the letters Unicode cannot fold (`njord` finds *Njǫrð*) and umlauts typed the German way
 (`knueppel` finds *Knüppel*).
 
+**Playback keys.** While something is playing: <kbd>Space</kbd> pauses and resumes,
+<kbd>←</kbd>/<kbd>→</kbd> seek ten seconds (thirty with <kbd>Shift</kbd>), <kbd>n</kbd> is the
+next track and <kbd>b</kbd> goes back. The desktop's own media keys work through the Media
+Session API — Chrome reads the audio element by itself, while Firefox and MPRIS need the
+handlers and the playback state this page sets explicitly.
+
 **Safety:** localhost only by default; writing calls need the header `X-Ytalbum: 1` and a
 JSON content type (so other websites cannot use it through your browser); the `Host` header
 must be ours (DNS rebinding); files are only ever served by album and video id, never by a
