@@ -187,9 +187,21 @@ the letters Unicode cannot fold (`njord` finds *Njǫrð*) and umlauts typed the 
 
 **Playback keys.** While something is playing: <kbd>Space</kbd> pauses and resumes,
 <kbd>←</kbd>/<kbd>→</kbd> seek ten seconds (thirty with <kbd>Shift</kbd>), <kbd>n</kbd> is the
-next track and <kbd>b</kbd> goes back. The desktop's own media keys work through the Media
-Session API — Chrome reads the audio element by itself, while Firefox and MPRIS need the
-handlers and the playback state this page sets explicitly.
+next track and <kbd>b</kbd> goes back. These are handled in the page and always work.
+
+The keyboard's own media keys go through the Media Session API, which this page implements
+fully (play, pause, stop, seek, track changes and the playback state). **On Linux they may
+still land in the wrong browser:** Chrome claims the legacy `org.gnome.SettingsDaemon.MediaKeys`
+grab, which GNOME's and Cinnamon's key daemon honours ahead of MPRIS, so an idle Chrome keeps
+the keys while Firefox plays. Routing them to whichever player was last active fixes it:
+
+```sh
+sudo apt install playerctl        # then bind the media keys to:
+playerctl --player=playerctld play-pause   # next, previous, stop accordingly
+```
+
+`playerctld` starts on demand over D-Bus; add it to your session's autostart so it sees
+players from the beginning.
 
 **Safety:** localhost only by default; writing calls need the header `X-Ytalbum: 1` and a
 JSON content type (so other websites cannot use it through your browser); the `Host` header
