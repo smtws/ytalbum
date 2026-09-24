@@ -175,3 +175,21 @@ def test_playlist_title_as_artist_and_a_guest_credit_are_not_extra_artists(elfte
 
 def test_a_real_compilation_still_is_one(vol1):
     assert classify(vol1) == Kind.COMPILATION  # 13 bands, no channel of their own
+
+
+def test_the_uploader_names_the_album_when_nothing_else_does():
+    """An album playlist carries no channel, but its videos do — "Unknown Artist" otherwise."""
+    entries = [
+        {"video_id": f"{i:011d}", "position": i, "title": f"Der Derwisch {i} 🌀 Epic Fantasy Ambience", "duration": 600,
+         "channel": "Saltatio Mortis"}
+        for i in range(1, 5)
+    ]
+    collection = Collection.from_dict({
+        "source_url": "u", "source_id": "OLAK5uy_x", "is_playlist": True,
+        "title": "Träume von Staub & Schatten, Vol. 1", "channel": None, "thumbnail": None,
+        "fetched_at": "2026-09-24T00:00:00", "entries": entries,
+    })
+    plan = build_plan(collection)
+    assert plan.albumartist == "Saltatio Mortis"
+    assert {t.artist for t in plan.tracks} == {"Saltatio Mortis"}
+    assert plan.folder.startswith("Saltatio Mortis/")

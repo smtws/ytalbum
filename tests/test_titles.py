@@ -365,3 +365,19 @@ def test_no_empty_brackets_are_left_behind():
     assert drop_album_name(album, tracks) == 3
     assert [t.title for t in tracks] == ["Louder Than Hell", "Funeral Song", "Seligkeit"]
     assert not any("()" in t.title for t in tracks)
+
+
+@pytest.mark.parametrize(
+    ("raw", "cleaned"),
+    [
+        # the pipe inside the bracket is part of the text; cutting there left it hanging open
+        (
+            "Der Derwisch 🌀 Epic Fantasy Ambience (Saltatio Mortis | Reading, Yoga & RPG Music)",
+            "Der Derwisch 🌀 Epic Fantasy Ambience (Saltatio Mortis | Reading, Yoga & RPG Music)",
+        ),
+        ("Song (Live | 2024) | Napalm Records", "Song (Live | 2024)"),  # outside it still cuts
+        ("Heilung | Season of Mist", "Heilung"),
+    ],
+)
+def test_a_pipe_only_ends_the_title_outside_brackets(raw, cleaned):
+    assert clean_title(raw) == cleaned

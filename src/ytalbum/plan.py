@@ -113,9 +113,12 @@ def build_plan(collection: Collection, kind: Kind | None = None) -> AlbumPlan:
         year = None
     else:
         named = [(a, track_artist(e)[1]) for e in entries if (a := named_artist(e, collection))]
-        albumartist, prov = _most_common(named) or (
-            collection.channel or "Unknown Artist",
-            Provenance.PLAYLIST,
+        # when no title names an artist, the uploader is the best guess there is: an album
+        # playlist carries no channel of its own, but its videos do ("Saltatio Mortis")
+        albumartist, prov = (
+            _most_common(named)
+            or _most_common([track_artist(e) for e in entries])
+            or (collection.channel or "Unknown Artist", Provenance.PLAYLIST)
         )
         album_prov["albumartist"] = prov
         shared_album = _shared([e.music.album for e in entries])

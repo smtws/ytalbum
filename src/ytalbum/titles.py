@@ -42,6 +42,23 @@ _INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")  # b
 _BY = re.compile(r"^(?P<title>.+?)\s+by\s+(?P<artist>[^()\[\]]+)$", re.I)
 
 
+def before_label(text: str) -> str:
+    """Drop a trailing "| Label", but only when the pipe stands outside every bracket.
+
+    "Der Derwisch (Saltatio Mortis | Reading, Yoga & RPG Music)" keeps its bracket; cutting
+    there used to leave it hanging open.
+    """
+    depth = 0
+    for i, c in enumerate(text):
+        if c in "([【":
+            depth += 1
+        elif c in ")]】":
+            depth = max(0, depth - 1)
+        elif depth == 0 and c == "|" and text[i - 1 : i] == " " and text[i + 1 : i + 2] == " ":
+            return text[:i].rstrip()
+    return text
+
+
 def clean_text(text: str) -> str:
     """NFC, and without the invisible marks YouTube titles carry ('In The Nursery \u200e- …')."""
     return _INVISIBLE.sub("", unicodedata.normalize("NFC", text))
@@ -178,7 +195,7 @@ def channel_artist(channel: str | None) -> str | None:
 
 def clean_title(title: str) -> str:
     """Drop label suffixes, noise brackets like '(Official Video)', stray quotes and spacing."""
-    title = clean_text(title).split(" | ")[0]
+    title = before_label(clean_text(title))
     title = _drop_publisher(title)
     title = _BRACKETS.sub(_clean_group, title)
     parts = _SEPARATOR.split(title)
@@ -196,7 +213,7 @@ def clean_title(title: str) -> str:
 def parse_video_title(title: str, channel: str | None) -> tuple[str | None, str]:
     """Return (artist or None, song title). None means the title names no artist."""
     ch = channel_artist(channel)
-    text = clean_text(title).split(" | ")[0]
+    text = before_label(clean_text(title))
 
     parts = _SEPARATOR.split(text, maxsplit=1)
     # '"Mad World" (feat. Gary Jules) - Official Music Video': what follows the dash only
