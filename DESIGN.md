@@ -233,6 +233,12 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
 - MusicBrainz: real UA with contact, one async-safe limiter (≤1 req/s, lock + monotonic
   clock), retry on 503, Lucene escaping; disk cache (sqlite) for hits; misses cached
   short (1 h), errors not cached.
+- Lyrics: **LRCLIB** (`lrclib.net`, no key, community-contributed), same client shape as
+  MusicBrainz — UA with the repo URL, ≤1 req/s, retry on 503 (it answers "server is busy"
+  readily), sqlite cache (hits 30 d, misses 7 d). Measured 2026-09-25 on 40 random library
+  tracks: 50 % synced, 22 % plain, 28 % nothing. The text is third-party and unlicensed;
+  ytalbum only puts it beside a file the user already has, and `--no-lyrics` / `config
+  --lyrics off` switches it off.
 - ffmpeg only for remux (`-c:a copy`) and chapter splitting.
 - Config: one TOML file (`~/.config/ytalbum/config.toml`), overridable per run by CLI
   flags. Holds `library_root` (**configurable, no default path baked into code**; the
@@ -413,6 +419,20 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    `provenance["order"] = user` on the album; a merge then keeps the user's numbers and puts a
    video that appeared since at the end. The position is an input in the album view, and the
    play button moved into a cell of its own so showing it on hover no longer shifts the row.
+
+15. ✅ Lyrics belong to the file, not to the tagger (2026-09-25). Three measurements decided
+   the shape. LRCLIB's exact endpoint (`/api/get`) needs *its* album name and the length
+   within ±2 s, so for compilations only the `/api/search` path can work — and a search on
+   artist + title alone is what attaches a cover version's words to the original, so a
+   candidate is refused unless its length is within 3 s of the **file's own** (mutagen, after
+   trimming; YouTube's duration includes intros). `tag_file` replaces every tag on every pass,
+   so the `LYRICS` comment (`©lyr` on m4a) is written *from* a `.lrc` sidecar rather than
+   preserved: the sidecar is the truth, delete it and the tag goes too. That also serves the
+   player that matters here — MPD/Volumio has no lyrics tag at all and reads `.lrc`. The text
+   is not kept in `.ytalbum.json` (3946 × ~3 KB would land in every `update` and in the track
+   index, which is 11 ms today); the plan holds only `lyrics: synced|plain|instrumental|none`
+   and the lrclib id, so nothing is ever looked up twice. A front trim shifts the timestamps
+   with the audio, so changing one makes the track be fetched and re-shifted.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

@@ -19,6 +19,7 @@ from pathlib import Path
 from yt_dlp.utils import DownloadError
 
 from .cover import square_if_padded
+from .lyrics import SYNCED, LyricsAPI, read_sidecar, rename_sidecar, update_track
 from .models import AlbumPlan, PlanTrack
 from .plan import refresh_derived, wanted_filename, wanted_folder
 from .tag import image_mime, signature, tag_file
@@ -96,10 +97,12 @@ def run(
     on_track: Callable[[PlanTrack, str], None] = lambda t, what: None,
     check: Callable[[], None] = lambda: None,
     download: bool = True,
+    lyrics: LyricsAPI | None = None,
 ) -> AlbumPlan:
     """Download, tag and place every track that is not done yet; rename/retag finished ones.
 
     `check()` is called between tracks and may raise to stop (cancel); the plan is always saved.
+    With a `lyrics` client, tracks that were never looked up get their `.lrc` sidecar here.
     """
     refresh_derived(plan)
     save_plan(plan, album_dir)
@@ -114,6 +117,7 @@ def run(
             if old.exists() and not new.exists():
                 old.rename(new)
                 on_track(track, "renamed")
+            rename_sidecar(album_dir, track.filename, wanted)  # the lyrics follow the audio
             track.filename = wanted
             save_plan(plan, album_dir)
         final = album_dir / track.filename
@@ -122,14 +126,20 @@ def run(
             try:
                 if apply_trim(album_dir, track, final):
                     track.tagged = None  # the new file needs its tags again
+                    if track.lyrics == SYNCED and lyrics is not None:
+                        track.lyrics = None  # its timestamps counted from the old cut
                     on_track(track, "trimmed")
             except RuntimeError as e:
                 track.error = str(e)
                 log.warning("%s: %s", track.filename, e)
-            if track.tagged != signature(plan, track, cover):
-                track.tagged = tag_file(final, plan, track, cover)
+            looked_up = lyrics is not None and track.lyrics is None
+            text = update_track(lyrics, plan, track, album_dir, final) if looked_up else read_sidecar(album_dir, track)
+            if track.tagged != signature(plan, track, cover, text):
+                track.tagged = tag_file(final, plan, track, cover, text)
                 save_plan(plan, album_dir)
-                on_track(track, "retagged")
+                on_track(track, f"lyrics ({track.lyrics})" if looked_up and text else "retagged")
+            elif looked_up:
+                save_plan(plan, album_dir)  # remember that we looked and found nothing
             continue
         if not track.in_source or not download:
             continue  # gone from the playlist, or we are only tidying up files
@@ -137,7 +147,8 @@ def run(
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 tmp = yt.download_audio(track.video_id, parts, track.audio_choice)
-                track.tagged = tag_file(tmp, plan, track, cover)
+                text = update_track(lyrics, plan, track, album_dir, tmp) if lyrics else None
+                track.tagged = tag_file(tmp, plan, track, cover, text)
                 os.replace(tmp, final)
                 track.state, track.error, track.error_kind = "done", None, None
                 break

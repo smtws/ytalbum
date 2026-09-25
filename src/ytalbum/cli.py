@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--all", action="store_true", help="channel: take every release and playlist")
     f.add_argument("--pick", metavar="SPEC", help="channel: which ones, e.g. 1,3-5 (default: ask)")
     f.add_argument("--no-mb", action="store_true", help="skip the MusicBrainz lookup")
+    f.add_argument("--no-lyrics", action="store_true", help="do not look lyrics up at lrclib.net")
     f.add_argument("--dump-collection", type=Path, metavar="FILE", help="also save what YouTube returned (for test fixtures)")
 
     se = sub.add_parser("search", help="find an artist's albums on YouTube and pick which to fetch")
@@ -37,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--all", action="store_true", help="take everything found")
     se.add_argument("--pick", metavar="SPEC", help="which ones, e.g. 1,3-5 (default: ask)")
     se.add_argument("--no-mb", action="store_true", help="skip MusicBrainz (lookups and the discography check)")
+    se.add_argument("--no-lyrics", action="store_true", help="do not look lyrics up at lrclib.net")
 
     pl = sub.add_parser("plan", help="write the plan into the album folder for editing, download nothing")
     pl.add_argument("url")
@@ -45,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
 
     d = sub.add_parser("download", help="download from an (edited) plan in an album folder")
     d.add_argument("album_dir", type=Path)
+    d.add_argument("--no-lyrics", action="store_true", help="do not look lyrics up at lrclib.net")
 
     pr = sub.add_parser("prune", help="delete the tracks that are no longer in the source playlist")
     pr.add_argument("album_dir", type=Path)
@@ -52,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
 
     rp = sub.add_parser("repair", help="tidy artist names in the library, offline (one-off)")
     rp.add_argument("--library", type=Path)
+
+    ly = sub.add_parser("lyrics", help="fetch lyrics for tracks that have none yet (.lrc beside the file + tag)")
+    ly.add_argument("--library", type=Path)
+    ly.add_argument("--artist", help="only this album artist")
+    ly.add_argument("--refetch", action="store_true", help="look every track up again (keeps lyrics you wrote yourself)")
 
     dl = sub.add_parser("delete", help="delete an album (or one track) — files are removed")
     dl.add_argument("album_dir", type=Path)
@@ -62,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--library", type=Path)
     u.add_argument("--dry-run", action="store_true", help="only report what changed")
     u.add_argument("--no-mb", action="store_true", help="skip the MusicBrainz lookup")
+    u.add_argument("--no-lyrics", action="store_true", help="do not look lyrics up at lrclib.net")
     u.add_argument("--deep", action="store_true", help="read every album fully, even unchanged ones")
 
     sv = sub.add_parser("serve", help="web UI for the library (also installable as an app)")
@@ -86,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--library", type=Path, help="set the library root")
     c.add_argument("--cookies-from-browser", metavar="BROWSER[:PROFILE]", help="use a browser's YouTube login (for age-restricted videos); 'none' to unset")
     c.add_argument("--cookies-file", type=Path, metavar="FILE", help="use an exported cookies.txt instead; 'none' to unset")
+    c.add_argument("--lyrics", choices=("on", "off"), help="look lyrics up at lrclib.net when downloading")
 
     args = p.parse_args(argv)
     sys.stdout.reconfigure(line_buffering=True)  # keep progress in order with stderr when piped
@@ -94,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config_mod.load()
     if getattr(args, "no_mb", False):
         cfg.musicbrainz = False
+    if getattr(args, "no_lyrics", False):
+        cfg.lyrics = False
 
     try:
         match args.cmd:
@@ -121,6 +133,11 @@ def main(argv: list[str] | None = None) -> int:
             case "repair":
                 library = _library(args, cfg, required=True)
                 return 2 if library is None else exit_code(_service(cfg, library).repair())
+            case "lyrics":
+                library = _library(args, cfg, required=True)
+                if library is None:
+                    return 2
+                return exit_code(_service(cfg, library).fetch_lyrics(refetch=args.refetch, artist=args.artist))
     except NotSupported as e:
         print(f"not supported: {e}", file=sys.stderr)
         return 2
@@ -147,6 +164,8 @@ def _config(args: argparse.Namespace, cfg: config_mod.Config) -> int:
         changes["cookies_from_browser"] = None if args.cookies_from_browser == "none" else args.cookies_from_browser
     if args.cookies_file:
         changes["cookies_file"] = None if str(args.cookies_file) == "none" else str(args.cookies_file.expanduser().resolve())
+    if args.lyrics:
+        changes["lyrics"] = args.lyrics == "on"
     for name, value in changes.items():
         config_mod.save_setting(name, value)
     if changes:
@@ -156,6 +175,7 @@ def _config(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     print(f"library_root: {cfg.library_root or '(not set)'}")
     print(f"cookies:      {cfg.cookies_file or cfg.cookies_from_browser or '(none — age-restricted videos are skipped)'}")
     print(f"musicbrainz:  {'on' if cfg.musicbrainz else 'off'}")
+    print(f"lyrics:       {'on (lrclib.net)' if cfg.lyrics else 'off'}")
     pot = cfg.resolved_pot_provider()
     if not pot or cfg.pot_mode == "off":
         print(f"po tokens:    {'off' if cfg.pot_mode == 'off' else '(no generator — some streams may be withheld; see README)'}")

@@ -122,6 +122,8 @@ class PlanTrack:
     trimmed: str | None = None  # the trim actually applied to the file on disk
     mb_length: float | None = None  # seconds, as MusicBrainz knows the recording
     duration: float | None = None  # seconds of the video itself (YouTube)
+    lyrics: str | None = None  # synced | plain | instrumental | none; None = not looked up yet
+    lyrics_id: int | None = None  # the lrclib entry the text came from
 
 
 @dataclass

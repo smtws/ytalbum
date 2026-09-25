@@ -26,7 +26,16 @@ def image_mime(data: bytes) -> str | None:
     return None
 
 
-def build_tags(plan: AlbumPlan, track: PlanTrack) -> dict[str, str]:
+def audio_length(path: Path) -> float | None:
+    """Seconds of audio in the file — the trimmed truth, not what YouTube said."""
+    try:
+        audio = MP4(path) if path.suffix.lower() in (".m4a", ".mp4") else OggOpus(path)
+        return float(audio.info.length)
+    except Exception:  # not readable, not audio: callers treat an unknown length as "no match"
+        return None
+
+
+def build_tags(plan: AlbumPlan, track: PlanTrack, lyrics: str | None = None) -> dict[str, str]:
     tags = {
         "title": track.title,
         "artist": track.artist,
@@ -48,32 +57,39 @@ def build_tags(plan: AlbumPlan, track: PlanTrack) -> dict[str, str]:
         tags["musicbrainz_albumid"] = plan.mbid
     if track.mbid:
         tags["musicbrainz_trackid"] = track.mbid
+    if lyrics:
+        # one key, the one every tag-reading player understands; timestamps and all,
+        # because that is what the .lrc beside the file holds (lyrics.py)
+        tags["lyrics"] = lyrics
     return tags
 
 
-def signature(plan: AlbumPlan, track: PlanTrack, cover: bytes | None) -> str:
+def signature(plan: AlbumPlan, track: PlanTrack, cover: bytes | None, lyrics: str | None = None) -> str:
     """Changes whenever the tags or cover that tag_file would write change."""
-    payload = json.dumps(build_tags(plan, track), sort_keys=True).encode()
+    payload = json.dumps(build_tags(plan, track, lyrics), sort_keys=True).encode()
     payload += hashlib.sha1(cover or b"").digest()
     return hashlib.sha1(payload).hexdigest()[:16]
 
 
 MP4_KEYS = {  # Vorbis comment -> MP4 atom
     "title": "\xa9nam", "artist": "\xa9ART", "albumartist": "aART", "album": "\xa9alb",
-    "date": "\xa9day", "source": "\xa9cmt", "youtube_id": "----:com.apple.iTunes:YOUTUBE_ID",
+    "date": "\xa9day", "source": "\xa9cmt", "lyrics": "\xa9lyr", "youtube_id": "----:com.apple.iTunes:YOUTUBE_ID",
     "musicbrainz_albumid": "----:com.apple.iTunes:MusicBrainz Album Id",
     "musicbrainz_trackid": "----:com.apple.iTunes:MusicBrainz Track Id",
 }
 
 
-def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None = None) -> str:
-    """Replace all tags. Keeps an already embedded cover if no new one is given. Returns the signature."""
+def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None = None, lyrics: str | None = None) -> str:
+    """Replace all tags. Keeps an already embedded cover if no new one is given. Returns the signature.
+
+    Lyrics are not kept but rewritten from the `.lrc` sidecar the caller read (lyrics.py).
+    """
     if path.suffix.lower() in (".m4a", ".mp4"):
-        return _tag_mp4(path, plan, track, cover)
+        return _tag_mp4(path, plan, track, cover, lyrics)
     audio = OggOpus(path)
     old_picture = (audio.tags or {}).get(PICTURE_KEY)
     audio.delete()  # drop whatever yt-dlp/ffmpeg or an earlier run put there
-    for key, value in build_tags(plan, track).items():
+    for key, value in build_tags(plan, track, lyrics).items():
         audio[key] = [value]
 
     if cover and (mime := image_mime(cover)):
@@ -86,15 +102,15 @@ def tag_file(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None 
     elif old_picture and cover is None:
         audio[PICTURE_KEY] = old_picture
     audio.save()
-    return signature(plan, track, cover)
+    return signature(plan, track, cover, lyrics)
 
 
-def _tag_mp4(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None) -> str:
+def _tag_mp4(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None, lyrics: str | None = None) -> str:
     """Same tags for the .m4a files (audio copied out of a combined stream)."""
     audio = MP4(path)
     old_cover = audio.tags.get("covr") if audio.tags else None
     audio.delete()
-    tags = build_tags(plan, track)
+    tags = build_tags(plan, track, lyrics)
     for key, atom in MP4_KEYS.items():
         if value := tags.get(key):
             audio[atom] = [value.encode() if atom.startswith("----") else value]
@@ -108,4 +124,4 @@ def _tag_mp4(path: Path, plan: AlbumPlan, track: PlanTrack, cover: bytes | None)
     elif old_cover and cover is None:
         audio["covr"] = old_cover
     audio.save()
-    return signature(plan, track, cover)
+    return signature(plan, track, cover, lyrics)

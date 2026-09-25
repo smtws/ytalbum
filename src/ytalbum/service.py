@@ -19,6 +19,8 @@ from typing import Any
 from .config import Config
 from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, relocate, run, save_plan
 from .enrich import enrich
+from .lyrics import Lrclib, LyricsAPI, remove_sidecar
+from .lyrics import default_cache_path as lyrics_cache_path
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
 from .plan import build_plan, drop_album_name, merge_plans, refresh_derived, renumber, wanted_folder
@@ -73,6 +75,7 @@ class Service:
         yt: YouTube | None = None,
         mb: MusicBrainz | None = None,
         cancel: threading.Event | None = None,
+        lrclib: LyricsAPI | None = None,
     ) -> None:
         self.cfg = cfg
         self.library = library.expanduser() if library else None
@@ -80,6 +83,7 @@ class Service:
         self.cancel = cancel
         self.yt = yt or YouTube(cfg, cancel)
         self._mb = mb
+        self._lrclib = lrclib
 
     def check(self) -> None:
         """Stop here if the job was cancelled (only called where stopping is safe)."""
@@ -93,6 +97,14 @@ class Service:
         if self._mb is None:
             self._mb = MusicBrainz(default_cache_path())
         return self._mb
+
+    @property
+    def lrclib(self) -> LyricsAPI | None:
+        if not self.cfg.lyrics:
+            return None
+        if self._lrclib is None:
+            self._lrclib = Lrclib(lyrics_cache_path())
+        return self._lrclib
 
     # -- one source --------------------------------------------------------------------
 
@@ -198,7 +210,7 @@ class Service:
     def execute(self, plan: AlbumPlan, album_dir: Path) -> Outcome:
         todo = sum(t.state != "done" and t.in_source for t in plan.tracks)
         self.log(f"downloading {todo} of {len(plan.tracks)} tracks into {album_dir}")
-        run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check)
+        run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, lyrics=self.lrclib)
         failed = [t for t in plan.tracks if t.state != "done" and t.in_source]
         self.log(f"{len(plan.tracks) - len(failed)}/{len(plan.tracks)} tracks done" + (f", {len(failed)} not yet — run again to retry" if failed else ""))
         if any(t.error == BOT_CHECK for t in failed):
@@ -320,6 +332,7 @@ class Service:
             path = _inside(album_dir, t.filename)
             if path and path.exists():
                 path.unlink()
+            remove_sidecar(album_dir, t.filename)
             self.log(f"removed {t.number:02d} {t.artist} - {t.title}" + ("" if path else " (unsafe file name ignored)"))
         plan.tracks = [t for t in plan.tracks if t.in_source]
         if all(t.disc == 1 for t in plan.tracks):  # gone tracks were numbered last; close any gap
@@ -327,6 +340,41 @@ class Service:
                 t.number = number
         save_plan(plan, album_dir)
         return self.execute(plan, album_dir)  # renames/retags only (tracktotal changed)
+
+    # -- lyrics ----------------------------------------------------------------------------
+
+    def fetch_lyrics(self, refetch: bool = False, artist: str | None = None) -> list[Outcome]:
+        """Look up what is missing, write the `.lrc` sidecars and the tags. Downloads nothing.
+
+        Only tracks that were never looked at are asked for, so running this twice costs
+        nothing; `refetch` asks again for all of them (but never for the user's own lyrics).
+        """
+        api = self.lrclib
+        if api is None:
+            self.log("lyrics are switched off — turn them on with: ytalbum config --lyrics on")
+            return []
+        albums = list(iter_plans(self.library)) if self.library and self.library.exists() else []
+        if artist:
+            albums = [(d, p) for d, p in albums if p.albumartist.casefold() == artist.casefold()]
+        outcomes: list[Outcome] = []
+        for i, (album_dir, plan) in enumerate(albums, 1):
+            self.check()
+            if refetch:
+                for t in plan.tracks:
+                    if t.provenance.get("lyrics") != Provenance.USER:
+                        t.lyrics, t.lyrics_id = None, None
+            todo = [t for t in plan.tracks if t.state == "done" and t.lyrics is None]
+            if not todo:
+                continue
+            self.log(f"=== [{i}/{len(albums)}] {plan.albumartist} — {plan.album}: {len(todo)} track(s) to look up")
+            outcomes.append(self._guarded(lambda: self._lyrics_pass(plan, album_dir, api)))
+        counts = Counter(t.lyrics or "not looked up" for _, plan in albums for t in plan.tracks if t.state == "done")
+        self.log("lyrics: " + (", ".join(f"{n} {what}" for what, n in counts.most_common()) or "no tracks"))
+        return outcomes
+
+    def _lyrics_pass(self, plan: AlbumPlan, album_dir: Path, api: LyricsAPI) -> Outcome:
+        run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False, lyrics=api)
+        return Outcome("ok", plan, album_dir)
 
     # -- offline repair --------------------------------------------------------------------
 
@@ -393,6 +441,7 @@ class Service:
         for path in (_inside(album_dir, track.filename), original_path(album_dir, track)):
             if path and path.exists():
                 path.unlink()
+        remove_sidecar(album_dir, track.filename)
         self.log(f"removed {track.number:02d} {track.artist} - {track.title}")
         plan.tracks.remove(track)
         renumber(plan)
@@ -409,6 +458,7 @@ class Service:
             for path in (_inside(album_dir, track.filename), original_path(album_dir, track)):
                 if path and path.exists():
                     path.unlink()
+            remove_sidecar(album_dir, track.filename)
         for path in [*album_dir.glob("cover.*"), album_dir / PLAN_FILE]:
             path.unlink(missing_ok=True)
         for folder in (album_dir / ORIGINALS, album_dir / PARTS_DIR):
