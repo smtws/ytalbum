@@ -278,7 +278,11 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     except LyricsError as e:
         log.debug("no lyrics for %s - %s: %s", track.artist, track.title, e)
         return read_sidecar(album_dir, track)  # ask again next time
-    track.lyrics = found.status if found else NONE
+    status = found.status if found else NONE
+    if status == NONE and NO_VOCALS.search(track.title):
+        # "none" means we looked and lrclib has nothing; here we know *why* there are no words
+        status = INSTRUMENTAL
+    track.lyrics = status
     track.lyrics_id = found.lrclib_id if found else None
     track.lyrics_length = found.length if found else None
     if not found or not found.text:

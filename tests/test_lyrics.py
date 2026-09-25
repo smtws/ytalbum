@@ -446,3 +446,20 @@ def test_an_instrumental_with_only_sung_entries_gets_none_of_them():
     assert found.text is None
     assert found.status == "none"
     assert found.length == 61.0  # the length is still worth keeping
+
+
+def test_a_track_that_says_it_has_no_words_is_not_recorded_as_a_blank(tmp_path, yt):
+    """"none" means lrclib has nothing; for an instrumental we know why, and can say so."""
+
+    class Refuses:
+        def get(self, artist, title, album=None, length=None):
+            return Lyrics(length=236.0)  # a near miss: the length is worth keeping
+
+    plan, album_dir = album(tmp_path, yt, None)
+    quiet, sung = plan.tracks
+    quiet.title, quiet.lyrics = "Dead End (Instrumental)", None
+    sung.lyrics = None
+
+    run(plan, album_dir, yt, download=False, lyrics=Refuses())
+    assert (quiet.lyrics, quiet.lyrics_length) == ("instrumental", 236.0)
+    assert sung.lyrics == "none"  # an ordinary track keeps the plain verdict
