@@ -19,7 +19,7 @@ from typing import Any
 
 from .mb import MusicBrainzAPI, MusicBrainzError
 from .models import AlbumPlan, Kind, PlanTrack, Provenance
-from .plan import drop_placeholder_lengths, refresh_derived
+from .plan import refresh_derived
 from .titles import channel_artist, key, move_feat
 
 log = logging.getLogger(__name__)
@@ -288,8 +288,6 @@ def enrich(plan: AlbumPlan, mb: MusicBrainzAPI, progress: Callable[[str], None] 
             stats["tracks"] += int(enrich_track(t, mb))
     except MusicBrainzError as e:
         log.warning("MusicBrainz unavailable, continuing without it: %s", e)
-    if dropped := drop_placeholder_lengths(plan):
-        progress(f"MusicBrainz: {dropped} length(s) repeat across the album and were ignored")
     refresh_derived(plan)
     return stats
 

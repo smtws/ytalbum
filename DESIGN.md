@@ -485,13 +485,12 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    a *stub* (a file under 60 % of the known length) flags an album on its own, because only 8
    of 3946 tracks are one and every one was a snippet, a radio edit or a wrong recording;
    while a whole-album drift needs **three** tracks, not two — at two, a volume where only
-   four tracks can be compared at all was flagged for a pair of long folk songs. And a length
-   that repeats across an album is not per-track data at all: "Judas (Deluxe Digital Edition)"
-   carries one bulk-imported 222.1 s on 23 of its 56 tracks, which read as half the album
-   running long. Three tracks sharing a value is enough to forget it — where the value is
-   right the tracks agree with it anyway, so nothing is lost either way. What is left on that
-   album is real: its songs come from official videos, and `Viva Vendetta` runs 7:51 against a
-   3:50 song.
+   four tracks can be compared at all was flagged for a pair of long folk songs. A rule that ignored
+   lengths repeating across an album (23 of Judas' 56 tracks read 222.1 s) was **built and
+   then reverted the same day**: the audio release turned out to have 24 tracks of exactly
+   223 s, because those collaborations are one arrangement sung by different guests. The
+   repetition was real data, and suppressing it hid a true flag — that album's files were
+   official videos running ~50 s long. Repetition is not evidence of a bad reference.
 
 19. ✅ A bracket group can say the recordings are different ones (2026-09-25). `core()` strips
    bracket groups before comparing titles, which is right for "(Deluxe Edition)" and wrong for

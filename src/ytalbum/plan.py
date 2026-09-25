@@ -413,25 +413,6 @@ LENGTH_STUB = 0.6  # a file this much shorter than the song is not that recordin
 ALBUM_SHARE = 0.5  # this many of an album's comparable tracks off the same way flags the album
 
 
-REPEATED_LENGTH = 3  # the same length on this many tracks of one album is not per-track data
-
-
-def drop_placeholder_lengths(plan: AlbumPlan) -> int:
-    """Forget MusicBrainz lengths that repeat across the album: they say nothing per track.
-
-    Lord of the Lost' "Judas (Deluxe Digital Edition)" carries one length, 222.1 s, on 23 of
-    its 56 tracks — a bulk import, and the only data MusicBrainz has for those recordings.
-    Against real files that reads as half the album running long. Where the repeated value is
-    right the tracks agree with it anyway, so dropping it costs nothing either way.
-    """
-    repeated = {v for v, n in Counter(t.mb_length for t in plan.tracks if t.mb_length).items() if n >= REPEATED_LENGTH}
-    dropped = 0
-    for t in plan.tracks:
-        if t.mb_length in repeated:
-            t.mb_length, dropped = None, dropped + 1
-    return dropped
-
-
 def reference_length(track: PlanTrack) -> float | None:
     """How long the song is according to somebody other than YouTube."""
     return track.mb_length or track.lyrics_length
