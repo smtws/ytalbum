@@ -674,7 +674,7 @@ const fromTime = (text) => {
 // longer version of the same song (live, extended), which would suggest past the end
 const usableLength = (t) => t.mb_length && t.duration && t.mb_length < t.duration - 0.5;
 
-// the same numbers as plan.py's LENGTH_* — keep them in step
+// mirrors plan.py's LENGTH_SLACK / LENGTH_BIG / LENGTH_STUB, which are the source of truth
 const LENGTH = { slack: 5, big: 20, stub: 0.6 };
 const refLength = (t) => t.mb_length || t.lyrics_length || null;
 const ourLength = (t) => t.file_length || (t.duration ? (t.trim_end || t.duration) - (t.trim_start || 0) : null);

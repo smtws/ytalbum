@@ -412,6 +412,9 @@ def track_filename(
 # clip, or an upload with a label ident in front. Measured over 3032 comparable tracks:
 # 13% are >5s longer than MusicBrainz, so only a wide gap is worth showing (DESIGN.md §9.18).
 
+# These four are the source of truth. The album flag below uses LENGTH_BIG, LENGTH_STUB and
+# ALBUM_SHARE; the per-track mark is drawn in the page, so `LENGTH` in webui/app.js mirrors
+# all of them — LENGTH_SLACK exists only for that mirror. Change a number here and there.
 LENGTH_SLACK = 5.0  # below this nothing is said: masters, fades and count-ins differ
 LENGTH_BIG = 20.0  # a gap worth marking on the track
 LENGTH_STUB = 0.6  # a file this much shorter than the song is not that recording at all
