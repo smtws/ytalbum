@@ -505,7 +505,7 @@ function provBadge(p) {
 // The .lrc file beside the track is the original; the tag is a copy of it, so what is
 // shown here is what a player reads.
 function lyricsMark(p, t) {
-  if (t.lyrics === "instrumental") return h("span", { class: "badge", title: "LRCLIB says this recording has no words" }, "instrumental");
+  if (t.lyrics === "instrumental") return h("span", { class: "badge", title: "LRCLIB has no words for this one — its entry is marked instrumental" }, "no words");
   if (t.lyrics !== "synced" && t.lyrics !== "plain") return null;
   return h("button", { class: "quiet small lyr", type: "button",
     title: t.lyrics === "synced" ? "Lyrics with timestamps — click to read" : "Lyrics without timestamps — click to read",
@@ -1003,6 +1003,7 @@ async function playAlbum(albumId, start = 0) {
   queue = plan.tracks.filter((t) => t.state === "done").map((t) => ({
     album: albumId, video_id: t.video_id, title: t.title, artist: t.artist, albumName: plan.album,
     start: t.trim_start, end: t.trim_end, duration: t.duration, mb_length: t.mb_length, trimmed: t.trimmed,
+    savedStart: t.trim_start, savedEnd: t.trim_end,  // what is on disk, to tell editing from listening
   }));
   if (!queue.length) return toast("Nothing downloaded yet in this album", "blocked");
   playIndex(Math.max(0, start));
@@ -1041,7 +1042,13 @@ audio.addEventListener("timeupdate", () => {
   const t = queue[qi];
   if (t) {  // preview the trim while listening: skip the head, stop at the end
     if (t.start && audio.currentTime < t.start - 0.4 && !dragging) audio.currentTime = t.start;
-    if (t.end && audio.currentTime > t.end) (qi + 1 < queue.length ? playIndex(qi + 1) : audio.pause());
+    if (t.end && audio.currentTime > t.end) {
+      // while the end is still being placed, stop on it. Running into the next track would
+      // take the unsaved trim with it: the buttons then edit and save the wrong song.
+      if (t.end !== t.savedEnd || t.start !== t.savedStart) audio.pause();
+      else if (qi + 1 < queue.length) playIndex(qi + 1);
+      else audio.pause();
+    }
   }
   $("#p-time").textContent = fmt(audio.currentTime);
   $("#p-dur").textContent = fmt(audio.duration);
@@ -1196,7 +1203,10 @@ for (const [id, which] of [["#p-h-start", "start"], ["#p-h-end", "end"]]) {
 }
 
 $("#p-set-start").addEventListener("click", () => setTrim("start", audio.currentTime));
-$("#p-set-end").addEventListener("click", () => setTrim("end", audio.currentTime));
+$("#p-set-end").addEventListener("click", () => {
+  setTrim("end", audio.currentTime);
+  audio.pause();  // this is where the song ends: stay here, do not play past the mark
+});
 $("#p-trim-clear").addEventListener("click", () => {
   const t = queue[qi];
   if (!t) return;
@@ -1206,6 +1216,7 @@ $("#p-trim-clear").addEventListener("click", () => {
 $("#p-trim-save").addEventListener("click", (e) => {
   const t = queue[qi];
   if (!t) return;
+  [t.savedStart, t.savedEnd] = [t.start, t.end];  // from here on these marks are the saved ones
   submit("edit", { id: t.album, edits: { tracks: [{ video_id: t.video_id, trim_start: t.start == null ? "" : String(t.start), trim_end: t.end == null ? "" : String(t.end) }] } }, e.currentTarget);
 });
 

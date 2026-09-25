@@ -118,6 +118,34 @@ def test_a_track_over_an_hour_skips_the_endpoint_that_would_reject_it():
     assert [u.path for u in asked] == ["/api/search"]
 
 
+def test_an_entry_without_words_never_ends_the_search():
+    """lrclib marks an entry instrumental when nobody submitted words, not only when a
+    recording has none: 16 of the 18 entries for one Feuerschwanz song are such stubs, and
+    the exact endpoint answered with one of them before the search saw the synced entry of
+    exactly the same length."""
+    stub = {**ROW, "id": 2608331, "syncedLyrics": None, "plainLyrics": None, "instrumental": True, "duration": 213.0}
+    real = {**ROW, "id": 1948185, "duration": 213.0}
+    api, asked = responses(get=stub, search=[stub, real])
+    found = api.get("TUNGSTEN", "Lullaby", "Best Of", 211.7)
+    assert found.lrclib_id == 1948185
+    assert found.synced == SYNCED_LRC
+    assert [u.path for u in asked] == ["/api/get", "/api/search"]
+
+
+def test_an_instrumental_stands_when_nobody_has_words_for_the_song():
+    stub = {**ROW, "syncedLyrics": None, "plainLyrics": None, "instrumental": True}
+    api, _ = responses(get=stub, search=[stub])
+    assert api.get("TUNGSTEN", "Lullaby", "Tundra", 61.0).status == "instrumental"
+
+
+def test_words_win_over_a_closer_length_without_them():
+    api, _ = responses(search=[
+        {**ROW, "id": 1, "duration": 61.0, "syncedLyrics": None, "plainLyrics": None, "instrumental": True},
+        {**ROW, "id": 2, "duration": 63.0},
+    ])
+    assert api.get("TUNGSTEN", "Lullaby", None, 61.0).lrclib_id == 2
+
+
 # -- transport ---------------------------------------------------------------------------
 
 
@@ -400,3 +428,21 @@ def test_update_track_survives_lrclib_being_down(tmp_path, yt):
     track = plan.tracks[0]
     assert update_track(Broken(), plan, track, album_dir, album_dir / track.filename) is None
     assert track.lyrics is None  # not remembered as "none": ask again next time
+
+
+def test_an_instrumental_cut_does_not_borrow_the_singers_words():
+    """It is exactly as long as the sung version, so only the title can tell them apart."""
+    sung = {**ROW, "id": 1, "duration": 61.0}
+    quiet = {**ROW, "id": 2, "duration": 61.0, "syncedLyrics": None, "plainLyrics": None, "instrumental": True}
+    api, _ = responses(search=[sung, quiet])
+    assert api.get("TUNGSTEN", "Lullaby (instrumental)", None, 61.0).lrclib_id == 2
+    assert api.get("TUNGSTEN", "Lullaby (Karaoke)", None, 61.0).lrclib_id == 2
+    assert api.get("TUNGSTEN", "Lullaby", None, 61.0).lrclib_id == 1  # the sung one still gets them
+
+
+def test_an_instrumental_with_only_sung_entries_gets_none_of_them():
+    api, _ = responses(get=ROW, search=[ROW])
+    found = api.get("TUNGSTEN", "Lullaby (instrumental)", "Tundra", 61.0)
+    assert found.text is None
+    assert found.status == "none"
+    assert found.length == 61.0  # the length is still worth keeping

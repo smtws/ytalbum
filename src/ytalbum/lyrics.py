@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -38,6 +39,8 @@ MISS_TTL = 7 * 24 * 3600
 TOLERANCE = 3.0  # seconds a candidate's length may differ from ours (YouTube pads, we trim)
 MAX_EXACT = 3600.0  # lrclib's /api/get answers "duration: must be between 1 and 3600"
 SUFFIX = ".lrc"
+# a title that says the recording has no singing: its words are the sung version's, not its
+NO_VOCALS = re.compile(r"\b(instrumentals?|karaoke|backing track)\b", re.I)
 
 # statuses kept in PlanTrack.lyrics
 SYNCED, PLAIN, INSTRUMENTAL, NONE = "synced", "plain", "instrumental", "none"
@@ -109,12 +112,20 @@ class Lrclib:
         """
         if length is None:
             return None
+        silent = bool(NO_VOCALS.search(title))  # "(instrumental)": the sung words are not its
+        exact = None
         if album and length <= MAX_EXACT:
             # the exact endpoint wants lrclib's own album name and ±2s (measured 2026-09-25),
             # so it answers for real albums and never for our compilation names
             params = {"artist_name": artist, "track_name": title, "duration": str(round(length))}
             if found := self._request("get", {**params, "album_name": album}):
-                return _lyrics(found)
+                exact = _pick([found], length, silent)
+                if exact and exact.text:
+                    return exact
+        # An entry without words is not an answer yet: lrclib's "instrumental" is set when
+        # nobody has submitted lyrics, not only when a recording has none — 16 of the 18
+        # entries for "Blöde Frage, Saufgelage" are such stubs, and one of them beat the
+        # synced entry of the very same length because the exact endpoint answered first.
         rows = self._request("search", {"artist_name": artist, "track_name": title}) or []
         same = [
             row
@@ -122,13 +133,14 @@ class Lrclib:
             if isinstance(row.get("duration"), int | float) and _same_artist(artist, row.get("artistName") or "")
         ]
         fits = [row for row in same if abs(row["duration"] - length) <= TOLERANCE]
-        if not fits:
-            # nothing close enough to be this recording — but how long lrclib thinks the song
-            # is, is worth knowing: it is the second opinion on a file that carries an intro
-            near = min(same, key=lambda row: abs(row["duration"] - length), default=None)
-            return Lyrics(length=near["duration"]) if near else None
-        best = min(fits, key=lambda row: (not row.get("syncedLyrics"), abs(row["duration"] - length)))
-        return _lyrics(best)
+        if picked := _pick(fits, length, silent):
+            return picked
+        if exact:
+            return exact  # the album's own entry, and nobody has words for this song
+        # nothing close enough to be this recording — but how long lrclib thinks the song
+        # is, is worth knowing: it is the second opinion on a file that carries an intro
+        near = min(same, key=lambda row: abs(row["duration"] - length), default=None)
+        return Lyrics(length=near["duration"]) if near else None
 
     # -- transport -----------------------------------------------------------------------
 
@@ -183,6 +195,22 @@ class Lrclib:
         if self._db:
             with self._db:
                 self._db.execute("INSERT OR REPLACE INTO cache VALUES (?, ?, ?)", (key, json.dumps(body), time.time() + ttl))
+
+
+def _has_words(row: dict[str, Any]) -> bool:
+    return bool(row.get("syncedLyrics") or row.get("plainLyrics"))
+
+
+def _pick(fits: list[dict[str, Any]], length: float, silent: bool) -> Lyrics | None:
+    """The best candidate of this length: words first, unless the track says it has none."""
+    if silent:
+        # an instrumental cut is as long as the sung one, so length cannot tell them apart;
+        # the title can, and borrowing the singer's words would be plainly wrong
+        quiet = [row for row in fits if not _has_words(row)]
+        return _lyrics(min(quiet, key=lambda row: abs(row["duration"] - length))) if quiet else None
+    if worded := [row for row in fits if _has_words(row)]:
+        return _lyrics(min(worded, key=lambda row: (not row.get("syncedLyrics"), abs(row["duration"] - length))))
+    return _lyrics(min(fits, key=lambda row: abs(row["duration"] - length))) if fits else None
 
 
 def _lyrics(row: dict[str, Any]) -> Lyrics | None:

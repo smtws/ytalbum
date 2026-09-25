@@ -431,7 +431,12 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    player that matters here — MPD/Volumio has no lyrics tag at all and reads `.lrc`. The text
    is not kept in `.ytalbum.json` (3946 × ~3 KB would land in every `update` and in the track
    index, which is 11 ms today); the plan holds only `lyrics: synced|plain|instrumental|none`
-   and the lrclib id, so nothing is ever looked up twice. A trim changes the file's length, so the
+   and the lrclib id, so nothing is ever looked up twice. Two things about lrclib's
+   `instrumental` flag, learned from real use: it means *nobody submitted words*, not that the
+   recording has none (16 of 18 entries for one Feuerschwanz song are such stubs), so an entry
+   without words never ends the search; and when our own title says "(instrumental)" the sung
+   version's words are refused however well the lengths agree, because an instrumental cut is
+   exactly as long as the sung one and only the title can tell them apart. A trim changes the file's length, so the
    track is matched again afterwards — but its timestamps are never moved: the match was
    gated on *this* file's length, so the recording that matched is the audio in front of us.
    (Shifting them by the trim, as the first version did, moved them a second time.) Two things the
