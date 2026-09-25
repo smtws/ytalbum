@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import sqlite3
 import threading
 import time
@@ -230,34 +229,6 @@ def rename_sidecar(album_dir: Path, old: str, new: str) -> None:
         was.rename(now)
 
 
-TIMESTAMP = re.compile(r"\[(?P<min>\d{1,3}):(?P<sec>\d{2}(?:[.:]\d{1,3})?)\]")
-
-
-def shift(lrc: str, seconds: float) -> str:
-    """Move every timestamp by `seconds`. Lines that would start before 0 are dropped.
-
-    Needed because a front trim cuts an intro off the file the timestamps count from.
-    """
-    if not seconds:
-        return lrc
-    lines = []
-    for line in lrc.splitlines():
-        dropped = False
-
-        def move(m: re.Match[str]) -> str:
-            nonlocal dropped
-            at = int(m["min"]) * 60 + float(m["sec"].replace(":", ".")) + seconds
-            if at < 0:
-                dropped = True  # that part of the song is no longer in the file
-                return ""
-            return f"[{int(at // 60):02d}:{at % 60:05.2f}]"
-
-        moved = TIMESTAMP.sub(move, line)
-        if not dropped:
-            lines.append(moved)
-    return "\n".join(lines)
-
-
 # -- one track ---------------------------------------------------------------------------
 
 
@@ -279,9 +250,12 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     if not found or not found.text:
         remove_sidecar(album_dir, track.filename)
         return None
-    text = shift(found.text, -track.trim_start) if found.synced and track.trim_start else found.text
+    # no shifting: the match was gated on *this* file's length, so the timestamps of the
+    # recording that matched are the timestamps of the file in front of us. A trim changes
+    # that length, which is why a trim change makes the track be looked up again (download.py)
+    text = found.text
     write_sidecar(album_dir, track, text)
     return text
 
 
-__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "read_sidecar", "shift", "update_track"]
+__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "read_sidecar", "update_track"]

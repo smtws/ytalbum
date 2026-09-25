@@ -19,7 +19,7 @@ from pathlib import Path
 from yt_dlp.utils import DownloadError
 
 from .cover import square_if_padded
-from .lyrics import SYNCED, LyricsAPI, read_sidecar, rename_sidecar, update_track
+from .lyrics import LyricsAPI, read_sidecar, rename_sidecar, update_track
 from .models import AlbumPlan, PlanTrack
 from .plan import refresh_derived, wanted_filename, wanted_folder
 from .tag import image_mime, signature, tag_file
@@ -126,8 +126,8 @@ def run(
             try:
                 if apply_trim(album_dir, track, final):
                     track.tagged = None  # the new file needs its tags again
-                    if track.lyrics == SYNCED and lyrics is not None:
-                        track.lyrics = None  # its timestamps counted from the old cut
+                    if track.lyrics is not None and lyrics is not None:
+                        track.lyrics = None  # the file is a different length: match it again
                     on_track(track, "trimmed")
             except RuntimeError as e:
                 track.error = str(e)

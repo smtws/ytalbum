@@ -431,8 +431,10 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    player that matters here — MPD/Volumio has no lyrics tag at all and reads `.lrc`. The text
    is not kept in `.ytalbum.json` (3946 × ~3 KB would land in every `update` and in the track
    index, which is 11 ms today); the plan holds only `lyrics: synced|plain|instrumental|none`
-   and the lrclib id, so nothing is ever looked up twice. A front trim shifts the timestamps
-   with the audio, so changing one makes the track be fetched and re-shifted. Two things the
+   and the lrclib id, so nothing is ever looked up twice. A trim changes the file's length, so the
+   track is matched again afterwards — but its timestamps are never moved: the match was
+   gated on *this* file's length, so the recording that matched is the audio in front of us.
+   (Shifting them by the trim, as the first version did, moved them a second time.) Two things the
    first run over the real library taught: lrclib's exact endpoint refuses a duration over
    3600 s (a 63-minute ambient piece got HTTP 400 on every run), so that request is not made
    at all, and any 4xx is now remembered as "nothing here" — only 5xx and network errors are

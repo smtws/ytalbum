@@ -10,7 +10,7 @@ from test_incremental import FakeYouTube, opus_template, vol1
 
 from ytalbum.config import Config
 from ytalbum.download import load_plan, run, save_plan
-from ytalbum.lyrics import Lrclib, Lyrics, LyricsError, read_sidecar, shift, sidecar_path, update_track
+from ytalbum.lyrics import Lrclib, Lyrics, LyricsError, read_sidecar, sidecar_path, update_track
 from ytalbum.models import Provenance
 from ytalbum.plan import build_plan
 from ytalbum.service import Service
@@ -167,22 +167,6 @@ def test_a_miss_is_remembered_too(tmp_path):
     assert len(asked) == 2  # get + search, once each
 
 
-# -- timestamps --------------------------------------------------------------------------
-
-
-def test_a_front_trim_moves_the_timestamps_and_drops_what_was_cut():
-    moved = shift(SYNCED_LRC, -5.0)
-    assert moved.splitlines() == ["[00:00.50] two", "[00:07.00] three"]  # "one" was in the intro
-
-
-def test_shifting_leaves_metadata_lines_alone():
-    assert shift("[ar: TUNGSTEN]\n[00:10.00] one", -2.0).splitlines() == ["[ar: TUNGSTEN]", "[00:08.00] one"]
-
-
-def test_minutes_are_carried():
-    assert shift("[00:59.00] one", 2.0) == "[01:01.00] one"
-
-
 # -- the album on disk -------------------------------------------------------------------
 
 
@@ -295,16 +279,18 @@ def test_lyrics_the_user_wrote_are_never_overwritten(tmp_path, yt):
     assert OggOpus(album_dir / track.filename)["lyrics"] == ["mine"]
 
 
-def test_a_new_front_trim_makes_the_timestamps_be_fetched_again(tmp_path, yt):
+def test_a_trim_makes_the_track_be_matched_again(tmp_path, yt):
+    """The match is gated on the file's length, so a cut file has to be looked up afresh."""
     api = FakeLyrics()
     plan, album_dir = album(tmp_path, yt, api)
     track = plan.tracks[0]
     assert track.lyrics == "synced"
 
-    track.trim_start = 5.0
+    track.trim_start = 0.2
     run(plan, album_dir, yt, download=False, lyrics=api)
     assert len(api.asked) == 3  # this one was looked up a second time
-    assert read_sidecar(album_dir, track).splitlines() == ["[00:00.50] two", "[00:07.00] three"]
+    assert api.asked[-1][2] < api.asked[0][2]  # against the length it has now, not the old one
+    assert read_sidecar(album_dir, track) == SYNCED_LRC  # and its timestamps are left alone
 
 
 def test_plain_lyrics_are_written_as_they_are(tmp_path, yt):
