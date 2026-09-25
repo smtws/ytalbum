@@ -40,6 +40,7 @@ from .models import AlbumPlan
 from .service import Outcome, Service, _inside, channel_base_url
 from .tag import image_mime
 from .titles import natural_key
+from .trim import original_path
 from .youtube import Cancelled, YouTube
 
 log = logging.getLogger(__name__)
@@ -314,14 +315,23 @@ class App:
             return None
         return {"status": track.lyrics, "lrclib_id": track.lyrics_id, "text": read_sidecar(album_dir, track) or ""}
 
-    def audio_path(self, source_id: str, video_id: str) -> Path | None:
-        """The finished track's file — looked up in the plan, never taken from the request."""
+    def audio_path(self, source_id: str, video_id: str, original: bool = False) -> Path | None:
+        """The finished track's file — looked up in the plan, never taken from the request.
+
+        `original` asks for the untouched download of a track that has been trimmed: the
+        player works in the trim's coordinates (they count from the start of the video), so
+        it must hear the file those numbers describe, not the one already cut to them.
+        """
         found = self.album(source_id)
         if not found:
             return None
         album_dir, plan = found
         track = next((t for t in plan.tracks if t.video_id == video_id and t.state == "done"), None)
-        path = _inside(album_dir, track.filename) if track else None
+        if not track:
+            return None
+        if original and (uncut := original_path(album_dir, track)).is_file():
+            return uncut
+        path = _inside(album_dir, track.filename)
         return path if path and path.is_file() else None
 
     def thumbnail(self, url: str) -> tuple[bytes, str] | None:
@@ -605,7 +615,7 @@ class _Handler(BaseHTTPRequestHandler):
                 found = self.app.lyrics(q.get("id", ""), q.get("v", ""))
                 return self._json(found) if found else self._error(HTTPStatus.NOT_FOUND, "no such track")
             case "/api/audio":
-                path = self.app.audio_path(q.get("id", ""), q.get("v", ""))
+                path = self.app.audio_path(q.get("id", ""), q.get("v", ""), original=q.get("o") == "1")
                 return self._file(path, "audio/ogg") if path else self._error(HTTPStatus.NOT_FOUND, "no such track")
             case "/api/job":
                 job = self.app.jobs.get(int(q.get("id", "0") or 0)) if q.get("id", "").isdigit() else None

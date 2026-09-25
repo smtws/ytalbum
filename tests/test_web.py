@@ -391,3 +391,32 @@ def test_lyrics_of_an_unknown_track_are_not_found(server):
     assert c.get(f"/api/lyrics?id={album_id}&v=nope").status_code == 404
     assert c.get("/api/lyrics?id=nope&v=nope").status_code == 404
     assert c.post("/api/lyrics", json={"id": "nope"}, headers=HDR).status_code == 400
+
+
+def test_a_trimmed_track_can_be_played_from_its_untouched_original(server, tmp_path):
+    """The trim points count from the start of the video, so the player needs that file.
+
+    Without it the head is skipped twice: the file is already cut and the player cuts again.
+    """
+    from ytalbum.trim import apply as apply_trim
+
+    app, c = server
+    album_dir, plan = app.album(app.albums()[0]["id"])
+    track = plan.tracks[0]
+    track.trim_start = 0.2
+    apply_trim(album_dir, track, album_dir / track.filename)
+    save_plan(plan, album_dir)
+
+    cut = app.audio_path(plan.source_id, track.video_id)
+    uncut = app.audio_path(plan.source_id, track.video_id, original=True)
+    assert cut != uncut
+    assert uncut.parent.name == ".originals"
+    assert c.get(f"/api/audio?id={plan.source_id}&v={track.video_id}&o=1").content == uncut.read_bytes()
+    assert c.get(f"/api/audio?id={plan.source_id}&v={track.video_id}").content == cut.read_bytes()
+
+
+def test_without_a_trim_there_is_no_original_and_the_file_is_served(server):
+    app, c = server
+    album_dir, plan = app.album(app.albums()[0]["id"])
+    track = plan.tracks[0]
+    assert app.audio_path(plan.source_id, track.video_id, original=True) == album_dir / track.filename

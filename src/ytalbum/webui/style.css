@@ -226,3 +226,11 @@ tr.lyrics pre {
   white-space: pre-wrap; font-size: .85em; line-height: 1.45;
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
 }
+tr.lyrics .lines {
+  margin: .3rem 0 0; padding: .4rem .2rem; max-height: 16rem; overflow: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+}
+tr.lyrics .line { padding: .1rem .5rem; border-radius: 5px; font-size: .9em; line-height: 1.5; }
+tr.lyrics .line.timed { cursor: pointer; display: flex; gap: .6rem; }
+tr.lyrics .line.timed:hover, tr.lyrics .line.timed:focus-visible { background: var(--panel); outline: none; }
+tr.lyrics .line .at { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3.2rem; }

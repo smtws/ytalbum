@@ -457,6 +457,16 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    already repaired by hand), and the two albums where the user chose "UNIVERSUM25" over
    MusicBrainz' "Universum25" keep that choice, as `user` outranks everything.
 
+17. ✅ The player hears the file the trim describes (2026-09-25). Clicking a lyric line to
+   jump there only works if the clock in the page is the clock in the audio, and it was not:
+   trim points count from the start of the *video*, but `/api/audio` served the file already
+   cut to them, so the player cut the head a second time. Measured on the one trimmed track
+   in the library: playback started 8.16 s into an already-trimmed file, and the first eight
+   seconds of the song could not be reached at all. A track whose file was cut is now played
+   from `.originals/` (`/api/audio?o=1`, the file `trim.apply` keeps anyway) and the player
+   previews the trim itself, which puts the trim handles, the text fields, the lyric
+   timestamps and the audio on one clock again.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

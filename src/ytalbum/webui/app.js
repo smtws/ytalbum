@@ -484,11 +484,43 @@ async function toggleLyrics(button, p, t) {
     row.after(h("tr", { class: "lyrics" }, h("td", { colspan: "8" },
       h("div", { class: "muted" }, `${t.artist} — ${t.title} · ${where}`,
         d.lrclib_id ? h("a", { href: `https://lrclib.net/api/get/${d.lrclib_id}`, target: "_blank", rel: "noopener", title: "the entry these words come from" }, ` \u00b7 lrclib #${d.lrclib_id}`) : null),
-      h("pre", {}, d.text || "The .lrc file is gone — the next lyrics run fetches it again."))));
+      d.text ? lyricsLines(p, t, d.text) : h("pre", {}, "The .lrc file is gone — the next lyrics run fetches it again."))));
   } catch (e) {
     toast(e.message, "failed");
   }
   button.classList.remove("working");
+}
+
+const LRC_LINE = /^\s*\[(\d{1,3}):(\d{2}(?:[.:]\d{1,3})?)\]\s*(.*)$/;
+
+// Timed lines can be clicked: the song jumps there. Checking whether the words and the
+// audio still line up is the quickest way to see that a file carries an intro.
+function lyricsLines(p, t, text) {
+  const lines = text.split("\n").map((line) => {
+    const m = LRC_LINE.exec(line);
+    if (!m) return h("div", { class: "line" }, line || "\u00a0");
+    const at = Number(m[1]) * 60 + parseFloat(m[2].replace(":", "."));
+    const jump = () => seekLyric(p, t, at);
+    return h("div", { class: "line timed", role: "button", tabindex: "0", title: `Play from ${fmt(at)}`,
+      onclick: jump, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jump(); } } },
+      h("span", { class: "at" }, fmt(at)), m[3] || "\u00a0");
+  });
+  return h("div", { class: "lines" }, lines);
+}
+
+async function seekLyric(p, t, at) {
+  if (!isPlaying(p.source_id, t.video_id)) {
+    const i = p.tracks.filter((x) => x.state === "done").findIndex((x) => x.video_id === t.video_id);
+    if (i < 0) return toast("This track has not been downloaded yet", "blocked");
+    await playAlbum(p.source_id, i);
+  }
+  const playing = queue[qi];
+  // the lyrics were matched against the file as it is on disk; when that file was cut, the
+  // player is holding the original, so the trim has to be added back to reach the same spot
+  const target = at + (playing?.trimmed ? playing.start || 0 : 0);
+  const go = () => { audio.currentTime = target; audio.play().catch(() => {}); };
+  if (audio.readyState >= 1) go();
+  else audio.addEventListener("loadedmetadata", go, { once: true });
 }
 
 function renderAlbum() {
@@ -915,7 +947,7 @@ async function playAlbum(albumId, start = 0) {
   }
   queue = plan.tracks.filter((t) => t.state === "done").map((t) => ({
     album: albumId, video_id: t.video_id, title: t.title, artist: t.artist, albumName: plan.album,
-    start: t.trim_start, end: t.trim_end, duration: t.duration, mb_length: t.mb_length,
+    start: t.trim_start, end: t.trim_end, duration: t.duration, mb_length: t.mb_length, trimmed: t.trimmed,
   }));
   if (!queue.length) return toast("Nothing downloaded yet in this album", "blocked");
   playIndex(Math.max(0, start));
@@ -925,7 +957,11 @@ function playIndex(i) {
   if (i < 0 || i >= queue.length) return;
   qi = i;
   const t = queue[i];
-  audio.src = `/api/audio?id=${encodeURIComponent(t.album)}&v=${encodeURIComponent(t.video_id)}`;
+  // A cut file no longer contains what trim_start counts from, so the player would skip the
+  // head twice (measured: 8s of a trimmed track were unreachable). It plays the untouched
+  // original instead and previews the trim itself, which keeps every number on one clock.
+  const uncut = t.trimmed ? "&o=1" : "";
+  audio.src = `/api/audio?id=${encodeURIComponent(t.album)}&v=${encodeURIComponent(t.video_id)}${uncut}`;
   audio.play().catch((e) => toast(`Cannot play: ${e.message}`, "failed"));
   $("#player").hidden = false;
   document.body.classList.add("has-player");
