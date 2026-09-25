@@ -280,7 +280,9 @@ function renderLibrary() {
     const focused = document.activeElement?.closest?.("#grid .card")?.dataset.id;
     gridShows = signature;
     fill(grid, shownAlbums().map(card));
-    if (focused) grid.querySelector(`.card[data-id="${CSS.escape(focused)}"]`)?.focus();
+    // preventScroll: a rebuild must not drag the viewport to the focused card - it would
+    // pull an open album editor out of view whenever a download changes something
+    if (focused) grid.querySelector(`.card[data-id="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
   }
   $("#empty").hidden = shownAlbums().length > 0;
   renderPlayMatches();
