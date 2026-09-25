@@ -70,12 +70,27 @@ def kept_suffixes(ours: str, theirs: str, albums: list[str] = ()) -> str:
     return "".join(f" {g}" for g in kept)
 
 
+def credited(entry: dict[str, Any]) -> str:
+    """One artist of a credit, in their own spelling when the credit only restyles it.
+
+    MusicBrainz credits carry per-release typography: three of seven Visions of Atlantis
+    releases credit "Visions Of Atlantis", and a library then splits in two over the
+    capital O. A credit that names something *else* ("Puff Daddy" for the artist "Diddy")
+    is a deliberate editorial decision and is kept — hence the equivalence check.
+    """
+    credit = entry.get("name") or ""
+    entity = (entry.get("artist") or {}).get("name") or ""
+    if credit and entity and key(credit) == key(entity):
+        return entity
+    return credit or entity
+
+
 def credit_phrase(ac: list[dict[str, Any]]) -> str:
-    return "".join(a.get("name", "") + a.get("joinphrase", "") for a in ac).strip()
+    return "".join(credited(a) + a.get("joinphrase", "") for a in ac).strip()
 
 
 def credit_names(ac: list[dict[str, Any]]) -> list[str]:
-    return [a.get("name") or a.get("artist", {}).get("name", "") for a in ac]
+    return [credited(a) for a in ac]
 
 
 def artist_matches(ours: str, ac: list[dict[str, Any]]) -> bool:

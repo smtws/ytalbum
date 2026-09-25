@@ -17,6 +17,10 @@ Comes with a command line and a small web app for the library.
 - **It finds the real artist and title per track.** YouTube Music's own fields first, then
   the video title (stripping "(Official Video)", label suffixes and the like), then
   MusicBrainz — which also fixes reversed "Song - Artist" titles.
+- **One artist, one spelling.** A MusicBrainz credit is how a release is printed, so it can
+  shout ("Visions **Of** Atlantis" on three releases of seven); the artist's own spelling wins
+  whenever the two differ only in case or punctuation, while a genuinely different credited
+  name (an old release as "Puff Daddy") is kept.
 - **The artist field stays the performer.** A guest credit moves into the title
   (`Feuerschwanz` / `Ding (SEEED Cover) ft. Melissa Bonny`), so a collaboration does not
   become an artist of its own, and one artist keeps one spelling across the library.
@@ -358,7 +362,7 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 326 tests, offline, ~12 s
+uv run pytest        # 336 tests, offline, ~12 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/` and mock

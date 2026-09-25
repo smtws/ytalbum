@@ -9,8 +9,11 @@ import pytest
 
 from ytalbum.enrich import (
     core,
+    credit_names,
     credit_phrase,
+    credited,
     enrich,
+    enrich_release,
     feat_text,
     kept_suffixes,
     pick_recording,
@@ -254,3 +257,87 @@ def test_only_a_channel_name_triggers_the_split():
     assert uploader_stood_in(t) is True
     t.channel = "Some Other Channel"  # a real artist name: the normal lookup applies
     assert uploader_stood_in(t) is False
+
+
+# -- a credit's typography is not the artist's name -----------------------------------------
+
+VOA = {"name": "Visions Of Atlantis", "artist": {"name": "Visions of Atlantis"}, "joinphrase": ""}
+
+
+def test_a_credit_that_only_restyles_the_name_uses_the_artists_own_spelling():
+    # MB credits carry per-release typography; three of seven VoA releases shout the "Of"
+    assert credited(VOA) == "Visions of Atlantis"
+    assert credit_phrase([VOA]) == "Visions of Atlantis"
+    assert credit_names([VOA]) == ["Visions of Atlantis"]
+
+
+def test_a_credit_that_names_something_else_is_kept():
+    """The whole point of "credited as": an old release says Puff Daddy, and it stays."""
+    entry = {"name": "Puff Daddy", "artist": {"name": "Diddy"}, "joinphrase": ""}
+    assert credited(entry) == "Puff Daddy"
+
+
+@pytest.mark.parametrize(
+    ("credit", "entity", "expected"),
+    [
+        ("MONO INC.", "Mono Inc.", "Mono Inc."),  # punctuation and case only
+        ("UNIVERSUM25", "Universum25", "Universum25"),
+        ("DOMINUM", "DOMINUM", "DOMINUM"),  # MusicBrainz agrees with the cover: nothing to do
+        ("Cat Stevens", "Yusuf", "Cat Stevens"),
+        ("", "Arcana", "Arcana"),  # no credited name: the entity is all there is
+        ("Arcana", "", "Arcana"),  # no entity in the response (a plain search hit)
+    ],
+)
+def test_the_equivalence_class_decides(credit, entity, expected):
+    assert credited({"name": credit, "artist": {"name": entity}}) == expected
+
+
+def test_join_phrases_survive_and_every_name_is_restyled():
+    ac = [
+        {"name": "MONO INC.", "artist": {"name": "Mono Inc."}, "joinphrase": " feat. "},
+        {"name": "tilo wolff", "artist": {"name": "Tilo Wolff"}, "joinphrase": ""},
+    ]
+    assert credit_phrase(ac) == "Mono Inc. feat. Tilo Wolff"
+    assert credit_names(ac) == ["Mono Inc.", "Tilo Wolff"]
+
+
+class OneRelease:
+    """A single release, credited with a restyled artist name at both levels."""
+
+    def __init__(self, titles: list[str]) -> None:
+        self.body = {
+            "id": "rel-1",
+            "title": "Delta",
+            "artist-credit": [VOA],
+            "release-group": {"id": "rg-1", "first-release-date": "2011-03-25"},
+            "media": [
+                {
+                    "position": 1,
+                    "tracks": [
+                        {"position": i, "title": t, "artist-credit": [VOA], "recording": {"id": f"rec-{i}"}}
+                        for i, t in enumerate(titles, 1)
+                    ],
+                }
+            ],
+        }
+
+    def search_releases(self, artist: str, album: str) -> list[dict]:
+        return [{**self.body, "track-count": len(self.body["media"][0]["tracks"]), "status": "Official", "score": 100}]
+
+    def release(self, mbid: str) -> dict:
+        return self.body
+
+
+def test_the_release_and_its_tracks_get_the_artists_own_spelling():
+    plan = plan_for("vol1_collection.json")
+    plan.kind = Kind.OFFICIAL_ALBUM
+    plan.album = "Delta"
+    plan.albumartist = "Visions Of Atlantis"  # as the video titles shouted it
+    plan.tracks = plan.tracks[:2]
+    for t in plan.tracks:
+        t.artist = "Visions Of Atlantis"
+
+    assert enrich_release(plan, OneRelease([t.title for t in plan.tracks])) is True
+    assert plan.albumartist == "Visions of Atlantis"
+    assert {t.artist for t in plan.tracks} == {"Visions of Atlantis"}
+    assert plan.provenance["albumartist"] == Provenance.MB

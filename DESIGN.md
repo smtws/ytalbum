@@ -439,6 +439,22 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    worth asking again. Coverage over 3946 tracks: 52 % synced, 15 % plain, 4 % instrumental,
    29 % nothing; audited against lrclib on 200 matches, none had the wrong artist or song.
 
+16. ✅ A credit's typography is not the artist's name (2026-09-25). "Visions of Atlantis"
+   stood in the library twice, and both spellings honestly carried `mb`: MusicBrainz credits
+   releases as they are printed, and three of seven credit "Visions **Of** Atlantis" while the
+   artist entity is always lower-case. With nothing left to weigh, harmonisation fell through
+   to its last resort, the alphabet, where "Of" beats "of". A credit now yields the artist
+   entity's own spelling whenever the two differ only in case or punctuation — `key(credit) ==
+   key(entity)`, the same equivalence class every other inference step works in, so a credit
+   that names something *else* ("Puff Daddy" for the artist "Diddy") is a deliberate editorial
+   decision and is kept. It costs no requests: `inc=artist-credits` already carries
+   `artist-credit[].artist.name` beside the credited name, at release **and** track level.
+   Measured over the 175 releases in the cache: 168 credits identical, 5 restyled, 0 named
+   differently — and MusicBrainz is not quietly de-stylising bands, since its canonical name
+   for DOMINUM is "DOMINUM". Nothing in the library changes on a later update (the five were
+   already repaired by hand), and the two albums where the user chose "UNIVERSUM25" over
+   MusicBrainz' "Universum25" keep that choice, as `user` outranks everything.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a
