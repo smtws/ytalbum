@@ -343,7 +343,7 @@ class Service:
 
     # -- lyrics ----------------------------------------------------------------------------
 
-    def fetch_lyrics(self, refetch: bool = False, artist: str | None = None) -> list[Outcome]:
+    def fetch_lyrics(self, refetch: bool = False, artist: str | None = None, source_id: str | None = None) -> list[Outcome]:
         """Look up what is missing, write the `.lrc` sidecars and the tags. Downloads nothing.
 
         Only tracks that were never looked at are asked for, so running this twice costs
@@ -356,6 +356,8 @@ class Service:
         albums = list(iter_plans(self.library)) if self.library and self.library.exists() else []
         if artist:
             albums = [(d, p) for d, p in albums if p.albumartist.casefold() == artist.casefold()]
+        if source_id:
+            albums = [(d, p) for d, p in albums if p.source_id == source_id]
         outcomes: list[Outcome] = []
         for i, (album_dir, plan) in enumerate(albums, 1):
             self.check()

@@ -12,10 +12,12 @@ from test_incremental import JPEG, FakeYouTube, opus_template, vol1
 
 from ytalbum.config import Config
 from ytalbum.download import load_plan, run, save_plan
-from ytalbum.models import Provenance
+from ytalbum.models import Collection, Provenance
 from ytalbum.plan import build_plan, refresh_derived
 from ytalbum.service import Service, apply_user_edits
 from ytalbum.web import App
+
+FIXTURES = Path(__file__).parent.parent / "design-fixtures"
 
 HDR = {"X-Ytalbum": "1", "Content-Type": "application/json"}
 
@@ -307,3 +309,85 @@ def test_nonsense_disc_values_are_ignored(value):
     plan = build_plan(vol1())
     apply_user_edits(plan, {"tracks": [{"video_id": plan.tracks[0].video_id, "disc": value}]})
     assert plan.tracks[0].disc == 1
+
+
+# -- lyrics -------------------------------------------------------------------------------
+
+
+class FakeLyrics:
+    """One lrclib answer for every track."""
+
+    LRC = "[00:01.00] one\n[00:04.00] two"
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def get(self, artist, title, album=None, length=None):
+        from ytalbum.lyrics import Lyrics
+
+        self.asked.append(title)
+        return Lyrics(synced=self.LRC, lrclib_id=11)
+
+
+@pytest.fixture
+def lyrics_server(library, opus_template):
+    """A server whose jobs find lyrics, so the button can be exercised offline."""
+    yt = FakeYouTube(opus_template)
+    api = FakeLyrics()
+    app = App(Config(musicbrainz=False), library, port=0,
+              service_factory=lambda job: Service(Config(musicbrainz=False), library, log=job.log.append, yt=yt, lrclib=api))
+    srv = app.make_server()
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with httpx.Client(base_url=f"http://127.0.0.1:{srv.server_address[1]}", timeout=10) as client:
+        yield app, client, api
+    srv.shutdown()
+
+
+def second_album(library, opus_template):
+    """A second album in the library, so "this album" can be told from "the library"."""
+    other = build_plan(Collection.from_dict(json.loads((FIXTURES / "vol20_collection.json").read_text())))
+    run(other, library / other.folder, FakeYouTube(opus_template))
+    return other
+
+
+def test_the_fetch_lyrics_button_fills_one_album(lyrics_server, opus_template):
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    other = second_album(app.library, opus_template)
+    assert app.albums()[0]["lyrics"] == 0
+
+    job = c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]
+    assert wait(c, job["id"])["state"] == "done"
+    assert len(api.asked) == len(app.album(album_id)[1].tracks)
+    assert app.albums()[0]["lyrics"] == len(api.asked)  # the card can show the count
+    # the other album was not touched: one button, one album
+    assert all(t.lyrics is None for t in app.album(other.source_id)[1].tracks)
+
+    # a second press asks nothing: every track has been looked up
+    job = c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]
+    assert wait(c, job["id"])["state"] == "done"
+    assert len(api.asked) == len(app.album(album_id)[1].tracks)
+
+
+def test_the_marker_reads_the_lrc_file_beside_the_track(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    track = app.album(album_id)[1].tracks[0]
+
+    got = c.get(f"/api/lyrics?id={album_id}&v={track.video_id}").json()
+    assert got == {"status": "synced", "lrclib_id": 11, "text": FakeLyrics.LRC}
+
+    # the file is the original: remove it and the UI says so instead of showing a stale tag
+    from ytalbum.lyrics import sidecar_path
+
+    sidecar_path(app.album(album_id)[0], track.filename).unlink()
+    assert c.get(f"/api/lyrics?id={album_id}&v={track.video_id}").json()["text"] == ""
+
+
+def test_lyrics_of_an_unknown_track_are_not_found(server):
+    app, c = server
+    album_id = app.albums()[0]["id"]
+    assert c.get(f"/api/lyrics?id={album_id}&v=nope").status_code == 404
+    assert c.get("/api/lyrics?id=nope&v=nope").status_code == 404
+    assert c.post("/api/lyrics", json={"id": "nope"}, headers=HDR).status_code == 400

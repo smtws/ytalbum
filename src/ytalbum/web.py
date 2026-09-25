@@ -35,6 +35,7 @@ import httpx
 from . import config as config_mod
 from .config import Config
 from .download import COVER_STEM, PLAN_FILE, iter_plans
+from .lyrics import read_sidecar
 from .models import AlbumPlan
 from .service import Outcome, Service, _inside, channel_base_url
 from .tag import image_mime
@@ -278,6 +279,7 @@ class App:
                     "failed": sum(t.state == "failed" and t.in_source for t in plan.tracks),
                     "cover": any(album_dir.glob(f"{COVER_STEM}.*")),
                     "mb": bool(plan.mbid) or any(t.mbid for t in plan.tracks),
+                    "lyrics": sum(t.lyrics in ("synced", "plain") for t in plan.tracks),
                     "needs_choice": sum(t.error_kind == "no_audio_stream" for t in plan.tracks),
                 }
             )
@@ -300,6 +302,17 @@ class App:
             if mime := image_mime(data):
                 return data, mime
         return None
+
+    def lyrics(self, source_id: str, video_id: str) -> dict[str, Any] | None:
+        """The lyrics of one track, read from the `.lrc` beside it (that file is the original)."""
+        found = self.album(source_id)
+        if not found:
+            return None
+        album_dir, plan = found
+        track = next((t for t in plan.tracks if t.video_id == video_id), None)
+        if not track:
+            return None
+        return {"status": track.lyrics, "lrclib_id": track.lyrics_id, "text": read_sidecar(album_dir, track) or ""}
 
     def audio_path(self, source_id: str, video_id: str) -> Path | None:
         """The finished track's file — looked up in the plan, never taken from the request."""
@@ -470,6 +483,14 @@ class App:
                 if not found:
                     raise ValueError("unknown album")
                 return self.jobs.submit("delete", f"Delete album {found[1].album}", lambda s: s.delete_album(source_id))
+            case "lyrics":
+                source_id = str(body.get("id", ""))
+                found = self.album(source_id)
+                if not found:
+                    raise ValueError("unknown album")
+                refetch = bool(body.get("refetch"))
+                verb = "Look up all lyrics of" if refetch else "Fetch lyrics for"
+                return self.jobs.submit("lyrics", f"{verb} {found[1].album}", lambda s: s.fetch_lyrics(refetch=refetch, source_id=source_id))
             case "edit":
                 source_id = str(body.get("id", ""))
                 if not self.album(source_id):
@@ -580,6 +601,9 @@ class _Handler(BaseHTTPRequestHandler):
             case "/api/thumb":
                 thumb = self.app.thumbnail(q.get("u", ""))
                 return self._send(HTTPStatus.OK, thumb[0], thumb[1], cache=True) if thumb else self._error(HTTPStatus.NOT_FOUND, "no thumbnail")
+            case "/api/lyrics":
+                found = self.app.lyrics(q.get("id", ""), q.get("v", ""))
+                return self._json(found) if found else self._error(HTTPStatus.NOT_FOUND, "no such track")
             case "/api/audio":
                 path = self.app.audio_path(q.get("id", ""), q.get("v", ""))
                 return self._file(path, "audio/ogg") if path else self._error(HTTPStatus.NOT_FOUND, "no such track")

@@ -349,7 +349,8 @@ function card(a) {
       h("div", { class: "title" }, marked(a.album)),
       h("div", { class: "artist link", role: "button", tabindex: "-1", title: `Show only ${a.albumartist}`,
         onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, marked(a.albumartist)),
-      h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null),
+      h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null,
+        a.lyrics ? h("span", { class: "badge", title: `${a.lyrics} of ${a.tracks} tracks have lyrics` }, `\u266a ${a.lyrics}`) : null),
       songs));
 }
 
@@ -463,6 +464,33 @@ function provBadge(p) {
   return p ? h("span", { class: `badge ${p === "mb" ? "mb" : p === "user" ? "user" : ""}` }, PROV[p] || p) : null;
 }
 
+// The .lrc file beside the track is the original; the tag is a copy of it, so what is
+// shown here is what a player reads.
+function lyricsMark(p, t) {
+  if (t.lyrics === "instrumental") return h("span", { class: "badge", title: "LRCLIB says this recording has no words" }, "instrumental");
+  if (t.lyrics !== "synced" && t.lyrics !== "plain") return null;
+  return h("button", { class: "quiet small lyr", type: "button",
+    title: t.lyrics === "synced" ? "Lyrics with timestamps — click to read" : "Lyrics without timestamps — click to read",
+    onclick: (e) => toggleLyrics(e.currentTarget, p, t) }, "\u266a");
+}
+
+async function toggleLyrics(button, p, t) {
+  const row = button.closest("tr");
+  if (row.nextElementSibling?.classList.contains("lyrics")) return row.nextElementSibling.remove();
+  button.classList.add("working");
+  try {
+    const d = await api(`/api/lyrics?id=${encodeURIComponent(p.source_id)}&v=${encodeURIComponent(t.video_id)}`);
+    const where = d.status === "synced" ? "with timestamps" : "plain text";
+    row.after(h("tr", { class: "lyrics" }, h("td", { colspan: "8" },
+      h("div", { class: "muted" }, `${t.artist} — ${t.title} · ${where}`,
+        d.lrclib_id ? h("a", { href: `https://lrclib.net/api/get/${d.lrclib_id}`, target: "_blank", rel: "noopener", title: "the entry these words come from" }, ` \u00b7 lrclib #${d.lrclib_id}`) : null),
+      h("pre", {}, d.text || "The .lrc file is gone — the next lyrics run fetches it again."))));
+  } catch (e) {
+    toast(e.message, "failed");
+  }
+  button.classList.remove("working");
+}
+
 function renderAlbum() {
   const p = currentAlbum;
   const panel = $("#album");
@@ -499,6 +527,7 @@ function renderAlbum() {
           : t.state === "failed" ? h("span", { class: "badge bad", title: t.error || "" }, "failed") : h("span", { class: "badge" }, "pending"),
         t.ext === "m4a" ? h("span", { class: "badge", title: "audio taken from the video stream (copied, not re-encoded)" }, "m4a") : null,
         t.in_source ? null : h("span", { class: "badge", title: "no longer in the source playlist" }, "gone"),
+        lyricsMark(p, t),
         h("button", { class: "quiet small danger-text", type: "button", title: "Delete this track (file is removed)",
           onclick: (e) => deleteTrack(p, t, e.currentTarget) }, "✕"))));
   const skipped = (p.skipped || []).map((s) => h("li", { class: "muted" }, `${s.title} — ${s.reason}`));
@@ -522,6 +551,9 @@ function renderAlbum() {
       h("div", { class: "actions" },
         h("button", { type: "submit" }, "Save changes (rename + retag + trim)"),
         h("button", { class: "quiet", type: "button", onclick: (e) => submit("fetch", { urls: [p.source_url] }, e.currentTarget) }, "Re-check source"),
+        h("button", { class: "quiet", type: "button",
+          title: "Look up the lyrics of every track that has none yet (LRCLIB), as a .lrc file beside it and in its tags.\nShift+click looks up all of them again — lyrics you wrote yourself are kept either way.",
+          onclick: (e) => submit("lyrics", { id: p.source_id, refetch: e.shiftKey }, e.currentTarget) }, "Fetch lyrics"),
         h("button", { class: "danger", type: "button", onclick: (e) => deleteAlbum(p, e.currentTarget) }, "Delete album"),
         gone.length ? h("button", { class: "danger", type: "button", onclick: (e) => pruneAlbum(p, gone, e.currentTarget) }, `Remove ${gone.length} track${gone.length > 1 ? "s" : ""} no longer in the playlist`) : null,
         h("a", { href: p.source_url, target: "_blank", rel: "noopener" }, "open on YouTube"))));

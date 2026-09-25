@@ -217,3 +217,12 @@ td.trim button { padding: .1rem .4rem; }
 td.trim .mb-len { font-size: .72rem; }
 td.trim .mb-len.unusable { text-decoration: line-through; opacity: .6; }
 td.trim input[data-suggested="1"] { border-style: dashed; border-color: var(--accent); }
+
+/* lyrics: the marker in a track row, and the text it opens */
+button.lyr { font-size: 1.05em; line-height: 1; padding: .1rem .35rem; }
+tr.lyrics > td { padding: .2rem .5rem .6rem; }
+tr.lyrics pre {
+  margin: .3rem 0 0; padding: .5rem .6rem; max-height: 16rem; overflow: auto;
+  white-space: pre-wrap; font-size: .85em; line-height: 1.45;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+}
