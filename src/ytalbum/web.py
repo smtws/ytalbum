@@ -37,6 +37,7 @@ from .config import Config
 from .download import COVER_STEM, PLAN_FILE, iter_plans
 from .lyrics import read_sidecar
 from .models import AlbumPlan
+from .plan import album_length_flag
 from .service import Outcome, Service, _inside, channel_base_url
 from .tag import image_mime
 from .titles import natural_key
@@ -281,6 +282,7 @@ class App:
                     "cover": any(album_dir.glob(f"{COVER_STEM}.*")),
                     "mb": bool(plan.mbid) or any(t.mbid for t in plan.tracks),
                     "lyrics": sum(t.lyrics in ("synced", "plain") for t in plan.tracks),
+                    "length": album_length_flag(plan),  # set only when most of the album disagrees
                     "needs_choice": sum(t.error_kind == "no_audio_stream" for t in plan.tracks),
                 }
             )

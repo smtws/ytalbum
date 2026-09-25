@@ -469,6 +469,20 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    song plays — the box scrolls itself, never the page, because `scrollIntoView` would take
    the editor with it (slice 12 learned that the hard way).
 
+18. ✅ Three opinions on how long a song is (2026-09-25). MusicBrainz knows the recording,
+   lrclib answers even when its recording was too far off to take the words from, and the file
+   on disk is measured when it is tagged (`file_length`) — so a disagreement is visible without
+   opening anything. The thresholds come from the library, not from taste: 13 % of 3032
+   comparable tracks are more than 5 s longer than MusicBrainz, so marking *any* mismatch would
+   mark 138 of 245 albums. The track shows the signed gap (amber past 20 s, red below 60 % of
+   the known length — that is not the song), and an album is flagged only when **half** its
+   comparable tracks are off by more than 20 s the same way: 11 albums of 245, a worklist
+   rather than wallpaper. The first one it caught was "Sabaton — Heroes", eleven
+   track-commentary clips of 30–50 s filed as the album, because YouTube's own title
+   ("Heroes (Track Commentary Version)") lost its bracket group to `core()` when the release
+   was matched and MusicBrainz then named it "Heroes". Replaced by the real album, where
+   every track now lands within 3 s.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

@@ -61,10 +61,26 @@ def test_an_album_lrclib_does_not_know_falls_back_to_the_search():
     assert [u.path for u in asked] == ["/api/get", "/api/search"]
 
 
-def test_a_recording_of_another_length_is_refused():
-    # the whole point: a cover or a live version is what a title-only match would attach
+def test_a_recording_of_another_length_is_refused_but_its_length_is_kept():
+    # the whole point: a cover or a live version is what a title-only match would attach.
+    # How long lrclib thinks the song is stays, though — it is the second opinion on a file
+    # that carries an intro, and the only one for tracks MusicBrainz does not know.
     api, _ = responses(search=[{**ROW, "duration": 210.0}])
-    assert api.get("TUNGSTEN", "Lullaby", None, 61.0) is None
+    found = api.get("TUNGSTEN", "Lullaby", None, 61.0)
+    assert found.text is None
+    assert found.status == "none"
+    assert found.length == 210.0
+
+
+def test_the_kept_length_lands_in_the_plan(tmp_path, yt):
+    class Refuses:
+        def get(self, *a):
+            return Lyrics(length=210.0)
+
+    plan, album_dir = album(tmp_path, yt, Refuses())
+    track = plan.tracks[0]
+    assert (track.lyrics, track.lyrics_id, track.lyrics_length) == ("none", None, 210.0)
+    assert read_sidecar(album_dir, track) is None
 
 
 def test_without_a_length_nothing_is_accepted():

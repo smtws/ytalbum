@@ -214,8 +214,10 @@ td.disc { width: 4rem; }
 input.disc { width: 100%; }
 td.trim input { width: 4.6rem; }  /* padding and font stay the base ones, or the row's inputs differ in height */
 td.trim button { padding: .1rem .4rem; }
-td.trim .mb-len { font-size: .72rem; }
-td.trim .mb-len.unusable { text-decoration: line-through; opacity: .6; }
+td.trim .len { font-size: .72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.trim .len.muted { opacity: .55; }
+td.trim .len.warn { color: var(--warn); }
+td.trim .len.bad { color: var(--bad); font-weight: 600; }
 td.trim input[data-suggested="1"] { border-style: dashed; border-color: var(--accent); }
 
 /* lyrics: the marker in a track row, and the text it opens */

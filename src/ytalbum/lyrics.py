@@ -53,6 +53,8 @@ class Lyrics:
     plain: str | None = None
     lrclib_id: int | None = None
     instrumental: bool = False
+    length: float | None = None  # seconds of the recording this came from — a second opinion
+                                 # on how long the song is, kept even when it was refused
 
     @property
     def text(self) -> str | None:
@@ -114,15 +116,17 @@ class Lrclib:
             if found := self._request("get", {**params, "album_name": album}):
                 return _lyrics(found)
         rows = self._request("search", {"artist_name": artist, "track_name": title}) or []
-        fits = [
+        same = [
             row
             for row in rows
-            if isinstance(row.get("duration"), int | float)
-            and abs(row["duration"] - length) <= TOLERANCE
-            and _same_artist(artist, row.get("artistName") or "")
+            if isinstance(row.get("duration"), int | float) and _same_artist(artist, row.get("artistName") or "")
         ]
+        fits = [row for row in same if abs(row["duration"] - length) <= TOLERANCE]
         if not fits:
-            return None
+            # nothing close enough to be this recording — but how long lrclib thinks the song
+            # is, is worth knowing: it is the second opinion on a file that carries an intro
+            near = min(same, key=lambda row: abs(row["duration"] - length), default=None)
+            return Lyrics(length=near["duration"]) if near else None
         best = min(fits, key=lambda row: (not row.get("syncedLyrics"), abs(row["duration"] - length)))
         return _lyrics(best)
 
@@ -187,6 +191,7 @@ def _lyrics(row: dict[str, Any]) -> Lyrics | None:
         plain=row.get("plainLyrics") or None,
         lrclib_id=row.get("id"),
         instrumental=bool(row.get("instrumental")),
+        length=row.get("duration"),
     )
     return found if found.text or found.instrumental else None
 
@@ -247,6 +252,7 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
         return read_sidecar(album_dir, track)  # ask again next time
     track.lyrics = found.status if found else NONE
     track.lyrics_id = found.lrclib_id if found else None
+    track.lyrics_length = found.length if found else None
     if not found or not found.text:
         remove_sidecar(album_dir, track.filename)
         return None

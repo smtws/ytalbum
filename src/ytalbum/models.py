@@ -124,6 +124,8 @@ class PlanTrack:
     duration: float | None = None  # seconds of the video itself (YouTube)
     lyrics: str | None = None  # synced | plain | instrumental | none; None = not looked up yet
     lyrics_id: int | None = None  # the lrclib entry the text came from
+    lyrics_length: float | None = None  # seconds of the recording lrclib matched (or refused on)
+    file_length: float | None = None  # seconds of audio actually on disk, after any trim
 
 
 @dataclass

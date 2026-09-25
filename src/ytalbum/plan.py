@@ -399,6 +399,56 @@ def track_filename(
     return f"{stem}.{ext}"
 
 
+# -- how long the song should be -------------------------------------------------------
+#
+# Three opinions can exist per track: the file on disk, MusicBrainz, and lrclib (which
+# answers even when its recording was too far off to take the lyrics from). Where they
+# disagree badly the track is usually not what it claims to be — a teaser, a commentary
+# clip, or an upload with a label ident in front. Measured over 3032 comparable tracks:
+# 13% are >5s longer than MusicBrainz, so only a wide gap is worth showing (DESIGN.md §9.18).
+
+LENGTH_SLACK = 5.0  # below this nothing is said: masters, fades and count-ins differ
+LENGTH_BIG = 20.0  # a gap worth marking on the track
+LENGTH_STUB = 0.6  # a file this much shorter than the song is not that recording at all
+ALBUM_SHARE = 0.5  # this many of an album's comparable tracks off the same way flags the album
+
+
+def reference_length(track: PlanTrack) -> float | None:
+    """How long the song is according to somebody other than YouTube."""
+    return track.mb_length or track.lyrics_length
+
+
+def effective_length(track: PlanTrack) -> float | None:
+    """How long our audio is: measured when we have measured it, else the video minus the trims."""
+    if track.file_length:
+        return track.file_length
+    if not track.duration:
+        return None
+    return (track.trim_end if track.trim_end else track.duration) - (track.trim_start or 0)
+
+
+def length_gap(track: PlanTrack) -> float | None:
+    """Ours minus theirs, in seconds; None when nobody else has an opinion."""
+    ours, theirs = effective_length(track), reference_length(track)
+    return None if ours is None or not theirs else ours - theirs
+
+
+def album_length_flag(plan: AlbumPlan) -> dict[str, object] | None:
+    """`{way, n, of}` when most of an album disagrees the same way, else None.
+
+    Half an album being wrong is a different fault from one track being wrong: it means the
+    release we matched is not the one we downloaded, or the playlist is not the album at all
+    (a Sabaton "album" of 11 track-commentary clips is what this first caught).
+    """
+    gaps = [g for t in plan.tracks if t.state == "done" and (g := length_gap(t)) is not None]
+    if len(gaps) < 2:
+        return None
+    for way, n in (("short", sum(g < -LENGTH_BIG for g in gaps)), ("long", sum(g > LENGTH_BIG for g in gaps))):
+        if n >= max(2, len(gaps) * ALBUM_SHARE):
+            return {"way": way, "n": n, "of": len(gaps)}
+    return None
+
+
 # -- small helpers -------------------------------------------------------------------
 
 

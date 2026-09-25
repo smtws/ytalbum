@@ -420,3 +420,15 @@ def test_without_a_trim_there_is_no_original_and_the_file_is_served(server):
     album_dir, plan = app.album(app.albums()[0]["id"])
     track = plan.tracks[0]
     assert app.audio_path(plan.source_id, track.video_id, original=True) == album_dir / track.filename
+
+
+def test_the_grid_carries_the_length_flag(server):
+    """The card badge is a count the server works out: the page never opens a file for it."""
+    app, c = server
+    album_dir, plan = app.album(app.albums()[0]["id"])
+    assert app.albums()[0]["length"] is None
+
+    for t in plan.tracks:  # a playlist of teasers: every track far shorter than the song
+        t.file_length, t.mb_length = 40.0, 200.0
+    save_plan(plan, album_dir)
+    assert app.albums()[0]["length"] == {"way": "short", "n": len(plan.tracks), "of": len(plan.tracks)}

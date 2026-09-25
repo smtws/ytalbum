@@ -22,7 +22,7 @@ from .cover import square_if_padded
 from .lyrics import LyricsAPI, read_sidecar, rename_sidecar, update_track
 from .models import AlbumPlan, PlanTrack
 from .plan import refresh_derived, wanted_filename, wanted_folder
-from .tag import image_mime, signature, tag_file
+from .tag import audio_length, image_mime, signature, tag_file
 from .trim import apply as apply_trim
 from .youtube import BOT_CHECK, NoAudioStream, YouTube, is_bot_check
 
@@ -123,8 +123,9 @@ def run(
         final = album_dir / track.filename
 
         if track.state == "done" and final.exists():
+            cut = False
             try:
-                if apply_trim(album_dir, track, final):
+                if cut := apply_trim(album_dir, track, final):
                     track.tagged = None  # the new file needs its tags again
                     if track.lyrics is not None and lyrics is not None:
                         track.lyrics = None  # the file is a different length: match it again
@@ -132,14 +133,17 @@ def run(
             except RuntimeError as e:
                 track.error = str(e)
                 log.warning("%s: %s", track.filename, e)
+            measured = cut or track.file_length is None  # measured once, then only when it changes
+            if measured:
+                track.file_length = audio_length(final)
             looked_up = lyrics is not None and track.lyrics is None
             text = update_track(lyrics, plan, track, album_dir, final) if looked_up else read_sidecar(album_dir, track)
             if track.tagged != signature(plan, track, cover, text):
                 track.tagged = tag_file(final, plan, track, cover, text)
                 save_plan(plan, album_dir)
                 on_track(track, f"lyrics ({track.lyrics})" if looked_up and text else "retagged")
-            elif looked_up:
-                save_plan(plan, album_dir)  # remember that we looked and found nothing
+            elif looked_up or measured:
+                save_plan(plan, album_dir)  # the lookup or the length we just measured
             continue
         if not track.in_source or not download:
             continue  # gone from the playlist, or we are only tidying up files
@@ -148,6 +152,7 @@ def run(
             try:
                 tmp = yt.download_audio(track.video_id, parts, track.audio_choice)
                 text = update_track(lyrics, plan, track, album_dir, tmp) if lyrics else None
+                track.file_length = audio_length(tmp)
                 track.tagged = tag_file(tmp, plan, track, cover, text)
                 os.replace(tmp, final)
                 track.state, track.error, track.error_kind = "done", None, None

@@ -241,7 +241,8 @@ function matchingTracks(a, terms) {
 }
 
 function shownAlbums() {
-  const byArtist = artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums;
+  let byArtist = artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums;
+  if (lengthOnly) byArtist = byArtist.filter((a) => a.length);
   if (!libFilter) return byArtist.map((a) => ({ ...a, matches: null }));
   const terms = fold(libFilter).split(" ").filter(Boolean);
   const out = [];
@@ -252,6 +253,25 @@ function shownAlbums() {
   }
   return out;
 }
+
+let lengthOnly = false;
+
+function renderLengthFilter() {
+  const flagged = (artistFilter ? state.albums.filter((a) => a.albumartist === artistFilter) : state.albums).filter((a) => a.length);
+  const button = $("#length-filter");
+  if (!flagged.length && !lengthOnly) {
+    button.hidden = true;
+    return;
+  }
+  button.hidden = false;
+  button.textContent = lengthOnly ? "⏱ show all albums" : `⏱ ${flagged.length} with odd lengths`;
+  button.setAttribute("aria-pressed", String(lengthOnly));
+}
+
+$("#length-filter").addEventListener("click", () => {
+  lengthOnly = !lengthOnly;
+  renderLibrary();
+});
 
 function showArtist(name) {
   artistFilter = name;
@@ -270,11 +290,13 @@ function renderLibrary() {
     : artistFilter
       ? `${all} albums`
       : state.library || "";
-  $("#empty").textContent = libFilter
-    ? `Nothing in the library matches “${libFilter}”.`
-    : "Nothing here yet. Paste a playlist URL or type an artist above.";
+  $("#empty").textContent = lengthOnly
+    ? "No album here is far off the length its songs are known to have."
+    : libFilter
+      ? `Nothing in the library matches “${libFilter}”.`
+      : "Nothing here yet. Paste a playlist URL or type an artist above.";
   const grid = $("#grid");
-  const signature = JSON.stringify(shownAlbums()) + artistFilter + libFilter + trackIndex.version;
+  const signature = JSON.stringify(shownAlbums()) + artistFilter + libFilter + lengthOnly + trackIndex.version;
   if (signature !== gridShows) {
     // rebuilding throws away the focused card, which would break arrow-key navigation
     const focused = document.activeElement?.closest?.("#grid .card")?.dataset.id;
@@ -286,6 +308,7 @@ function renderLibrary() {
   }
   $("#empty").hidden = shownAlbums().length > 0;
   renderPlayMatches();
+  renderLengthFilter();
   renderRail();
 }
 
@@ -325,6 +348,18 @@ toTop.addEventListener("click", () => {
 });
 addEventListener("scroll", () => { toTop.hidden = scrollY < 600; }, { passive: true });
 
+// Only albums that disagree as a whole get a badge: one odd track is normal, half an album
+// means the release we matched is not the one we have (or the playlist is not the album).
+function lengthBadge(a) {
+  if (!a.length) return null;
+  const short = a.length.way === "short";
+  return h("span", { class: `badge ${short ? "bad" : "warn"}`,
+    title: short
+      ? `${a.length.n} of ${a.length.of} tracks are far shorter than the song is meant to be — previews, commentary clips, or the wrong release matched`
+      : `${a.length.n} of ${a.length.of} tracks run well over the known length — intros to cut, or the wrong release matched` },
+    `\u23f1 ${a.length.n}/${a.length.of} ${short ? "short" : "long"}`);
+}
+
 function card(a) {
   const cover = a.cover
     ? h("img", { class: "cover", src: `/api/cover?id=${encodeURIComponent(a.id)}&t=${a.done}`, alt: "", loading: "lazy" })
@@ -350,7 +385,8 @@ function card(a) {
       h("div", { class: "artist link", role: "button", tabindex: "-1", title: `Show only ${a.albumartist}`,
         onclick: (e) => { e.stopPropagation(); showArtist(a.albumartist); } }, marked(a.albumartist)),
       h("div", { class: "info" }, a.year ? `${a.year} ` : "", status, a.mb ? h("span", { class: "badge mb" }, "MB") : null,
-        a.lyrics ? h("span", { class: "badge", title: `${a.lyrics} of ${a.tracks} tracks have lyrics` }, `\u266a ${a.lyrics}`) : null),
+        a.lyrics ? h("span", { class: "badge", title: `${a.lyrics} of ${a.tracks} tracks have lyrics` }, `\u266a ${a.lyrics}`) : null,
+        lengthBadge(a)),
       songs));
 }
 
@@ -545,11 +581,7 @@ function renderAlbum() {
         h("input", { type: "text", name: "trim_start", value: asTime(t.trim_start), placeholder: "0:00", "aria-label": "cut from the front", size: 5,
           oninput: (e) => suggestEnd(e.currentTarget, t) }),
         h("input", { type: "text", name: "trim_end", value: asTime(t.trim_end), placeholder: "end", "aria-label": "play until", size: 5 }),
-        t.mb_length ? h("span", { class: `muted mb-len${usableLength(t) ? "" : " unusable"}`,
-          title: usableLength(t)
-            ? `MusicBrainz: the song is ${asTime(t.mb_length)} long — used to suggest the end`
-            : `MusicBrainz knows a ${asTime(t.mb_length)} version, but this file is ${asTime(t.duration)} — no suggestion` },
-          asTime(t.mb_length)) : null,
+        lengthChip(t),
         t.channel ? h("button", { class: "quiet small", type: "button", title: `Apply this trim to every track from ${t.channel} in the library`,
           onclick: (e) => trimChannel(t, e.currentTarget) }, "⇉") : null),
       h("td", { class: "src" }, provBadge(t.provenance.title)),
@@ -639,6 +671,27 @@ const fromTime = (text) => {
 // only when the known length actually fits this file: MusicBrainz often has another,
 // longer version of the same song (live, extended), which would suggest past the end
 const usableLength = (t) => t.mb_length && t.duration && t.mb_length < t.duration - 0.5;
+
+// the same numbers as plan.py's LENGTH_* — keep them in step
+const LENGTH = { slack: 5, big: 20, stub: 0.6 };
+const refLength = (t) => t.mb_length || t.lyrics_length || null;
+const ourLength = (t) => t.file_length || (t.duration ? (t.trim_end || t.duration) - (t.trim_start || 0) : null);
+
+// How far our audio is from what everyone else says the song is. Small differences are
+// normal (masters, fades); a big one means an intro to cut, and a file far shorter than the
+// song means this is not the song at all — a teaser or a commentary clip.
+function lengthChip(t) {
+  const ref = refLength(t), ours = ourLength(t);
+  if (!ref || !ours) return null;
+  const gap = ours - ref;
+  const stub = ours < ref * LENGTH.stub;
+  const klass = stub ? "bad" : Math.abs(gap) > LENGTH.big ? "warn" : Math.abs(gap) > LENGTH.slack ? "" : "muted";
+  const sources = [t.mb_length ? `MusicBrainz ${asTime(t.mb_length)}` : null, t.lyrics_length ? `LRCLIB ${asTime(t.lyrics_length)}` : null];
+  const why = stub ? " — far too short to be this song (a teaser or a commentary clip?)"
+    : gap > LENGTH.big ? " — an intro or outro to cut?" : "";
+  return h("span", { class: `len ${klass}`, title: `${sources.filter(Boolean).join(" · ")} · this file ${asTime(ours)}${why}` },
+    Math.round(Math.abs(gap)) === 0 ? "0:00" : `${gap > 0 ? "+" : "−"}${asTime(Math.round(Math.abs(gap)))}`);
+}
 
 function suggestEnd(startInput, track) {
   const end = startInput.closest("tr").querySelector("[name=trim_end]");
