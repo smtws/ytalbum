@@ -7,6 +7,7 @@ from ytalbum.plan import (
     LENGTH_BIG,
     album_length_flag,
     build_plan,
+    drop_placeholder_lengths,
     effective_length,
     is_stub,
     length_gap,
@@ -105,3 +106,18 @@ def test_one_comparable_track_is_never_enough():
     plan = album(34.0, 200.0, mb=200.0)
     plan.tracks[1].mb_length = None
     assert album_length_flag(plan) is None
+
+
+def test_a_length_that_repeats_across_the_album_is_not_per_track_data():
+    """Judas (Deluxe) carries one bulk-imported length, 222.1s, on 23 of its 56 tracks."""
+    plan = album(274.0, 274.0, 274.0, 300.0, mb=222.1)
+    plan.tracks[3].mb_length = 300.0
+    assert drop_placeholder_lengths(plan) == 3
+    assert [t.mb_length for t in plan.tracks] == [None, None, None, 300.0]
+    assert album_length_flag(plan) is None  # nothing left to disagree with
+
+
+def test_two_tracks_of_a_length_are_a_coincidence_and_are_kept():
+    plan = album(223.0, 223.0, 300.0, 300.0, mb=223.0)
+    plan.tracks[2].mb_length = plan.tracks[3].mb_length = 300.0
+    assert drop_placeholder_lengths(plan) == 0

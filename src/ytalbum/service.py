@@ -23,7 +23,7 @@ from .lyrics import Lrclib, LyricsAPI, remove_sidecar
 from .lyrics import default_cache_path as lyrics_cache_path
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
-from .plan import build_plan, drop_album_name, merge_plans, refresh_derived, renumber, wanted_folder
+from .plan import build_plan, drop_album_name, drop_placeholder_lengths, merge_plans, refresh_derived, renumber, wanted_folder
 from .search import SearchResult, search_artist
 from .titles import key as text_key
 from .titles import move_feat, strip_self_feat
@@ -402,6 +402,9 @@ class Service:
                     if t.mb_length and not t.mbid:
                         t.mb_length = None
                 self.log(f"{borrowed} track(s) gave up a length taken from another recording")
+            if repeated := drop_placeholder_lengths(plan):
+                borrowed += repeated  # the album has to be saved either way
+                self.log(f"{repeated} length(s) repeat across the album and say nothing per track")
             for t in plan.tracks:
                 if t.provenance.get("artist") == Provenance.YT_MUSIC and ", " in t.artist:
                     t.artist = t.auto["artist"] = t.artist.split(", ")[0]  # writers and producers
