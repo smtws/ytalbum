@@ -95,6 +95,13 @@ def test_an_instrumental_is_an_answer_not_a_gap():
     assert found.text is None
 
 
+def test_a_track_over_an_hour_skips_the_endpoint_that_would_reject_it():
+    # lrclib: "duration: must be between 1 and 3600" (HTTP 400, measured on a 63-minute track)
+    api, asked = responses(get=ROW, search=[])
+    assert api.get("Spooky Forest Music", "Ghost Glade", "Vol. 4", 3800.0) is None
+    assert [u.path for u in asked] == ["/api/search"]
+
+
 # -- transport ---------------------------------------------------------------------------
 
 
@@ -115,6 +122,21 @@ def test_giving_up_raises_and_never_pretends_there_are_no_lyrics(monkeypatch):
     api = client(lambda request: httpx.Response(503, json={}), retries=1)
     with pytest.raises(LyricsError):
         api.get("TUNGSTEN", "Lullaby", "Tundra", 61.0)
+
+
+def test_a_request_lrclib_refuses_is_an_answer_not_an_error(tmp_path):
+    """A 4xx will not become a 2xx on the next run; raising would retry it for ever."""
+    asked = []
+
+    def handler(request):
+        asked.append(request.url)
+        return httpx.Response(400, json={"message": "duration: must be between 1 and 3600"})
+
+    cache = tmp_path / "lyrics.sqlite3"
+    for _ in range(2):
+        api = Lrclib(cache, httpx.Client(transport=httpx.MockTransport(handler)), min_interval=0)
+        assert api.get("TUNGSTEN", "Lullaby", "Tundra", 61.0) is None
+    assert len(asked) == 2  # get + search in the first run, nothing in the second
 
 
 def test_answers_are_cached_on_disk(tmp_path, monkeypatch):

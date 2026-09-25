@@ -37,6 +37,7 @@ USER_AGENT = "ytalbum/0.1 ( https://github.com/smtws/ytalbum )"
 HIT_TTL = 30 * 24 * 3600
 MISS_TTL = 7 * 24 * 3600
 TOLERANCE = 3.0  # seconds a candidate's length may differ from ours (YouTube pads, we trim)
+MAX_EXACT = 3600.0  # lrclib's /api/get answers "duration: must be between 1 and 3600"
 SUFFIX = ".lrc"
 
 # statuses kept in PlanTrack.lyrics
@@ -107,10 +108,10 @@ class Lrclib:
         """
         if length is None:
             return None
-        params = {"artist_name": artist, "track_name": title, "duration": str(round(length))}
-        if album:
+        if album and length <= MAX_EXACT:
             # the exact endpoint wants lrclib's own album name and ±2s (measured 2026-09-25),
             # so it answers for real albums and never for our compilation names
+            params = {"artist_name": artist, "track_name": title, "duration": str(round(length))}
             if found := self._request("get", {**params, "album_name": album}):
                 return _lyrics(found)
         rows = self._request("search", {"artist_name": artist, "track_name": title}) or []
@@ -147,10 +148,13 @@ class Lrclib:
                     raise LyricsError(f"{path}: HTTP {r.status_code} after {attempt + 1} tries")
                 time.sleep(2**attempt)
                 continue
-            if r.status_code == 404:  # "TrackNotFound": a real answer, worth remembering
+            if 400 <= r.status_code < 500:
+                # "TrackNotFound", or a request lrclib will never accept (a track over an hour):
+                # a real answer either way, and asking again every run would only annoy it
+                log.debug("%s: HTTP %s %s", path, r.status_code, r.text[:120])
                 self._cache_put(key, None, MISS_TTL)
                 return None
-            if r.status_code >= 400:
+            if r.status_code >= 500:
                 raise LyricsError(f"{path}: HTTP {r.status_code}")
             body = r.json()
             self._cache_put(key, body, MISS_TTL if not body else HIT_TTL)

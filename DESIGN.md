@@ -432,7 +432,12 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    is not kept in `.ytalbum.json` (3946 × ~3 KB would land in every `update` and in the track
    index, which is 11 ms today); the plan holds only `lyrics: synced|plain|instrumental|none`
    and the lrclib id, so nothing is ever looked up twice. A front trim shifts the timestamps
-   with the audio, so changing one makes the track be fetched and re-shifted.
+   with the audio, so changing one makes the track be fetched and re-shifted. Two things the
+   first run over the real library taught: lrclib's exact endpoint refuses a duration over
+   3600 s (a 63-minute ambient piece got HTTP 400 on every run), so that request is not made
+   at all, and any 4xx is now remembered as "nothing here" — only 5xx and network errors are
+   worth asking again. Coverage over 3946 tracks: 52 % synced, 15 % plain, 4 % instrumental,
+   29 % nothing; audited against lrclib on 200 matches, none had the wrong artist or song.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

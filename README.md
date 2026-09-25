@@ -358,7 +358,7 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 324 tests, offline, ~12 s
+uv run pytest        # 326 tests, offline, ~12 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/` and mock
