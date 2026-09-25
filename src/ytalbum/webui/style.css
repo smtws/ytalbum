@@ -234,3 +234,5 @@ tr.lyrics .line { padding: .1rem .5rem; border-radius: 5px; font-size: .9em; lin
 tr.lyrics .line.timed { cursor: pointer; display: flex; gap: .6rem; }
 tr.lyrics .line.timed:hover, tr.lyrics .line.timed:focus-visible { background: var(--panel); outline: none; }
 tr.lyrics .line .at { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3.2rem; }
+tr.lyrics .line.now { background: var(--accent); color: var(--accent-ink); }
+tr.lyrics .line.now .at { color: inherit; opacity: .7; }

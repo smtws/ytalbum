@@ -465,7 +465,9 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    seconds of the song could not be reached at all. A track whose file was cut is now played
    from `.originals/` (`/api/audio?o=1`, the file `trim.apply` keeps anyway) and the player
    previews the trim itself, which puts the trim handles, the text fields, the lyric
-   timestamps and the audio on one clock again.
+   timestamps and the audio on one clock again. The line being sung is then marked as the
+   song plays — the box scrolls itself, never the page, because `scrollIntoView` would take
+   the editor with it (slice 12 learned that the hard way).
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

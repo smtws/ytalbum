@@ -481,7 +481,7 @@ async function toggleLyrics(button, p, t) {
   try {
     const d = await api(`/api/lyrics?id=${encodeURIComponent(p.source_id)}&v=${encodeURIComponent(t.video_id)}`);
     const where = d.status === "synced" ? "with timestamps" : "plain text";
-    row.after(h("tr", { class: "lyrics" }, h("td", { colspan: "8" },
+    row.after(h("tr", { class: "lyrics", "data-id": t.video_id }, h("td", { colspan: "8" },
       h("div", { class: "muted" }, `${t.artist} — ${t.title} · ${where}`,
         d.lrclib_id ? h("a", { href: `https://lrclib.net/api/get/${d.lrclib_id}`, target: "_blank", rel: "noopener", title: "the entry these words come from" }, ` \u00b7 lrclib #${d.lrclib_id}`) : null),
       d.text ? lyricsLines(p, t, d.text) : h("pre", {}, "The .lrc file is gone — the next lyrics run fetches it again."))));
@@ -501,7 +501,7 @@ function lyricsLines(p, t, text) {
     if (!m) return h("div", { class: "line" }, line || "\u00a0");
     const at = Number(m[1]) * 60 + parseFloat(m[2].replace(":", "."));
     const jump = () => seekLyric(p, t, at);
-    return h("div", { class: "line timed", role: "button", tabindex: "0", title: `Play from ${fmt(at)}`,
+    return h("div", { class: "line timed", role: "button", tabindex: "0", title: `Play from ${fmt(at)}`, "data-at": at,
       onclick: jump, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jump(); } } },
       h("span", { class: "at" }, fmt(at)), m[3] || "\u00a0");
   });
@@ -992,7 +992,28 @@ audio.addEventListener("timeupdate", () => {
   $("#p-dur").textContent = fmt(audio.duration);
   if (document.activeElement !== $("#p-pos") && audio.duration) $("#p-pos").value = Math.round((audio.currentTime / audio.duration) * 1000);
 });
+audio.addEventListener("timeupdate", markLyricLine);
 audio.addEventListener("error", () => { if (audio.src) toast("This track cannot be played (moved or deleted?)", "failed"); });
+
+// The line being sung is marked while the song plays: seeing it drift away from what you
+// hear is the quickest way to tell that a file carries an intro the timestamps know nothing of.
+function markLyricLine() {
+  const t = queue[qi];
+  for (const row of document.querySelectorAll("#album tr.lyrics")) {
+    const playing = t && isPlaying(currentAlbum?.source_id, row.dataset.id);
+    const at = audio.currentTime - (t?.trimmed ? t.start || 0 : 0);
+    let active = null;
+    if (playing) for (const line of row.querySelectorAll(".line.timed")) if (Number(line.dataset.at) <= at) active = line;
+    const before = row.querySelector(".line.now");
+    if (before === active) continue;
+    before?.classList.remove("now");
+    if (!active) continue;
+    active.classList.add("now");
+    // scrollIntoView would take the page with it and pull the editor out of view
+    const box = row.querySelector(".lines");
+    box.scrollTop = active.offsetTop - box.clientHeight / 2 + active.offsetHeight / 2;
+  }
+}
 $("#p-pos").addEventListener("change", (e) => { if (audio.duration) audio.currentTime = (e.target.value / 1000) * audio.duration; });
 $("#p-play").addEventListener("click", () => (audio.paused ? audio.play() : audio.pause()));
 $("#p-prev").addEventListener("click", () => (audio.currentTime > 3 ? (audio.currentTime = 0) : playIndex(qi - 1)));

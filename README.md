@@ -98,7 +98,7 @@ idle minutes.
 | | |
 |---|---|
 | ![Album view](docs/screenshots/album.jpg) | ![Channel listing](docs/screenshots/search.jpg) |
-| **Album view:** cover, editable fields, where each value came from, position, disc and trim points, per-track delete. ♪ marks a track whose lyrics are here — click it to read them (from the `.lrc` beside the file), and click a line to play from there. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
+| **Album view:** cover, editable fields, where each value came from, position, disc and trim points, per-track delete. ♪ marks a track whose lyrics are here — click it to read them (from the `.lrc` beside the file), and click a line to play from there — while the song plays, the line being sung is marked, so a file that carries an intro shows itself by drifting. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
 | ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
 | **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library:** one artist's albums, narrowed further by the filter with the matches highlighted, ▶ plays all of them, and "check for new albums" asks YouTube for that artist alone. |
 
