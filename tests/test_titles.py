@@ -8,6 +8,7 @@ from ytalbum.plan import build_plan, drop_album_name
 from ytalbum.titles import (
     channel_artist,
     clean_title,
+    drop_label,
     move_feat,
     parse_video_title,
     split_feat,
@@ -381,3 +382,17 @@ def test_no_empty_brackets_are_left_behind():
 )
 def test_a_pipe_only_ends_the_title_outside_brackets(raw, cleaned):
     assert clean_title(raw) == cleaned
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [
+        ("Viva Vendetta | Napalm Records", "Viva Vendetta"),
+        ("Judas (Deluxe Version) | Napalm Records", "Judas (Deluxe Version)"),
+        ("Legends", "Legends"),  # nothing to drop
+        ("Der Derwisch (Saltatio Mortis | Reading, Yoga & RPG Music)", "Der Derwisch (Saltatio Mortis | Reading, Yoga & RPG Music)"),
+        ("Album - Chronik | Some Media", "Album - Chronik"),
+    ],
+)
+def test_drop_label(raw, want):
+    assert drop_label(raw) == want

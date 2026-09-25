@@ -59,6 +59,11 @@ def before_label(text: str) -> str:
     return text
 
 
+def drop_label(text: str) -> str:
+    """'Viva Vendetta | Napalm Records' -> 'Viva Vendetta': the uploader's label is not a name."""
+    return _drop_publisher(before_label(clean_text(text))).strip(" -–—~")
+
+
 def clean_text(text: str) -> str:
     """NFC, and without the invisible marks YouTube titles carry ('In The Nursery \u200e- …')."""
     return _INVISIBLE.sub("", unicodedata.normalize("NFC", text))

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ytalbum.models import AlbumPlan, Collection, Kind, Provenance
+from ytalbum.models import AlbumPlan, Collection, Entry, Kind, Provenance
 from ytalbum.plan import build_plan, classify, compilation_album_title, safe_name, track_filename
 from ytalbum.youtube import entry_from_info
 
@@ -193,3 +193,23 @@ def test_the_uploader_names_the_album_when_nothing_else_does():
     assert plan.albumartist == "Saltatio Mortis"
     assert {t.artist for t in plan.tracks} == {"Saltatio Mortis"}
     assert plan.folder.startswith("Saltatio Mortis/")
+
+
+def test_a_single_from_a_label_channel_is_not_named_after_the_label():
+    """The video's own title is the album name here, and on a label channel it ends in one."""
+    raw = "LORD OF THE LOST - Viva Vendetta (Official Video) | Napalm Records"
+    collection = Collection(
+        source_url="https://www.youtube.com/watch?v=" + "a" * 11,
+        source_id="a" * 11,
+        is_playlist=False,
+        title=raw,
+        channel="Napalm Records",
+        thumbnail=None,
+        fetched_at="2026-09-25T00:00:00",
+        entries=[Entry(video_id="a" * 11, position=1, title=raw, channel="Napalm Records", duration=471)],
+    )
+    plan = build_plan(collection)
+    assert plan.kind == Kind.SINGLE
+    assert plan.album == "Viva Vendetta"
+    assert plan.albumartist == "LORD OF THE LOST"  # the spelling is MusicBrainz' job, later
+    assert plan.tracks[0].title == "Viva Vendetta"

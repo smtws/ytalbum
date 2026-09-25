@@ -10,6 +10,7 @@ from .models import AlbumPlan, Collection, Entry, Kind, PlanTrack, Provenance
 from .titles import (
     NOISE_WORDS,
     channel_artist,
+    drop_label,
     key,
     move_feat,
     parse_video_title,
@@ -347,7 +348,7 @@ def _edited(obj: AlbumPlan | PlanTrack, name: str) -> bool:
 
 def compilation_album_title(playlist_title: str, curator: str) -> str:
     """'My Dark Lullabies Vol.1 - Heavy Sleeping' -> 'Vol. 1 - Heavy Sleeping' (DESIGN.md §2.1)."""
-    title = playlist_title.strip()
+    title = drop_label(playlist_title)
     words = re.findall(r"\w+", curator)
     if words:  # match the curator's words with any spacing/punctuation between them
         prefix = r"\W*".join(map(re.escape, words))
@@ -360,8 +361,12 @@ ALBUM_NOISE = NOISE_WORDS | {"full", "album", "complete", "playlist", "stream"}
 
 
 def _playlist_album_title(playlist_title: str, artist: str) -> str:
-    """'SABATON - Legends (Full Album)' -> 'Legends'; 'Album - Chronik' -> 'Chronik'."""
-    title = playlist_title.strip().removeprefix("Album - ")
+    """'SABATON - Legends (Full Album)' -> 'Legends'; 'Album - Chronik' -> 'Chronik'.
+
+    A single takes its album name from the video's own title, which on a label channel ends
+    in "| Napalm Records" — the same tail `clean_title` drops from a track title.
+    """
+    title = drop_label(playlist_title).removeprefix("Album - ")
     for sep in (" - ", " – ", ": "):
         head, found, rest = title.partition(sep)
         if found and _key(head) == _key(artist):
