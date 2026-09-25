@@ -25,11 +25,15 @@ uncovered a rule that was wrong for a whole class of videos, not just that one.
 
 ```sh
 uv sync
-uv run pytest        # ~240 tests, a few seconds
+uv run pytest        # ~380 tests, a few seconds
 ```
 
 They answer from responses recorded in `design-fixtures/`, so they need **no network, no
 credentials and no ffmpeg**, and they keep working when YouTube starts refusing requests.
+
+The suite covers the pieces; [docs/qa-catalog.md](docs/qa-catalog.md) is a hand-run checklist
+for the seams between them — trimming a track that has lyrics, pruning an album whose order you
+set yourself — with each case marked read-only, reversible, or destructive.
 
 ## Keeping yt-dlp current
 
