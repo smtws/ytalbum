@@ -436,7 +436,11 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    recording has none (16 of 18 entries for one Feuerschwanz song are such stubs), so an entry
    without words never ends the search; and when our own title says "(instrumental)" the sung
    version's words are refused however well the lengths agree, because an instrumental cut is
-   exactly as long as the sung one and only the title can tell them apart. A trim changes the file's length, so the
+   exactly as long as the sung one and only the title can tell them apart. The marker is read
+   from the **track** title alone: an album called "(Instrumental)" claims something about
+   every track on it, and such records do turn up with a sung intro or outro, while a track
+   title is written per recording. It costs nothing here either — every instrumental track in
+   the library carries the word itself, so the album name would reach none of them. A trim changes the file's length, so the
    track is matched again afterwards — but its timestamps are never moved: the match was
    gated on *this* file's length, so the recording that matched is the audio in front of us.
    (Shifting them by the trim, as the first version did, moved them a second time.) Two things the
