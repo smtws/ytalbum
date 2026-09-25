@@ -36,7 +36,7 @@ empty and can be deleted at any point.
 export QA=/tmp/ytalbum-qa
 mkdir -p "$QA"
 
-# seed it — about nine tracks, each specimen chosen below
+# seed it — about nine tracks; S9 and S10 are fetched later, by B8 and D3 alone
 ytalbum fetch --library "$QA" 'https://www.youtube.com/watch?v=___ci9kmRc4'   # S1
 ytalbum fetch --library "$QA" 'https://www.youtube.com/watch?v=ITVwzDlOg3M'   # S2
 ytalbum fetch --library "$QA" 'https://www.youtube.com/playlist?list=PLfX9CI0JhSo6PJ4yWuk2Cn5HfvRwmOMrV'  # S3
@@ -69,6 +69,8 @@ low. For a case that must reach the live service (J7–J9, I3), force a cold sta
 | S6 | Lord of the Lost — *Judas*, the **audio** release: 56 tracks, 24 of them exactly 223 s | `playlist?list=OLAK5uy_kvKX_bTPTXGRmCQy3wcwy0UD2By9j5y2w` |
 | S7 | Visions of Atlantis — *Delta*: MusicBrainz credits the release "Visions **Of** Atlantis" while the artist is "Visions of Atlantis" | `playlist?list=OLAK5uy_kOH7P46M_xmvvnVSUPNiMTvaivBBjn9vk` |
 | S8 | Feuerschwanz — *Blöde Frage, Saufgelage* (on *Best Of*): lrclib holds 18 entries for it, 16 of them wordless stubs, one synced (#1948185) at 213 s. Used only as a **query**, never fetched | `playlist?list=OLAK5uy_lZouiZ8ft8t-95Br3K3al8ttP_N5d2hyk` |
+| S9 | DOMINUM — *The Dead Don't Die*, 246 s: a second video **uploaded by the same channel as S1** (Napalm Records), carrying the same label ident at the front. Fetched only for B8 | `watch?v=dGO_sx4By28` |
+| S10 | *Viva Vendetta*, 230 s — the **sung** album recording as its own audio upload, against MusicBrainz' 229.8 s. The canonical counterpart to S1's 471 s film. Fetched only for D3 | `watch?v=Z2UO4FsFGFM` |
 
 Prefix each with `https://www.youtube.com/`.
 
@@ -165,11 +167,12 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: `plan.trimmed`; duration
 
 - [ ] **B8 · M★** — one trim for a whole channel
-  - do: press ⇉ on a track whose uploader appears in several scratch albums (S1 and S2 are both
-    *Lord Of The Lost*)
-  - expect: every track from that uploader is trimmed, each keeping its own original
-  - invariant: albums not involved are untouched
-  - evidence: the job log; per-album plans
+  - do: fetch S9, then set a front trim on S1 and press ⇉
+  - expect: S9 is trimmed to the same points, in its own album, keeping its own original
+  - invariant: the rule keys on the **uploader**, not the artist — S1 and S9 are different
+    bands sharing one label channel, while S2 is the same band on its own channel and must
+    **not** be touched
+  - evidence: all three plans' `trim_start`/`trim_end`; the job log
 
 ---
 
@@ -250,11 +253,13 @@ is working on the same library — nothing locks them against each other (G5).
     trim can lengthen them. Only replacing those files clears that badge
   - evidence: `/api/state` for the album; the chip's class in the row
 
-- [ ] **D3 · D★** — replace video edits with the audio release
-  - do: in the scratch library, delete S1 and fetch S2 in its place
-  - expect: the gap collapses and the badge disappears
-  - invariant: deleting an album takes its sidecars and originals with it
-  - evidence: per-track gaps
+- [ ] **D3 · D★** — replace a video edit with the canonical audio
+  - do: in the scratch library, delete S1 (471 s of film around the song) and fetch S10, the
+    same recording as an audio upload
+  - expect: the gap against MusicBrainz collapses from +241 s to about 0, and the chip clears
+  - invariant: it must be the **same song**, not another variant — S2 is the instrumental and
+    would prove nothing about replacing an edit with its release
+  - evidence: `length_gap` before and after; `mb_length` unchanged at 229.8 s
   - class: destructive because it deletes an album, even a scratch one
 
 - [ ] **D4 · R★** — an album nobody has a length for
@@ -414,10 +419,14 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: the banner
 
 - [ ] **H6 · R★** — media keys with an unsaved trim
-  - do: set an end mark without saving, then press the media key for the next track
-  - expect: next/previous work, and the unsaved mark is neither saved nor silently lost
-  - invariant: an unsaved mark is neither written nor silently discarded
-  - evidence: `playerctl status`; the plan is unchanged
+  - do: set an end mark without saving, press the media key for the next track, then for the
+    previous one; afterwards press ▶ on the album card to start it afresh
+  - expect (specified from the code, confirm it holds): going next and back **keeps** the mark,
+    because the queue holds it; playing the album afresh rebuilds the queue from the plan and
+    the mark is gone. A reload loses it too
+  - invariant: nothing reaches the disk without *save trim* — in every one of those paths the
+    plan is byte-identical
+  - evidence: the end handle after each step; `sha1sum` of `.ytalbum.json` throughout
 
 ---
 
