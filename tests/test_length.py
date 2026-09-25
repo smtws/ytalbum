@@ -105,3 +105,16 @@ def test_one_comparable_track_is_never_enough():
     plan = album(34.0, 200.0, mb=200.0)
     plan.tracks[1].mb_length = None
     assert album_length_flag(plan) is None
+
+
+def test_renaming_a_track_gives_up_the_length_that_came_with_its_recording():
+    """Otherwise the pair breaks and `repair` drops the length later, seemingly by itself."""
+    from ytalbum.service import apply_user_edits
+
+    plan = album(471.0, 200.0, mb=229.8)
+    for t in plan.tracks:
+        t.mbid = f"rec-{t.number}"
+    apply_user_edits(plan, {"tracks": [{"video_id": plan.tracks[0].video_id, "title": "Viva Vendetta (video version)"}]})
+
+    assert (plan.tracks[0].mbid, plan.tracks[0].mb_length) == (None, None)
+    assert (plan.tracks[1].mbid, plan.tracks[1].mb_length) == ("rec-2", 229.8)  # untouched

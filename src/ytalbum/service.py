@@ -571,7 +571,11 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
             if isinstance(value, str) and value.strip() and value.strip() != getattr(t, name):
                 setattr(t, name, value.strip())
                 t.provenance[name] = Provenance.USER
-                t.mbid = None if name == "title" else t.mbid
+                if name == "title":
+                    # this is no longer the recording MusicBrainz matched, and neither is its
+                    # length: the two belong together, and a length that outlives its recording
+                    # is a false reference that `repair` would later drop on its own
+                    t.mbid = t.mb_length = None
     if discs_changed or order_changed:
         renumber_discs(plan)  # sorts by what was asked for, then counts each disc from 1
     if order_changed:
