@@ -433,18 +433,29 @@ def length_gap(track: PlanTrack) -> float | None:
     return None if ours is None or not theirs else ours - theirs
 
 
-def album_length_flag(plan: AlbumPlan) -> dict[str, object] | None:
-    """`{way, n, of}` when most of an album disagrees the same way, else None.
+def is_stub(track: PlanTrack) -> bool:
+    """A file far shorter than the song: a snippet, a teaser, or a match that is plain wrong."""
+    ours, theirs = effective_length(track), reference_length(track)
+    return bool(ours and theirs and ours < theirs * LENGTH_STUB)
 
-    Half an album being wrong is a different fault from one track being wrong: it means the
-    release we matched is not the one we downloaded, or the playlist is not the album at all
-    (a Sabaton "album" of 11 track-commentary clips is what this first caught).
+
+def album_length_flag(plan: AlbumPlan) -> dict[str, object] | None:
+    """`{way, n, of}` when an album is worth looking at, else None.
+
+    Two faults, two messages. A *stub* is strong on its own — 8 of 3946 tracks are one, and
+    each turned out to be a snippet, a radio edit or a wrong recording. A whole album being
+    off the same way means the release we matched is not the one we downloaded (a Sabaton
+    "album" of 11 track-commentary clips is what this first caught), and that needs more than
+    two tracks to say: at two, a compilation where only four tracks can be compared at all
+    would be flagged for a pair of long folk songs.
     """
     gaps = [g for t in plan.tracks if t.state == "done" and (g := length_gap(t)) is not None]
     if len(gaps) < 2:
         return None
+    if stubs := sum(is_stub(t) for t in plan.tracks if t.state == "done"):
+        return {"way": "stub", "n": stubs, "of": len(gaps)}
     for way, n in (("short", sum(g < -LENGTH_BIG for g in gaps)), ("long", sum(g > LENGTH_BIG for g in gaps))):
-        if n >= max(2, len(gaps) * ALBUM_SHARE):
+        if n >= max(3, len(gaps) * ALBUM_SHARE):
             return {"way": way, "n": n, "of": len(gaps)}
     return None
 

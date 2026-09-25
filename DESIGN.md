@@ -481,7 +481,24 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    track-commentary clips of 30–50 s filed as the album, because YouTube's own title
    ("Heroes (Track Commentary Version)") lost its bracket group to `core()` when the release
    was matched and MusicBrainz then named it "Heroes". Replaced by the real album, where
-   every track now lands within 3 s.
+   every track now lands within 3 s. Two thresholds were corrected once the library answered:
+   a *stub* (a file under 60 % of the known length) flags an album on its own, because only 8
+   of 3946 tracks are one and every one was a snippet, a radio edit or a wrong recording;
+   while a whole-album drift needs **three** tracks, not two — at two, a volume where only
+   four tracks can be compared at all was flagged for a pair of long folk songs.
+
+19. ✅ A bracket group can say the recordings are different ones (2026-09-25). `core()` strips
+   bracket groups before comparing titles, which is right for "(Deluxe Edition)" and wrong for
+   "(Instrumental)": the first names the same recordings, the second does not. Measured on 35
+   library albums against their real YouTube titles: 5 had an edition marker MusicBrainz
+   lacked (correctly dropped), 1 a version marker — "OPVS NOIR Vol. 1 (Instrumental)", filed
+   as the ordinary album. A release candidate is now refused unless its version markers match
+   ours; re-fetched, that album did not merely keep its name, it matched the *right*
+   MusicBrainz release. The same measurement found the companion fault: a track whose
+   recording was refused ("(Live)", a cover) still kept that recording's length, so 55 tracks
+   carried a length they never had and 21 of them were marked by the new chip — a live cut
+   against its studio version reads as two minutes off. `mb_length` is now only written when
+   the recording is accepted, and `repair` gives up the ones already stored.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

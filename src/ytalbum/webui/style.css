@@ -61,7 +61,10 @@ h2 { font-size: 1rem; margin: .25rem 0 .75rem; }
 .cover.none { display: grid; place-items: center; font-size: 2rem; color: var(--muted); }
 .card .meta { padding: .5rem .6rem .6rem; }
 .card .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card .artist, .card .info { font-size: .85rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .artist { font-size: .85rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the badges wrap instead of being cut off: a card can carry tracks, MB, lyrics and a length */
+.card .info { font-size: .85rem; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: .2rem; }
+.card .info .badge { margin-left: 0; }
 .badge { display: inline-block; font-size: .72rem; padding: .05rem .4rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); margin-left: .25rem; }
 .badge.mb, .badge.user { border-color: var(--accent); color: var(--accent); }
 .badge.ok { border-color: var(--ok); color: var(--ok); }

@@ -431,4 +431,4 @@ def test_the_grid_carries_the_length_flag(server):
     for t in plan.tracks:  # a playlist of teasers: every track far shorter than the song
         t.file_length, t.mb_length = 40.0, 200.0
     save_plan(plan, album_dir)
-    assert app.albums()[0]["length"] == {"way": "short", "n": len(plan.tracks), "of": len(plan.tracks)}
+    assert app.albums()[0]["length"] == {"way": "stub", "n": len(plan.tracks), "of": len(plan.tracks)}

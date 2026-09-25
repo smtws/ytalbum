@@ -14,11 +14,14 @@ from ytalbum.enrich import (
     credited,
     enrich,
     enrich_release,
+    enrich_track,
     feat_text,
     kept_suffixes,
     pick_recording,
+    release_candidates,
     split_lookup,
     uploader_stood_in,
+    version_markers,
 )
 from ytalbum.mb import MusicBrainz, MusicBrainzError, phrase
 from ytalbum.models import Collection, Kind, PlanTrack, Provenance
@@ -341,3 +344,65 @@ def test_the_release_and_its_tracks_get_the_artists_own_spelling():
     assert plan.albumartist == "Visions of Atlantis"
     assert {t.artist for t in plan.tracks} == {"Visions of Atlantis"}
     assert plan.provenance["albumartist"] == Provenance.MB
+
+
+# -- a bracket group can say the recordings are different ones ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("title", "markers"),
+    [
+        ("OPVS NOIR Vol. 1 (Instrumental)", {"instrumental"}),
+        ("Heroes (Track Commentary Version)", {"commentary"}),
+        ("Louder Than Hell (Live in Hamburg)", {"live"}),
+        ("Swan Songs (Deluxe Edition)", set()),  # an edition holds the same recordings
+        ("Nimmermehr (Tour Edition)", set()),
+        ("Temple of the Torn (Collector's Cut)", set()),
+        ("Alive", set()),  # not a marker: it must be a word of its own, in brackets
+        ("Wildlive", set()),
+    ],
+)
+def test_version_markers_are_told_from_edition_markers(title, markers):
+    assert version_markers(title) == markers
+
+
+def release_named(title, n=13):
+    return {"id": "rel", "title": title, "track-count": n, "status": "Official",
+            "artist-credit": [{"name": "Sabaton", "artist": {"name": "Sabaton"}}], "score": 100}
+
+
+def test_a_release_of_other_recordings_is_not_our_album():
+    """The Sabaton case: 11 commentary clips took the name of the album they talk about."""
+    plan = plan_for("vol1_collection.json")
+    plan.albumartist, plan.album = "Sabaton", "Heroes (Track Commentary Version)"
+    assert release_candidates(plan, [release_named("Heroes")]) == []
+    assert release_candidates(plan, [release_named("Heroes (Track Commentary Version)")])
+
+
+def test_an_edition_still_matches_the_plain_release():
+    plan = plan_for("vol1_collection.json")
+    plan.albumartist, plan.album = "Sabaton", "Heroes (Deluxe Edition)"
+    assert release_candidates(plan, [release_named("Heroes")])
+
+
+def test_a_studio_release_is_not_offered_for_a_live_upload():
+    plan = plan_for("vol1_collection.json")
+    plan.albumartist, plan.album = "Sabaton", "Heroes (Live in Prague)"
+    assert release_candidates(plan, [release_named("Heroes")]) == []
+
+
+def test_a_rejected_recording_leaves_no_length_behind():
+    """`mb_length` is the length of the recording we accepted, or nothing at all."""
+    t = PlanTrack(video_id="a" * 11, number=1, artist="Feuerschwanz", title="Ketzerei (Summer Breeze 2016)",
+                  filename="", provenance={})
+
+    class OneRecording:
+        def search_recordings(self, artist, title):
+            return [{"id": "rec-1", "title": "Ketzerei", "length": 215500, "score": 100,
+                     "artist-credit": [{"name": "Feuerschwanz", "artist": {"name": "Feuerschwanz"}}]}]
+
+    assert enrich_track(t, OneRecording()) is True
+    assert t.artist == "Feuerschwanz"  # the artist is confirmed
+    assert t.title == "Ketzerei (Summer Breeze 2016)"  # our title stands
+    assert t.mbid is None
+    assert t.mb_length is None

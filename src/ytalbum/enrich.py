@@ -30,6 +30,17 @@ MIN_TRACK_MATCH = 0.8
 RELEASE_LOOKUPS = 3  # candidates to open per album (each is one request)
 
 _GROUP = re.compile(r"\s*[(\[]([^()\[\]]*)[)\]]")
+# Bracket groups that say the recordings themselves are different ones. An edition marker
+# ("Deluxe Edition", "Tour Edition", "Collector's Cut") names the same songs and MusicBrainz
+# is right to drop it; these do not. Measured on 35 library albums: 5 carried an edition
+# marker YouTube had and MusicBrainz lacked, 1 a version marker — "OPVS NOIR Vol. 1
+# (Instrumental)", which had been filed as the ordinary album (DESIGN.md §9.19).
+VERSION_MARKERS = (
+    "instrumental", "instrumentals", "karaoke", "acoustic", "unplugged", "live", "demo", "demos",
+    "commentary", "remix", "remixes", "a cappella", "acapella", "orchestral", "symphonic",
+    "radio edit", "sped up", "slowed", "reprise", "rehearsal", "backing track",
+)
+_MARKER = re.compile(r"\b(" + "|".join(VERSION_MARKERS) + r")\b", re.I)
 _FEAT = re.compile(r"\b(?:feat\.?|ft\.?|featuring)\s", re.I)
 
 
@@ -68,6 +79,11 @@ def kept_suffixes(ours: str, theirs: str, albums: list[str] = ()) -> str:
             continue
         kept.append(g)
     return "".join(f" {g}" for g in kept)
+
+
+def version_markers(title: str) -> set[str]:
+    """What a title's bracket groups say this release *is*: {'instrumental'}, {'live'}, …"""
+    return {m.lower() for group in _GROUP.findall(title) for m in _MARKER.findall(group)}
 
 
 def credited(entry: dict[str, Any]) -> str:
@@ -163,16 +179,17 @@ def enrich_track(t: PlanTrack, mb: MusicBrainzAPI) -> bool:
         title += "".join(f" {g}" for g in re.findall(r"\([^)]*feat[^)]*\)", title_source, re.I))
     artist, title = move_feat(credit_phrase(ac), title)  # "A feat. B" - "Song" -> "A" - "Song feat. B"
     _set(t, "artist", artist)
-    if length := rec.get("length"):
-        t.mb_length = round(length / 1000, 1)  # lets the UI suggest where the song ends
     if extra:
         # "(Live)", "(Behind The Scenes Documentary)": the artist is confirmed, but this is
-        # not that recording - keep our title, attach no recording id
+        # not that recording - keep our title, attach no recording id, and take no length
+        # from it either (a live cut measured against the studio one reads as 2 minutes off)
         t.title = t.auto["title"] = title
         t.provenance["title"] = Provenance.YT_TITLE
     else:
         _set(t, "title", title)
         t.mbid = rec["id"]
+        if length := rec.get("length"):
+            t.mb_length = round(length / 1000, 1)  # lets the UI suggest where the song ends
     return True
 
 
@@ -189,6 +206,7 @@ def release_candidates(plan: AlbumPlan, releases: list[dict[str, Any]]) -> list[
         r
         for r in releases
         if key(core(r.get("title", ""))) == key(core(plan.album))
+        and version_markers(r.get("title", "")) == version_markers(plan.album)
         and artist_matches(plan.albumartist, r.get("artist-credit", []))
         and abs(int(r.get("track-count") or 0) - n) <= 1
     ]

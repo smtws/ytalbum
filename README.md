@@ -28,6 +28,9 @@ Comes with a command line and a small web app for the library.
   re-encodes it.
 - **It tags everything**, embeds the cover and files it as
   `Album artist/Album/Album artist - Album - 07 - [Track artist - ]Title.opus`.
+- **An edition is not a version.** "(Deluxe Edition)" names the same recordings and
+  MusicBrainz' spelling wins; "(Instrumental)", "(Live)" or "(Track Commentary Version)" do
+  not, and an album keeps them rather than being filed as the record it only resembles.
 - **It tells you when a track is not the length it should be.** MusicBrainz and LRCLIB both
   know how long a song is; where the file disagrees you see by how much, and an album whose
   tracks are mostly wrong is marked in the library — that is how a Sabaton "album" turned out
@@ -104,7 +107,7 @@ idle minutes.
 | ![Album view](docs/screenshots/album.jpg) | ![Channel listing](docs/screenshots/search.jpg) |
 | **Album view:** cover, editable fields, where each value came from, position, disc and trim points, per-track delete. The trim column says how far the file is from the length MusicBrainz and LRCLIB know — amber for a wide gap, red when it is far too short to be that song at all. ♪ marks a track whose lyrics are here — click it to read them (from the `.lrc` beside the file), and click a line to play from there — while the song plays, the line being sung is marked, so a file that carries an intro shows itself by drifting. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
 | ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
-| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library:** one artist's albums, narrowed further by the filter with the matches highlighted, ▶ plays all of them, and "check for new albums" asks YouTube for that artist alone. |
+| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library:** one artist's albums, narrowed further by the filter with the matches highlighted, ▶ plays all of them, and "check for new albums" asks YouTube for that artist alone. ♪ counts the tracks whose lyrics are here; ⏱ marks an album that is not the length it should be. |
 
 The compilations throughout these screenshots are
 [**My Dark Lullabies**](https://www.youtube.com/@MyDarkLullabies) — *"a curated collection

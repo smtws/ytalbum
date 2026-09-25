@@ -3,7 +3,15 @@
 import pytest
 from test_incremental import vol1
 
-from ytalbum.plan import LENGTH_BIG, album_length_flag, build_plan, effective_length, length_gap, reference_length
+from ytalbum.plan import (
+    LENGTH_BIG,
+    album_length_flag,
+    build_plan,
+    effective_length,
+    is_stub,
+    length_gap,
+    reference_length,
+)
 
 
 def album(*lengths, mb=None, done=True):
@@ -45,10 +53,29 @@ def test_nobody_else_has_an_opinion():
     assert album_length_flag(album(180.0, 190.0)) is None
 
 
-def test_an_album_of_teasers_is_flagged_as_short():
+def test_an_album_of_teasers_is_flagged_as_clips():
     # what this first caught: a Sabaton "album" of eleven track-commentary clips
     plan = album(34.0, 44.0, 39.0, 50.0, mb=200.0)
-    assert album_length_flag(plan) == {"way": "short", "n": 4, "of": 4}
+    assert album_length_flag(plan) == {"way": "stub", "n": 4, "of": 4}
+
+
+def test_one_track_far_under_the_known_length_is_enough():
+    """8 tracks of 3946 are one, and each was a snippet, a radio edit or a wrong match."""
+    plan = album(78.0, 200.0, 200.0, 200.0, mb=198.0)
+    assert album_length_flag(plan) == {"way": "stub", "n": 1, "of": 4}
+    assert is_stub(plan.tracks[0]) and not is_stub(plan.tracks[1])
+
+
+def test_a_short_album_that_is_not_made_of_clips():
+    # 40s under a 200s song is wrong, but it is still most of the song
+    plan = album(160.0, 158.0, 155.0, 200.0, mb=200.0)
+    assert album_length_flag(plan) == {"way": "short", "n": 3, "of": 4}
+
+
+def test_two_long_tracks_are_not_enough_to_damn_an_album():
+    """A volume where only four tracks can be compared kept being flagged for two long ones."""
+    plan = album(230.0, 230.0, 200.0, 200.0, mb=200.0)
+    assert album_length_flag(plan) is None
 
 
 def test_an_album_of_padded_uploads_is_flagged_as_long():

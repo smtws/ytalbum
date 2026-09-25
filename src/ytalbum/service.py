@@ -394,6 +394,14 @@ class Service:
                 self.log(f"{len(plan.tracks) - len(unique)} duplicate track(s) removed from the album")
                 plan.tracks = unique
                 renumber(plan)
+            # a length belongs to the recording it was read from; tracks whose recording was
+            # refused ("(Live)", a cover) kept one anyway and read as minutes off (fixed 2026-09-25)
+            borrowed = sum(bool(t.mb_length and not t.mbid) for t in plan.tracks)
+            if borrowed:
+                for t in plan.tracks:
+                    if t.mb_length and not t.mbid:
+                        t.mb_length = None
+                self.log(f"{borrowed} track(s) gave up a length taken from another recording")
             for t in plan.tracks:
                 if t.provenance.get("artist") == Provenance.YT_MUSIC and ", " in t.artist:
                     t.artist = t.auto["artist"] = t.artist.split(", ")[0]  # writers and producers
@@ -415,7 +423,7 @@ class Service:
             # a plan can be right while the folder is not: the album artist was unified
             # earlier without moving anything (fixed 2026-09-24, but the folders remain)
             misplaced = album_dir != self.library / wanted_folder(plan)
-            if not misplaced and before == (plan.albumartist, [(t.artist, t.title) for t in plan.tracks], len(plan.tracks)):
+            if not misplaced and not borrowed and before == (plan.albumartist, [(t.artist, t.title) for t in plan.tracks], len(plan.tracks)):
                 continue
             self.log(f"=== {plan.albumartist} — {plan.album}")
             save_plan(plan, album_dir)

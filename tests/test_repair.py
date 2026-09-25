@@ -156,3 +156,18 @@ def test_a_spelling_the_user_chose_beats_musicbrainz(tmp_path, opus_template):
 def test_without_either_the_case_rule_still_decides(tmp_path, opus_template):
     names = [("SCHANDMAUL", Provenance.YT_TITLE), ("Schandmaul", Provenance.YT_MUSIC)]
     assert harmonised(tmp_path, opus_template, names, own=("SCHANDMAUL", Provenance.YT_TITLE)) == "Schandmaul"
+
+
+def test_a_length_read_from_another_recording_is_given_up(tmp_path, opus_template):
+    """A live cut kept the studio recording's length, which reads as minutes off."""
+
+    def borrow(plan):
+        plan.tracks[0].mb_length, plan.tracks[0].mbid = 215.5, None  # "(Summer Breeze 2016)"
+        plan.tracks[1].mb_length, plan.tracks[1].mbid = 208.2, "rec-1"  # this one really matched
+
+    tmp_path, plan = library_with(tmp_path, opus_template, borrow)
+    service(tmp_path, opus_template).repair()
+
+    saved = load_plan(tmp_path / plan.folder)
+    assert saved.tracks[0].mb_length is None
+    assert saved.tracks[1].mb_length == 208.2  # the accepted one keeps it

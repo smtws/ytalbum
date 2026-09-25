@@ -352,12 +352,14 @@ addEventListener("scroll", () => { toTop.hidden = scrollY < 600; }, { passive: t
 // means the release we matched is not the one we have (or the playlist is not the album).
 function lengthBadge(a) {
   if (!a.length) return null;
-  const short = a.length.way === "short";
-  return h("span", { class: `badge ${short ? "bad" : "warn"}`,
-    title: short
-      ? `${a.length.n} of ${a.length.of} tracks are far shorter than the song is meant to be — previews, commentary clips, or the wrong release matched`
-      : `${a.length.n} of ${a.length.of} tracks run well over the known length — intros to cut, or the wrong release matched` },
-    `\u23f1 ${a.length.n}/${a.length.of} ${short ? "short" : "long"}`);
+  const { way, n, of } = a.length;
+  const text = { stub: `⏱ ${n} clip${n > 1 ? "s" : ""}`, short: `⏱ ${n}/${of} short`, long: `⏱ ${n}/${of} long` }[way];
+  const title = {
+    stub: `${n} track${n > 1 ? "s are" : " is"} far shorter than the song — a snippet, a radio edit, or the wrong recording matched`,
+    short: `${n} of ${of} tracks fall well under the known length — previews, or the wrong release matched`,
+    long: `${n} of ${of} tracks run well over the known length — intros to cut, or the wrong release matched`,
+  }[way];
+  return h("span", { class: `badge ${way === "long" ? "warn" : "bad"}`, title }, text);
 }
 
 function card(a) {
