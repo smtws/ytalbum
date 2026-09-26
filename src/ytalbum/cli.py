@@ -82,8 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     sd = sub.add_parser("service", help="run the web UI on demand via systemd (user level)")
     sd.add_argument("action", choices=("install", "uninstall", "status", "restart"))
     sd.add_argument("--force", action="store_true", help="restart even while a job is running")
-    sd.add_argument("--port", type=int, default=8765)
-    sd.add_argument("--idle-exit", type=int, default=900, metavar="SECONDS")
+    sd.add_argument("--port", type=int, default=None, help="install: the port to listen on (default 8765)")
+    sd.add_argument("--idle-exit", type=int, default=None, metavar="SECONDS",
+                    help="install: stop the service after this long without requests or jobs (default 900)")
 
     ap = sub.add_parser("app", help="desktop launcher with its own window, not another browser window")
     ap.add_argument("action", choices=("install", "uninstall", "status"))
@@ -262,11 +263,19 @@ def _prune(args: argparse.Namespace, cfg: config_mod.Config) -> int:
 def _systemd(args: argparse.Namespace, cfg: config_mod.Config) -> int:
     from . import systemd
 
+    given = [flag for flag, value in (("--port", args.port), ("--idle-exit", args.idle_exit)) if value is not None]
+    if args.action != "install" and given:
+        # they describe the units, which only `install` writes — silently doing nothing with them
+        # is how you come to believe the service moved to another port
+        print(f"{' and '.join(given)} only mean something for 'install': they are written into the units. "
+              f"The running service's port is the installed one — 'ytalbum service status' shows it.", file=sys.stderr)
+        return 2
+    port, idle_exit = args.port or 8765, args.idle_exit or 900
     try:
         if args.action == "install":
-            for line in systemd.install(cfg, args.port, args.idle_exit):
+            for line in systemd.install(cfg, port, idle_exit):
                 print(line)
-            print(f"ready: open http://localhost:{args.port}/ — the web UI starts on demand and stops after {args.idle_exit}s idle")
+            print(f"ready: open http://localhost:{port}/ — the web UI starts on demand and stops after {idle_exit}s idle")
         elif args.action == "uninstall":
             for line in systemd.uninstall():
                 print(line)

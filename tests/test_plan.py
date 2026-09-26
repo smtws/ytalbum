@@ -195,6 +195,33 @@ def test_the_uploader_names_the_album_when_nothing_else_does():
     assert plan.folder.startswith("Saltatio Mortis/")
 
 
+def single(raw: str, channel: str, duration: int = 200):
+    return Collection(
+        source_url="https://www.youtube.com/watch?v=" + "a" * 11,
+        source_id="a" * 11,
+        is_playlist=False,
+        title=raw,
+        channel=channel,
+        thumbnail=None,
+        fetched_at="2026-09-25T00:00:00",
+        entries=[Entry(video_id="a" * 11, position=1, title=raw, channel=channel, duration=duration)],
+    )
+
+
+def test_a_singles_album_name_gets_the_same_hygiene_as_its_title():
+    """The album read 'The Dead Don't Die (feat. @xxFEUERSCHWANZxx)' while the track read it clean."""
+    plan = build_plan(single("DOMINUM - The Dead Don't Die (feat. @xxFEUERSCHWANZxx)", "DOMINUM"))
+    assert plan.kind == Kind.SINGLE
+    assert "@" not in plan.album
+    assert "@" not in plan.folder  # and the folder is named after it
+    assert plan.album == plan.tracks[0].title  # a single's album is its song
+
+
+def test_a_singles_album_name_loses_the_noise_bracket_too():
+    plan = build_plan(single("DOMINUM - Deathmetal Jumpscare (Official Video)", "DOMINUM"))
+    assert plan.album == "Deathmetal Jumpscare"
+
+
 def test_a_single_from_a_label_channel_is_not_named_after_the_label():
     """The video's own title is the album name here, and on a label channel it ends in one."""
     raw = "LORD OF THE LOST - Viva Vendetta (Official Video) | Napalm Records"

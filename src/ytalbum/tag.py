@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from mutagen import MutagenError
 from mutagen.flac import Picture
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.oggopus import OggOpus
@@ -31,8 +32,8 @@ def audio_length(path: Path) -> float | None:
     try:
         audio = MP4(path) if path.suffix.lower() in (".m4a", ".mp4") else OggOpus(path)
         return float(audio.info.length)
-    except Exception:  # not readable, not audio: callers treat an unknown length as "no match"
-        return None
+    except (MutagenError, OSError):  # not readable, not audio: an unknown length means "no match"
+        return None  # and nothing else is swallowed: a bug here must not read as a missing file
 
 
 def tagged_lyrics(path: Path) -> str | None:
@@ -41,7 +42,7 @@ def tagged_lyrics(path: Path) -> str | None:
         if path.suffix.lower() in (".m4a", ".mp4"):
             return ((MP4(path).tags or {}).get("\xa9lyr") or [None])[0]
         return ((OggOpus(path).tags or {}).get("lyrics") or [None])[0]
-    except Exception:
+    except (MutagenError, OSError):  # same rule as `audio_length`: only a file we cannot read
         return None
 
 

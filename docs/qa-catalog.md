@@ -4,7 +4,7 @@ Hand-run checks from a user's point of view, aimed at the places where **feature
 trimming a track that has lyrics, renaming one that MusicBrainz matched, pruning an album whose
 order you set yourself. The pytest suite covers the pieces; this covers the seams.
 
-Derived from the code as of 2026-09-26 (379 tests, 246 albums in the reference library).
+Derived from the code as of 2026-09-26 (379 tests at the time of writing, 458 after the fixes it produced; 246 albums in the reference library).
 
 ## How to use it
 
@@ -444,7 +444,7 @@ is working on the same library — nothing locks them against each other (G5).
   - **result 2026-09-26:** deferred to the M pass — needs a write job in flight
   - **result 2026-09-26:** pass — a search answered on the read lane in 20.7 s while the fetch kept running
 
-- [ ] **G4 · R** — restart while busy
+- [x] **G4 · R** — restart while busy *(limitation of the case, not of the software)*
   - do: with a scratch job running, `ytalbum service restart`
   - expect: it refuses and says why, unless given `--force`
   - invariant: the refusal is the default; `--force` is the deliberate way past it
@@ -452,6 +452,11 @@ is working on the same library — nothing locks them against each other (G5).
   - note: needs an M job in flight to be meaningful; the restart itself writes nothing
   - **result 2026-09-26:** deferred to the M pass — the refusal only triggers on a *write* job; a search deliberately does not block a restart
   - **result 2026-09-26:** **not executable under the run's constraints** — the refusal only triggers on a *write* job, and the busy check always targets the installed service on the real library, which is read-only here. Observation: `service restart --port N` accepts the flag and ignores it; `restart()` calls `busy()` with no port
+  - **recorded as a limitation of the case (P6):** it cannot be run without a write job on the
+    *installed* service, i.e. against the real library, which every pass of this catalog forbids.
+    The refusal itself is covered offline (`test_restart_refuses_while_a_job_runs`). The flag
+    observation was a real fault and is fixed: `--port` and `--idle-exit` only describe the units,
+    so outside `install` they are now refused with a message and exit 2 instead of being ignored
 
 - [ ] **G5 · M★⚠** — CLI and server writing at once
   - do: start a fetch on the scratch server, then run `ytalbum lyrics --library "$QA"` in a
@@ -655,12 +660,21 @@ the metadata, and the lyrics matcher can be asked directly.
 | Date | Cases run | Passed | Failed | Notes |
 |---|---|---|---|---|
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
+| 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
+| 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | re-runs after the fixes, `1e3da95..456d83e` | B6, B7, B8, I4, E5, E6, C5, C6, C7, E7, J5, J8, J9 + the split/merge round trip | all pass | Nine commits: trim integrity and its two mirrors, the lyrics ownership contract and its follow-up, order and prune, artist unification, repair's one-pass decision, the consensus length reference. 458 tests at the end, from 379. |
 
 ### Evidence methods that lied
 
-Three of my own checks produced a false result before the software did anything wrong. Use
-these forms:
+Five of my own checks produced a false result, or none at all, before the software did anything
+wrong. Use these forms:
 
+- **A scripted doc edit that matches nothing succeeds.** `str.replace` returns the string
+  unchanged when its target is absent, so a heredoc that rewrites a paragraph, writes the file and
+  exits 0 can leave the document untouched — twice here, both times because an earlier edit in the
+  same session had already changed the text being matched. Two commits therefore claimed
+  documentation that was never written. Assert the target appears exactly once before writing, and
+  grep for the new text afterwards.
 - **The specimens carry the scars of earlier cases.** Case C4 renamed a track to *Sex is Muss
   (QA rename)*, which silently took it out of lrclib's reach — so a later lyrics case run against
   that specimen reported a FAIL that was nothing to do with the code under test. Check a specimen's

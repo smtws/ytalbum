@@ -10,6 +10,7 @@ from .models import AlbumPlan, Collection, Entry, Kind, PlanTrack, Provenance
 from .titles import (
     NOISE_WORDS,
     channel_artist,
+    clean_title,
     drop_label,
     key,
     move_feat,
@@ -363,10 +364,12 @@ ALBUM_NOISE = NOISE_WORDS | {"full", "album", "complete", "playlist", "stream"}
 def _playlist_album_title(playlist_title: str, artist: str) -> str:
     """'SABATON - Legends (Full Album)' -> 'Legends'; 'Album - Chronik' -> 'Chronik'.
 
-    A single takes its album name from the video's own title, which on a label channel ends
-    in "| Napalm Records" — the same tail `clean_title` drops from a track title.
+    A single takes its album name from the video's own title, so it gets the same hygiene the
+    track title gets — `clean_title`, which drops the label tail, the noise brackets and the `@`
+    of a handle. Without it the album read *The Dead Don't Die (feat. @xxFEUERSCHWANZxx)* while
+    its one track read the same name without the `@`, and the folder carried the handle.
     """
-    title = drop_label(playlist_title).removeprefix("Album - ")
+    title = clean_title(playlist_title).removeprefix("Album - ")
     for sep in (" - ", " – ", ": "):
         head, found, rest = title.partition(sep)
         if found and _key(head) == _key(artist):

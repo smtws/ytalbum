@@ -170,7 +170,7 @@ Library/
 | `ytalbum service install\|status\|restart\|uninstall` | Run the web UI on demand via a systemd **user** socket: the first request starts it, it stops itself when idle. `restart` refuses while a job runs unless given `--force`. |
 | `ytalbum app install\|status\|uninstall` | Desktop launcher (Linux) that opens the UI in a window of its own instead of another browser window. `--remove-profile` on uninstall also drops the app's browser profile. |
 | `ytalbum repair` | One-off, offline: performer-only artist names, guest credits moved into the title, the album's own name removed from its track titles, one spelling per artist, duplicate tracks removed — renames and retags, no downloads. |
-| `ytalbum lyrics` | Fetch the lyrics of every track that has none yet — a `.lrc` beside the file plus a `LYRICS` tag. Nothing is downloaded and nothing is asked twice. `--artist NAME` limits it, `--refetch` looks every track up again (lyrics you wrote yourself are always kept). |
+| `ytalbum lyrics` | Fetch the lyrics of every track that has none yet — a `.lrc` beside the file plus a `LYRICS` tag. Nothing is downloaded and nothing is asked twice. `--artist NAME` limits it, `--refetch` looks every track up again (lyrics you wrote yourself are always kept). The first `--refetch` over a library written before this version also asks LRCLIB what each stored entry says, to tell your edits from its own words — one extra request per track whose lyrics are no longer in the month-long cache, and never again afterwards. |
 | `ytalbum config` | Show or change settings: `--library`, `--cookies-from-browser BROWSER[:PROFILE]`, `--cookies-file FILE`, `--lyrics on\|off`. |
 
 Exit codes: `0` fine, `1` something failed, `2` wrong usage, `3` YouTube is blocking
@@ -293,6 +293,9 @@ while searches and previews run alongside.
 - **Multi-disc albums** are supported — file names carry `1-07`, `discnumber` is tagged, and
   a split survives updates. The album view has a disc column after the title, on
   every album, and each disc is numbered from 1 again when you change it.
+- **A lyrics lookup can also change what the ⏱ marks.** LRCLIB answers how long a song is even
+  when its words were refused, so a track MusicBrainz does not know gains a length reference from
+  the lyrics pass — and an album can pick up or lose its length flag because of it.
 - **Lyrics are found for about three tracks in four**, and only half of those carry
   timestamps — LRCLIB is contributed by its users, so folk, ritual and instrumental music is
   where the gaps are. A lyric is only accepted when its length is within three seconds of
@@ -371,7 +374,7 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 338 tests, offline, ~14 s
+uv run pytest        # 458 tests, offline, ~17 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/` and mock

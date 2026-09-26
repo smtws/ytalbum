@@ -11,7 +11,7 @@ from mutagen.oggopus import OggOpus
 
 from ytalbum.download import cover_candidates
 from ytalbum.models import AlbumPlan, Kind, PlanTrack
-from ytalbum.tag import image_mime, tag_file
+from ytalbum.tag import audio_length, image_mime, tag_file, tagged_lyrics
 from ytalbum.youtube import best_thumbnail, entry_from_info
 
 JPEG = b"\xff\xd8\xff\xe0" + b"\0" * 32
@@ -184,3 +184,31 @@ def test_filenames_follow_the_format(tmp_path):
     plan = make_plan()
     plan.tracks[0].ext = "m4a"
     assert wanted_filename(plan, plan.tracks[0]).endswith(" - A1 - T1.m4a")
+
+
+# -- an unknown length means an unreadable file, not any error at all ---------------------
+
+
+def test_an_unreadable_file_has_no_length(tmp_path):
+    broken = tmp_path / "not-audio.opus"
+    broken.write_bytes(b"this is not an Ogg stream")
+    assert audio_length(broken) is None
+    assert audio_length(tmp_path / "missing.opus") is None  # not there at all
+    assert tagged_lyrics(broken) is None
+
+
+@pytest.mark.parametrize("reader", ["MP4", "OggOpus"])
+def test_a_bug_in_the_reader_is_not_read_as_a_missing_length(monkeypatch, tmp_path, reader):
+    """Swallowing everything would turn a programming error into "this file has no length"."""
+    import ytalbum.tag as tag
+
+    def explode(*a, **k):
+        raise TypeError("a bug, not a broken file")
+
+    monkeypatch.setattr(tag, reader, explode)
+    path = tmp_path / ("x.m4a" if reader == "MP4" else "x.opus")
+    path.write_bytes(b"\0" * 64)
+    with pytest.raises(TypeError):
+        audio_length(path)
+    with pytest.raises(TypeError):
+        tagged_lyrics(path)

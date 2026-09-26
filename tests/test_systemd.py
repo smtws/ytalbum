@@ -60,3 +60,36 @@ def test_installed_port_is_read_from_the_unit(tmp_path, monkeypatch):
     (tmp_path / "systemd" / "user").mkdir(parents=True)
     (tmp_path / "systemd" / "user" / "ytalbum.socket").write_text("[Socket]\nListenStream=127.0.0.1:9123\n")
     assert sd.installed_port() == 9123
+
+
+# -- flags that only describe the units ---------------------------------------------------
+
+
+@pytest.mark.parametrize("action", ["restart", "status", "uninstall"])
+@pytest.mark.parametrize("flag", [["--port", "9000"], ["--idle-exit", "60"]])
+def test_a_flag_that_cannot_work_is_refused_not_ignored(action, flag, capsys, monkeypatch, tmp_path):
+    """`service restart --port 9000` did nothing with the port — and said nothing either."""
+    import ytalbum.cli as cli
+    import ytalbum.systemd as sd
+
+    monkeypatch.setattr(sd, "restart", lambda force=False: pytest.fail("must not act"))
+    monkeypatch.setattr(sd, "uninstall", lambda: pytest.fail("must not act"))
+    monkeypatch.setattr(sd, "status", lambda: pytest.fail("must not act"))
+    assert cli.main(["service", action, *flag]) == 2
+    message = capsys.readouterr().err
+    assert flag[0] in message and "install" in message
+
+
+def test_install_still_takes_both_flags(monkeypatch, capsys, tmp_path):
+    import ytalbum.cli as cli
+    import ytalbum.systemd as sd
+
+    seen = {}
+    monkeypatch.setattr(sd, "install", lambda cfg, port, idle: seen.update(port=port, idle=idle) or [])
+    monkeypatch.setattr(sd, "status", lambda: "")
+    assert cli.main(["service", "install", "--port", "9000", "--idle-exit", "60"]) == 0
+    assert seen == {"port": 9000, "idle": 60}
+
+    seen.clear()
+    assert cli.main(["service", "install"]) == 0
+    assert seen == {"port": 8765, "idle": 900}  # the documented defaults, unchanged

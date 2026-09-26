@@ -648,6 +648,10 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    2 albums cannot be computed from the cache, because their searches were made with the marker and
    returned nothing — those are the ones that *gain* a reference, and only a lyrics pass will say
    what it is.
+   Accepted, not overlooked: the marker is matched as a bare word too, so a song whose real title
+   contains "instrumental" is asked for under a shorter name. The same set already decided whether
+   a track's *words* are refused, so the two behaviours stay identical rather than drifting apart —
+   which is the property worth keeping here.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
