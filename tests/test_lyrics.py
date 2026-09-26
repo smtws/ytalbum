@@ -575,6 +575,47 @@ def test_refetch_brings_a_deleted_lyric_back(tmp_path, opus_template):
     assert read_sidecar(album_dir, saved.tracks[0]) == SYNCED_LRC
 
 
+def test_deleting_your_own_lyric_is_the_way_back_to_lrclibs(tmp_path, opus_template):
+    """The mark protects a file; once the file is gone there is nothing left to protect."""
+    album_dir = library(tmp_path, opus_template)
+    api = FakeLyrics()
+    service(tmp_path, api).fetch_lyrics()
+    plan = load_plan(album_dir)
+    mine = plan.tracks[0]
+    sidecar_path(album_dir, mine.filename).write_text("my own words\n")
+    save_plan(plan, album_dir)
+
+    service(tmp_path, api).fetch_lyrics(refetch=True)  # recognised as the user's and kept
+    saved = load_plan(album_dir)
+    assert saved.provenance is not None and saved.tracks[0].provenance["lyrics"] == Provenance.USER
+
+    sidecar_path(album_dir, saved.tracks[0].filename).unlink()  # the user gives their version up
+    service(tmp_path, api).fetch_lyrics(refetch=True)
+    saved = load_plan(album_dir)
+    assert "lyrics" not in saved.tracks[0].provenance  # nothing of theirs is left to protect
+    assert read_sidecar(album_dir, saved.tracks[0]) == SYNCED_LRC  # lrclib's words are back
+    assert saved.tracks[0].lyrics == "synced"
+
+
+def test_deleting_your_own_lyric_without_a_refetch_leaves_it_deleted(tmp_path, opus_template):
+    """Deleting a file is not a request for another one — only --refetch asks again."""
+    album_dir = library(tmp_path, opus_template)
+    api = FakeLyrics()
+    service(tmp_path, api).fetch_lyrics()
+    plan = load_plan(album_dir)
+    track = plan.tracks[0]
+    sidecar_path(album_dir, track.filename).write_text("my own words\n")
+    track.provenance["lyrics"] = Provenance.USER
+    save_plan(plan, album_dir)
+    sidecar_path(album_dir, track.filename).unlink()
+
+    service(tmp_path, api).fetch_lyrics()
+    saved = load_plan(album_dir)
+    assert saved.tracks[0].lyrics == "none"
+    assert not sidecar_path(album_dir, saved.tracks[0].filename).exists()
+    assert "lyrics" not in saved.tracks[0].provenance
+
+
 def test_lyrics_switched_off_does_nothing(tmp_path, opus_template):
     album_dir = library(tmp_path, opus_template)
     api = FakeLyrics()

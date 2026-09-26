@@ -19,7 +19,7 @@ from typing import Any
 from .config import Config
 from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, relocate, run, save_plan
 from .enrich import enrich
-from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost
+from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost, user_owns
 from .lyrics import default_cache_path as lyrics_cache_path
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
@@ -365,7 +365,7 @@ class Service:
             self.check()
             if refetch:
                 for t in plan.tracks:
-                    if t.provenance.get("lyrics") != Provenance.USER:
+                    if not user_owns(album_dir, t):  # a mark with no file behind it protects nothing
                         t.lyrics = None  # lyrics_id stays: it is how a sidecar is recognised as ours
             # a deleted sidecar is work too: the pass has to drop the tag and the status with it
             todo = [t for t in plan.tracks if t.state == "done" and (t.lyrics is None or sidecar_lost(album_dir, t))]

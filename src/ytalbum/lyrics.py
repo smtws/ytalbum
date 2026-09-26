@@ -283,6 +283,11 @@ def sidecar_lost(album_dir: Path, track: PlanTrack) -> bool:
     return track.lyrics in (SYNCED, PLAIN) and not sidecar_path(album_dir, track.filename).exists()
 
 
+def user_owns(album_dir: Path, track: PlanTrack) -> bool:
+    """Whether these are the user's own words — only for as long as the file holding them is."""
+    return track.provenance.get("lyrics") == Provenance.USER and sidecar_path(album_dir, track.filename).exists()
+
+
 def write_sidecar(album_dir: Path, track: PlanTrack, text: str) -> Path:
     """Write the words and remember the bytes: anything else there later is the user's."""
     path = sidecar_path(album_dir, track.filename)
@@ -317,10 +322,17 @@ def reconcile(album_dir: Path, track: PlanTrack, audio: Path) -> tuple[str | Non
     """
     text = read_sidecar(album_dir, track)
     if text is None:
+        changed = False
+        if track.provenance.get("lyrics") == Provenance.USER:
+            # The file the mark protected is gone, so there is nothing of the user's left to
+            # protect — and keeping the mark would make "delete your file and --refetch" (the
+            # way back to lrclib's version, README) skip the track for ever.
+            del track.provenance["lyrics"]
+            changed = True
         if track.lyrics in (SYNCED, PLAIN):  # the words are not on the disk any more
             track.lyrics, track.lyrics_sha = NONE, None
-            return None, True
-        return None, False
+            changed = True
+        return None, changed
     if track.provenance.get("lyrics") == Provenance.USER:
         return text, False
     if track.lyrics_sha is None:  # written before we kept a record
@@ -409,4 +421,4 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     return text
 
 
-__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "read_sidecar", "reconcile", "sidecar_lost", "update_track"]
+__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "read_sidecar", "reconcile", "sidecar_lost", "update_track", "user_owns"]
