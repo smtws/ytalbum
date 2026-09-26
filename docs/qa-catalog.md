@@ -1039,6 +1039,40 @@ events for the rest.
 practice (the drag still ran, because the moves arrive on `document` anyway) but it was an exception
 escaping an event handler, so the call is now guarded.
 
+## R. The page's logic under test (P19, DESIGN §9.33)
+
+Added 2026-09-26 with the harness. The split moves what `app.js` computes into `webui/logic.mjs`,
+which the page imports as a module; these cases are about the page still working, since the tests
+themselves are the harness's own evidence.
+
+- [x] **R1 · R** — the page loads as a module and says nothing
+  - do: open a scratch server's page after the split
+  - expect: no console error, the library renders
+  - evidence: the console; the snapshot
+  - **result:** pass — `<script type="module" src="/app.js?v=fbce9445f5">`, 0 console errors, the
+    grid and header render as before. `/logic.mjs` is served as `text/javascript`
+
+- [x] **R2 · R** — everything the split touched still behaves
+  - do: open an album; filter; drag a row to the top; open a lyrics panel; play and set a mark
+  - expect: unchanged behaviour
+  - evidence: the DOM after each
+  - **result:** pass — 7 rows with their ⏱ chips (−1:56, −2:27, −2:19, +1:07); the filter narrowed 1
+    album on "muss"; the drag put the last row first and renumbered 1…7 live; the lyrics panel read
+    *with timestamps · lrclib #…* with Edit / Look up again / Not these words and 53 timed lines;
+    a mark taken at 42.37 s was written as `0:42.7` and the target line read "now 3:45.2 · keeping
+    3:02.3 · MusicBrainz 3:17 · −14.7s"
+
+- [x] **R3 · R** — H4 again: the cache chain survives a second file
+  - do: check the headers, then change `logic.mjs` and re-read the hashes
+  - expect: the index is never cached, the assets are hashed, and a change to the module moves
+    `app.js`'s URL too
+  - invariant: a module's import URL is inside the module, where the index's rewriting never
+    reached — a new `logic.mjs` behind a cached `app.js` would never be asked for
+  - evidence: `Cache-Control`; the hashes before and after
+  - **result:** pass — index `no-store`, `app.js` and `logic.mjs` `no-cache`; the served `app.js`
+    imports `./logic.mjs?v=d65eda03de`; touching the module took it to `05175a0217` **and** `app.js`
+    from `fbce9445f5` to `a3cd1aeba3`, then both restored
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -1046,6 +1080,7 @@ escaping an event handler, so the call is now guarded.
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the R cases (the page's logic under test) | 3 | 0 | After the module split: the page loads and behaves, and the cache chain covers the imported file. 23 JS tests, 518 from `uv run pytest`. |
 | 2026-09-26 | the Q cases (reordering by dragging) | 5 | 1 defect found in the package under test (Q2), fixed | Two-disc split; drags driven with real and synthetic pointer events. |
 | 2026-09-26 | the P cases (the ⏱ mark leads to a cut) | 5 | 0 | D2's specimen taken from +1:07 to +0.3s by ear and by target, in one pass through the page. |
 | 2026-09-26 | the O cases (opening an album asks the disk) | 4 | 0 | Sidecars changed with a shell, on a 56-track album; the open costs about 2 ms more than before. |

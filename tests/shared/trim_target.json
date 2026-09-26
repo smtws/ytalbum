@@ -1,0 +1,17 @@
+{
+  "_comment": "One table, two runners: tests/js/length.test.mjs checks logic.mjs's trimTarget and tests/test_length.py checks plan.trimmed_gap against it. A rule that changes on one side fails on the other.",
+  "cases": [
+    {"why": "nothing cut yet: a minute too long", "duration": 300.0, "mb": 240.0, "start": null, "end": null, "kept": 300.0, "gap": 60.0},
+    {"why": "a minute off the front lands on the reference", "duration": 300.0, "mb": 240.0, "start": 60.0, "end": null, "kept": 240.0, "gap": 0.0},
+    {"why": "the same from the back", "duration": 300.0, "mb": 240.0, "start": null, "end": 240.0, "kept": 240.0, "gap": 0.0},
+    {"why": "half from each end", "duration": 300.0, "mb": 240.0, "start": 30.0, "end": 270.0, "kept": 240.0, "gap": 0.0},
+    {"why": "cut to a snippet", "duration": 300.0, "mb": 240.0, "start": 10.0, "end": 100.0, "kept": 90.0, "gap": -150.0},
+    {"why": "marks at the very ends are no cut at all", "duration": 300.0, "mb": 240.0, "start": 0.0, "end": 300.0, "kept": 300.0, "gap": 60.0},
+    {"why": "an end mark past the video counts as the end", "duration": 300.0, "mb": 240.0, "start": null, "end": 999.0, "kept": 300.0, "gap": 60.0},
+    {"why": "MusicBrainz outranks lrclib", "duration": 300.0, "mb": 240.0, "lrclib": 200.0, "start": 60.0, "end": null, "kept": 240.0, "gap": 0.0},
+    {"why": "lrclib answers when MusicBrainz has nothing", "duration": 300.0, "lrclib": 200.0, "start": 60.0, "end": null, "kept": 240.0, "gap": 40.0},
+    {"why": "nobody knows the song: a length, no verdict", "duration": 300.0, "start": 60.0, "end": null, "kept": 240.0, "gap": null},
+    {"why": "no duration, no target", "start": 10.0, "end": 20.0, "kept": null, "gap": null},
+    {"why": "the marks count in the video, not in a file already cut", "duration": 300.0, "mb": 240.0, "file_length": 120.0, "start": 60.0, "end": null, "kept": 240.0, "gap": 0.0}
+  ]
+}

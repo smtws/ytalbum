@@ -49,6 +49,7 @@ log = logging.getLogger(__name__)
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/logic.mjs": ("logic.mjs", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/sw.js": ("sw.js", "text/javascript; charset=utf-8"),
     "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
@@ -629,9 +630,17 @@ def _asset(name: str) -> bytes:
     return resources.files("ytalbum").joinpath("webui", name).read_bytes()
 
 
+# what a served module imports: the URL is versioned when the module is served, and the importer's
+# own hash covers it too — otherwise a new logic.mjs would sit behind a cached app.js that never
+# asks for it again
+IMPORTS = {"app.js": ("logic.mjs",)}
+
+
 def _asset_hash(name: str) -> str:
-    """Changes with the file, so a new version is never served from a browser cache."""
-    return hashlib.sha1(_asset(name)).hexdigest()[:10]
+    """Changes with the file and with anything it imports, so a new version is never served
+    from a browser cache."""
+    data = _asset(name) + b"".join(_asset(dep) for dep in IMPORTS.get(name, ()))
+    return hashlib.sha1(data).hexdigest()[:10]
 
 
 def _append(job: Job, line: str) -> None:
@@ -673,6 +682,8 @@ class _Handler(BaseHTTPRequestHandler):
             if url.path == "/":  # never cached itself; points at content-hashed assets
                 for asset in ("app.js", "style.css"):
                     body = body.replace(f'"/{asset}"'.encode(), f'"/{asset}?v={_asset_hash(asset)}"'.encode())
+            for dep in IMPORTS.get(name, ()):  # the same for what that asset imports
+                body = body.replace(f'"./{dep}"'.encode(), f'"./{dep}?v={_asset_hash(dep)}"'.encode())
             return self._send(HTTPStatus.OK, body, ctype, cache=url.path != "/")
         match url.path:
             case "/api/state":

@@ -151,7 +151,7 @@ rewritten in the DOM before the shot, as the previous one did: nothing is saved,
 directory does not belong in a public README. The first capture found the invisible reset badge
 (fixed in 914a22a) and a second cosmetic defect, reported separately.
 
-## 10. JavaScript test harness for `app.js` — OPEN, not decided
+## 10. JavaScript test harness for `app.js` — DONE (P19, DESIGN §9.33)
 
 `src/ytalbum/webui/app.js` is around 1,500 lines and carries real logic: the length target while
 trimming, the drag-and-drop arrangement and its live renumbering, the lyrics panel and its ownership
@@ -167,3 +167,10 @@ build step at all — a property worth keeping.
 
 **The user's call**, not the reviewer's and not mine. Raised by the assistant at the end of the
 backlog; deliberately left open rather than decided quietly in a feature package (DESIGN §9.31).
+
+**Approved and done:** `webui/logic.mjs` holds what the page computes rather than draws and is
+imported by `app.js` as a module — no build step, no npm. 23 tests under `node --test`, run by
+`uv run pytest` through `tests/test_js.py` and by CI, and a shared case table
+(`tests/shared/trim_target.json`) that both `plan.trimmed_gap` and `trimTarget` are tested against so
+the twins cannot drift. What stays browser-only: anything needing a DOM, which is what the catalog's
+Playwright sections are for.

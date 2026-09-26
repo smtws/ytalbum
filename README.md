@@ -392,11 +392,16 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 516 tests, offline, ~40 s
+uv run pytest        # 518 tests, offline, ~40 s — including the page's own 23, under node
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/` and mock
-transports for MusicBrainz and LRCLIB, so they need no network and no credentials. Every bug
+transports for MusicBrainz and LRCLIB, so they need no network and no credentials. The web page's
+own logic lives in `webui/logic.mjs` and is tested with node's built-in runner
+(`node --test "tests/js/*.test.mjs"`); `uv run pytest` shells out to it, so one command runs
+everything and says so when node is missing. Where a rule exists on both sides — the length a trim
+would leave, for one — a single table in `tests/shared/` is what both are tested against, so the two
+cannot drift apart. No npm dependency and no build step: the page loads the module natively. Every bug
 found in real use has a fixture and a test. The same suite runs on every push via GitHub
 Actions.
 

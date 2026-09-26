@@ -1,3 +1,7 @@
+import { LENGTH, asTime, fmt, fold, foldMap, hits, lengthBand, lyricsPanelState, maps, markedTrim,
+         movedRow, numberByDisc, ourLength, refLength, resetKind, roundMark, trimTarget }
+  from "./logic.mjs";
+
 // ytalbum web UI. No framework, no build step. All server text goes in via textContent.
 "use strict";
 
@@ -165,32 +169,6 @@ async function loadTracks() {
 
 // ignore case, accents and punctuation, so "njord" finds "Dreams of Njǫrð".
 // NFD handles the combining marks; these letters are separate characters and never decompose.
-const LETTERS = { ð: "d", þ: "th", ø: "o", æ: "ae", œ: "oe", ß: "ss", ł: "l", đ: "d", ŋ: "n", ʒ: "z" };
-
-// Folds one character at a time and remembers where each folded character came from, so a
-// match can be pointed back at the original text ("ü" -> "ue" is two characters from one).
-function foldMap(text, german) {
-  let folded = "";
-  const from = [];
-  for (let i = 0; i < (text || "").length; i++) {
-    let c = text[i].normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    if (german && (c === "a" || c === "o" || c === "u") && text[i].normalize("NFD").length > 1) c += "e";
-    c = c.replace(/[ðþøæœßłđŋʒ]/g, (x) => LETTERS[x]).replace(/[^\p{L}\p{N}]+/gu, " ");
-    for (const _ of c) from.push(i);
-    folded += c;
-  }
-  return { folded, from };
-}
-
-const fold = (s) => foldMap(s, false).folded;
-
-// German keyboards without umlauts write "knueppel" for "Knüppel", which folding to
-// "knuppel" would miss — so every string is matched (and highlighted) in both spellings.
-const maps = (text) => [foldMap(text, false), foldMap(text, true)];
-const hits = (terms, text) => {
-  const both = maps(text);
-  return terms.every((term) => both.some((m) => m.folded.includes(term)));
-};
 
 // Where each term sits in the original string, as [start, end) ranges, merged and sorted.
 function matchRanges(text, terms) {
@@ -507,10 +485,12 @@ function provBadge(p) {
 // way back to what ytalbum found. Nothing is offered where nothing was derived (DESIGN.md §9.29).
 function resetMark(plan, track, name, label = null) {
   const owner = track || plan;
-  if (owner.provenance?.[name] !== "user") return provBadge(owner.provenance?.[name]);
   const derived = owner.auto?.[name];
-  if (derived === undefined || derived === null || derived === "") {
-    return h("span", { class: "badge user", title: "Yours. ytalbum derived nothing for this field, so there is nothing to go back to." }, PROV.user);
+  const kind = resetKind(owner.provenance?.[name], derived);
+  if (kind !== "button") {
+    return owner.provenance?.[name] === "user"
+      ? h("span", { class: "badge user", title: "Yours. ytalbum derived nothing for this field, so there is nothing to go back to." }, PROV.user)
+      : provBadge(owner.provenance?.[name]);
   }
   const what = label || name;
   return h("button", { class: "badge user reset", type: "button",
@@ -588,7 +568,7 @@ async function lyricsRow(p, t, editing = false) {
 // Reading and writing are the same panel: the .lrc beside the track is the original either way,
 // and saving here does exactly what the ownership contract does for a file edited on disk.
 function lyricsPanel(p, t, d, editing) {
-  const where = d.text ? (d.status === "synced" ? "with timestamps" : "plain text") : "no words yet";
+  const { where, actions } = lyricsPanelState(d);
   const head = h("div", { class: "muted" }, `${t.artist} — ${t.title} · ${where}`,
     d.owner === "user"
       ? h("span", { class: "badge", title: "Your words. A lyrics run never replaces them — delete them to let LRCLIB answer again." }, "yours")
@@ -602,13 +582,13 @@ function lyricsPanel(p, t, d, editing) {
       : "No .lrc beside this track. Write the words here, or let a lyrics run look them up."),
     h("div", { class: "lyrics-actions" },
       h("button", { class: "quiet small", type: "button", onclick: (e) => editLyrics(e.currentTarget, p, t, true) },
-        d.text ? "Edit" : "Write lyrics"),
+        actions[0]),
       // not offered for words of the user's: those are not lrclib's to replace, and the editor's
       // Delete is the way to let it answer again
-      d.owner === "user" ? null : h("button", { class: "quiet small", type: "button",
+      !actions.includes("Look up again") ? null : h("button", { class: "quiet small", type: "button",
         title: "Ask LRCLIB about this one track again, with its title, artist and the length of the file as they are now",
         onclick: (e) => lyricsTrack(e.currentTarget, p, t, false) }, "Look up again"),
-      d.owner === "user" || !d.lrclib_id ? null : h("button", { class: "quiet small", type: "button",
+      !actions.includes("Not these words") ? null : h("button", { class: "quiet small", type: "button",
         title: `Wrong song: LRCLIB #${d.lrclib_id} is not this recording. It is never offered for this track again, and the next best match is taken if one fits.`,
         onclick: (e) => lyricsTrack(e.currentTarget, p, t, true) }, "Not these words")));
 }
@@ -790,12 +770,9 @@ function rowsOf(tbody) {
 
 // each disc counts from 1 again, so the column never shows two 3s mid-edit
 function renumberRows(tbody) {
-  const counts = new Map();
-  for (const tr of rowsOf(tbody)) {
-    const disc = Number(tr.querySelector("[name=disc]").value) || 1;
-    counts.set(disc, (counts.get(disc) || 0) + 1);
-    tr.querySelector("[name=number]").value = counts.get(disc);
-  }
+  const rows = rowsOf(tbody);
+  const numbers = numberByDisc(rows.map((tr) => tr.querySelector("[name=disc]").value));
+  rows.forEach((tr, i) => { tr.querySelector("[name=number]").value = numbers[i]; });
 }
 
 function startRowDrag(event) {
@@ -812,15 +789,18 @@ function startRowDrag(event) {
 
 function moveRowTo(row, over) {
   if (!over || over === row) return;
-  const rows = rowsOf(row.parentElement);
-  const goingDown = rows.indexOf(over) > rows.indexOf(row);
-  over.insertAdjacentElement(goingDown ? "afterend" : "beforebegin", row);
-  // dropped among another disc's rows: that is the disc it is on now
-  const neighbour = (row.previousElementSibling?.dataset.id ? row.previousElementSibling : row.nextElementSibling);
-  const disc = neighbour?.querySelector("[name=disc]")?.value;
-  if (disc) row.querySelector("[name=disc]").value = disc;
+  const tbody = row.parentElement;
+  const before = rowsOf(tbody).map((tr) => ({ id: tr.dataset.id, disc: tr.querySelector("[name=disc]").value }));
+  const after = movedRow(before, row.dataset.id, over.dataset.id);
+  if (after === before) return;
+  const byId = new Map(rowsOf(tbody).map((tr) => [tr.dataset.id, tr]));
+  for (const { id, disc } of after) {
+    const tr = byId.get(id);
+    tr.querySelector("[name=disc]").value = disc;
+    tbody.append(tr);  // appending in the new order is the new order
+  }
   movedRows.add(row.dataset.id);  // a moved row keeps its per-disc number often enough to matter
-  renumberRows(row.parentElement);
+  renumberRows(tbody);
 }
 
 document.addEventListener("pointermove", (e) => {
@@ -889,12 +869,6 @@ function pruneAlbum(p, gone, button) {
 }
 
 // keeps tenths when there are any, so a value set on the player survives a save from the field
-const asTime = (seconds) => {
-  if (seconds == null) return "";
-  const rest = seconds % 60;
-  const shown = Number.isInteger(rest) ? String(rest).padStart(2, "0") : rest.toFixed(1).padStart(4, "0");
-  return `${Math.floor(seconds / 60)}:${shown}`;
-};
 
 const fromTime = (text) => {
   const parts = String(text).trim().split(":");
@@ -908,9 +882,6 @@ const fromTime = (text) => {
 const usableLength = (t) => t.mb_length && t.duration && t.mb_length < t.duration - 0.5;
 
 // mirrors plan.py's LENGTH_SLACK / LENGTH_BIG / LENGTH_STUB, which are the source of truth
-const LENGTH = { slack: 5, big: 20, stub: 0.6 };
-const refLength = (t) => t.mb_length || t.lyrics_length || null;
-const ourLength = (t) => t.file_length || (t.duration ? (t.trim_end || t.duration) - (t.trim_start || 0) : null);
 
 // How far our audio is from what everyone else says the song is. Small differences are
 // normal (masters, fades); a big one means an intro to cut, and a file far shorter than the
@@ -919,11 +890,12 @@ function lengthChip(t) {
   const ref = refLength(t), ours = ourLength(t);
   if (!ref || !ours) return null;
   const gap = ours - ref;
-  const stub = ours < ref * LENGTH.stub;
-  const klass = stub ? "bad" : Math.abs(gap) > LENGTH.big ? "warn" : Math.abs(gap) > LENGTH.slack ? "" : "muted";
+  const band = lengthBand(ours, ref);
+  const stub = band === "stub";
+  const klass = { stub: "bad", big: "warn", slack: "", close: "muted" }[band];
   const sources = [t.mb_length ? `MusicBrainz ${asTime(t.mb_length)}` : null, t.lyrics_length ? `LRCLIB ${asTime(t.lyrics_length)}` : null];
   const why = stub ? " — far too short to be this song (a teaser or a commentary clip?)"
-    : gap > LENGTH.big ? " — an intro or outro to cut?" : "";
+    : band === "big" && gap > 0 ? " — an intro or outro to cut?" : "";
   return h("span", { class: `len ${klass}`, title: `${sources.filter(Boolean).join(" · ")} · this file ${asTime(ours)}${why}` },
     Math.round(Math.abs(gap)) === 0 ? "0:00" : `${gap > 0 ? "+" : "−"}${asTime(Math.round(Math.abs(gap)))}`);
 }
@@ -1240,7 +1212,6 @@ const audio = $("#audio");
 let queue = []; // [{ album, video_id, title, artist }]
 let qi = -1;
 
-const fmt = (sec) => (Number.isFinite(sec) ? `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}` : "0:00");
 const isPlaying = (albumId, videoId) => qi >= 0 && queue[qi].album === albumId && queue[qi].video_id === videoId;
 
 async function playAlbum(albumId, start = 0) {
@@ -1414,15 +1385,6 @@ function renderTrim() {
   syncTrimInputs(t);
 }
 
-// The chip says a track is the wrong length; this says whether the cut you are making fixes it.
-// Mirrors plan.trimmed_gap — change one and change the other.
-function trimTarget(t, total, start, end) {
-  if (!total) return { kept: null, gap: null };
-  const kept = (end == null ? total : Math.min(end, total)) - (start || 0);
-  const ref = refLength(t);
-  return { kept, gap: ref ? kept - ref : null, ref };
-}
-
 function renderTarget(t, total) {
   const box = $("#p-target");
   const { kept, gap, ref } = trimTarget(t, total, t.start, t.end);
@@ -1456,9 +1418,8 @@ function setTrim(which, seconds) {
   const t = queue[qi];
   if (!t) return;
   const total = trimLimit();
-  const value = Math.round(Math.min(Math.max(seconds, 0), total) * 10) / 10;
-  if (which === "start") t.start = value >= (t.end ?? total) ? t.start : value || null;
-  else t.end = value <= (t.start || 0) ? t.end : value >= total ? null : value;
+  const marks = markedTrim(t, which, roundMark(seconds, total), total);
+  [t.start, t.end] = [marks.start, marks.end];
   renderTrim();
 }
 

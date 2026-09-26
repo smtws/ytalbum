@@ -825,6 +825,32 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    one disc, "1" means first; the old reading was defensible only while numbers were read under the
    old discs for every purpose. The test carries the reasoning.
 
+33. ✅ The page's own logic has tests (2026-09-26, backlog item 10, the user's call after two UI
+   defects shipped green). `app.js` had grown to ~1,500 lines carrying real rules — the length
+   target, the arrangement and its live renumbering, what a panel offers, the filter's folding — and
+   none of it ran under a test. What it *did* have was the Python twins and the Playwright cases,
+   which is why the two defects that shipped (§9.29's invisible badge, §9.31's scattered buttons)
+   were caught by looking at pictures; neither a unit test nor a DOM assertion would have found them,
+   and that is the honest limit of what this slice buys.
+   The split is `webui/logic.mjs` — everything that computes rather than draws, exported — and
+   `app.js`, which imports it. The page loads it as `<script type="module">`, which browsers do
+   natively, so **there is still no build step**: the reason the module keeps the `.mjs` extension is
+   that node then treats it as ESM without a `package.json`, and the repo stays free of npm. Tests
+   are `node --test` with `node:assert`; `tests/test_js.py` shells out to them so `uv run pytest`
+   runs everything, and skips with a reason where node is missing (CI installs it rather than
+   skipping quietly).
+   The twins are what earn it: `tests/shared/trim_target.json` is one table of twelve cases that
+   `plan.trimmed_gap` and `logic.mjs`'s `trimTarget` are both tested against, so a rule changed on one
+   side fails on the other. §9.24's rounding, §9.22's per-disc numbering, §9.32's drop semantics,
+   §9.21's panel rules and §9.29's badge decision are pinned the same way.
+   Caching needed one more thing than the split: a module's import URL is inside the module, where
+   the index's rewriting never reached, so a new `logic.mjs` could have sat behind a cached `app.js`
+   that never asked for it. `IMPORTS` in web.py versions the import when the module is served, and
+   folds the imported file into the importer's own hash.
+   Left browser-only, deliberately: everything that needs a DOM — the drag's pointer handling, the
+   panel's rendering, the player. Testing those would mean jsdom, which is the npm dependency this
+   slice exists to avoid; the catalog's sections H and K–R remain their evidence.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

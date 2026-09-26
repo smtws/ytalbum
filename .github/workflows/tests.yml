@@ -14,7 +14,13 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      # the page's own tests run under node; `uv run pytest` shells out to them, and skips them
+      # with a reason where node is missing — so CI installs it rather than skipping silently
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       # the suite answers from recorded fixtures: no network, no credentials, no ffmpeg
       - run: uv sync --locked --dev
       - run: uv run pytest -q
+      - run: node --check src/ytalbum/webui/app.js
       - run: uvx ruff check src tests  # hygiene only; the code is hand-formatted, ruff format is not used
