@@ -98,18 +98,20 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: the listing; `ls ~/Music/YouTube\ Downloads/Feuerschwanz`
   - **result 2026-09-26:** pass — every held album marked `✓ in library`, exit 0, no folder created
 
-- [ ] **A3 · M** — the documented hand-editing path
+- [x] **A3 · M** — the documented hand-editing path
   - do: `ytalbum plan <S3> --library "$QA"` → edit the plan (album name, swap two numbers) →
     `ytalbum download "$QA/<artist>/<album>"`
   - expect: your edits are what lands on disk
   - invariant: file names follow the edited values; `tracktotal` matches
   - evidence: file names; `mutagen` tags
+  - **result 2026-09-26:** pass — hand-edited the plan (two tracks kept, numbers swapped, album renamed): folder relocated, files named from the edits, `tracknumber` 1/2 and `tracktotal` 2 in the tags
 
-- [ ] **A4 · M★** — a single from a label channel
+- [x] **A4 · M★** — a single from a label channel
   - do: the S1 fetch from the seed step
   - expect: album name *Viva Vendetta*, **not** *Viva Vendetta | Napalm Records*; `kind = single`
   - invariant: `drop_label` applies to album names, not only track titles
   - evidence: `plan.album`; the folder name
+  - **result 2026-09-26:** pass — album *Viva Vendetta*, kind single, no label suffix
 
 - [ ] **A5 · M★** — take the audio out of the video stream
   - do: on S1, set `audio_choice` to `combined` (album view, or the `edit` action) and let it
@@ -180,11 +182,12 @@ is working on the same library — nothing locks them against each other (G5).
 
 ## C. Lyrics
 
-- [ ] **C1 · M** — idempotence
+- [x] **C1 · M** — idempotence
   - do: `ytalbum lyrics --library "$QA"` twice
   - expect: the second run asks nothing and retags nothing
   - invariant: a second pass must not rewrite a single tag
   - evidence: job log line counts
+  - **result 2026-09-26:** pass — two runs in a row reported the same `6 none, 2 synced, 1 instrumental` and retagged nothing
 
 - [ ] **C2 · M★** — trim a track that has synced lyrics, to a length that still matches
   - do: on S3 track 4 (*Sex is Muss*, 285 s of file against a 217.6 s song, synced lyrics),
@@ -225,12 +228,13 @@ is working on the same library — nothing locks them against each other (G5).
   - invariant: the tag never outlives the file it was copied from
   - evidence: `mutagen` tag absent
 
-- [ ] **C8 · M★** — an instrumental never borrows the singer's words
+- [x] **C8 · M★** — an instrumental never borrows the singer's words
   - do: run the lyrics pass over S2 (*Viva Vendetta (Instrumental)*, 230 s — the same length as
     the sung recording)
   - expect: verdict "no words"; no `.lrc`
   - invariant: the marker is read from the **track** title, never the album's
   - evidence: `plan.lyrics`; the folder
+  - **result 2026-09-26:** pass, and it happened at fetch time — S2 arrived as *Viva Vendetta (Instrumental)* with verdict `instrumental` and no sidecar, although the sung recording is the same 230 s
 
 - [x] **C9 · R** — the lyrics panel
   - do: in the real library, open an album, click ♪, click a line, let it play on
@@ -446,18 +450,20 @@ is working on the same library — nothing locks them against each other (G5).
 
 ## I. Degraded modes
 
-- [ ] **I1 · M** — without MusicBrainz or lrclib
+- [x] **I1 · M** — without MusicBrainz or lrclib
   - do: `ytalbum fetch <S2> --library "$QA" --no-mb --no-lyrics`
   - expect: it downloads and tags from YouTube's data alone
   - invariant: both lookups are optional; the download path does not depend on them
   - evidence: provenance in the plan; no `.lrc`
+  - **result 2026-09-26:** pass — `mbid` absent everywhere, every provenance `yt_title`, no `.lrc`
 
-- [ ] **I2 · M★** — lyrics switched off for the run
+- [x] **I2 · M★** — lyrics switched off for the run
   - do: the same fetch with `--no-lyrics` only
   - expect: no lrclib traffic at all
   - invariant: switching lyrics off for a run leaves the configured setting alone
   - evidence: the lyrics cache file's mtime
   - note: `config --lyrics off` would change the real setup — use the flag
+  - **result 2026-09-26:** pass — the lyrics cache file was not touched by the fetch
 
 - [ ] **I3 · M★** — the network drops mid-lookup
   - do: `XDG_CACHE_HOME="$QA/cache" HTTPS_PROXY=http://127.0.0.1:9 ytalbum lyrics --library "$QA"`
@@ -488,11 +494,12 @@ the metadata, and the lyrics matcher can be asked directly.
   - evidence: the printed plan; `mbid` absent
   - **result 2026-09-26:** pass — album stayed *Heroes (Track Commentary Version)*, provenance YTM, no release accepted
 
-- [ ] **J2 · M★** — the marker finds the *right* release
+- [x] **J2 · M★** — the marker finds the *right* release
   - do: `ytalbum plan <S5> --library "$QA"`
   - expect: the album keeps "(Instrumental)" **and** matches MusicBrainz' instrumental release
   - invariant: a version marker narrows the match, it does not only block it
   - evidence: `plan.album`; `plan.mbid` resolves to a title containing "(Instrumental)"
+  - **result 2026-09-26:** pass — album kept *(Instrumental)* and matched the MusicBrainz release **of the same name**; no audio downloaded
 
 - [x] **J3 · R★** — an edition marker is still normalised
   - do: `ytalbum fetch <S6> --dry-run`
@@ -515,11 +522,12 @@ the metadata, and the lyrics matcher can be asked directly.
   - evidence: the printed plan
   - **result 2026-09-26:** pass — album *Viva Vendetta*, kind single. Note: a dry run prints the artist **before** harmonisation (*LORD OF THE LOST*), so the preview is not the outcome
 
-- [ ] **J6 · M★** — a rejected recording leaves no length behind
+- [x] **J6 · M★** — a rejected recording leaves no length behind
   - do: `ytalbum plan <S3> --library "$QA"`, look at *Ketzerei (Summer Breeze 2016)*
   - expect: the title keeps its bracket group, `mbid` is absent, and `mb_length` is absent too
   - invariant: a length belongs to the recording it was read from
   - evidence: the plan JSON
+  - **result 2026-09-26:** pass — *Krieger des Mets (Wacken 2016)* and *Ketzerei (Summer Breeze 2016)* both have `mbid=None` **and** `mb_length=None`, while *Ringelpietz (mit Anfassen)*, whose brackets are part of the title, keeps both
 
 - [x] **J7 · R★** — a wordless entry does not end the search
   - do: ask the matcher directly for S8's track 5 at 211.7 s, with a cold cache
@@ -573,6 +581,25 @@ these forms:
 - **Process checks**: never `pgrep -f`/`pkill -f` with a pattern that appears in your own
   command line — it matches the shell running it. `pkill` that way killed the shell instead of
   the server. Check the **port** (`ss -ltnp | grep 8799`) or the log.
+
+### Findings from the M pass
+
+- **A fetch can leave the library split; only `repair` unifies it.** Seeding produced
+  `LORD OF THE LOST/` and `Lord Of The Lost/` side by side, because `_harmonize_artist` aligns
+  the album being fetched to the library but never rewrites the albums already there. Observed
+  again in the other direction when a MusicBrainz-spelled plan arrived after a repair had
+  settled on the YouTube spelling. Each `repair` converged correctly (finally on
+  *Lord of the Lost*), so the fault is that a fetch alone does not.
+- **An album artist can disagree with its own track artists.** After the first repair,
+  *Viva Vendetta* read `albumartist='Lord Of The Lost'` (`yt_title`, borrowed from the other
+  album) while its only track read `'Lord of the Lost'` (`mb`). The evidence order weighs
+  provenance on the album field, and the MusicBrainz evidence sat on the track. It resolved
+  once an MB-spelled album joined the library, but the intermediate state was wrong.
+- **A single's album name keeps what a track title drops.** Fetching the DOMINUM video gave
+  the album `The Dead Don't Die (feat. @xxFEUERSCHWANZxx)` — the raw `@handle` and the feat.
+  group — while the track title was cleaned to `The Dead Don't Die (feat. xxFEUERSCHWANZxx)`.
+  Same class as the label suffix fixed in `5f49752`: album naming does not share all of
+  `clean_title`'s hygiene.
 
 ### Smaller observations, not cases
 
