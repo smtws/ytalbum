@@ -113,47 +113,53 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: `plan.album`; the folder name
   - **result 2026-09-26:** pass — album *Viva Vendetta*, kind single, no label suffix
 
-- [ ] **A5 · M★** — take the audio out of the video stream
+- [x] **A5 · M★** — take the audio out of the video stream
   - do: on S1, set `audio_choice` to `combined` (album view, or the `edit` action) and let it
     re-download
   - expect: the track arrives as `.m4a`, tagged through the MP4 atoms
   - invariant: `ext` flips; the cover and `©lyr` are written; the old `.opus` is removed
   - evidence: `mutagen` atom dump; the file suffix
   - note: this is how to reach the m4a path without hunting for a video that has no audio stream
+  - **result 2026-09-26:** pass — the track came back as `.m4a` with MP4 atoms and the cover, and the old `.opus` was removed
 
 ---
 
 ## B. Trim, and everything it touches
 
-- [ ] **B1 · M** — cut the front
+- [x] **B1 · M** — cut the front
   - do: on S1, drag the start handle to 19.8 s, *save trim*
   - expect: the file is shorter; `.originals/___ci9kmRc4.opus` holds the untouched download
   - invariant: the original is byte-identical to the file before the trim
   - evidence: `ffprobe` duration; `sha1sum` against a copy taken beforehand
+  - **result 2026-09-26:** pass — 470.9 s → 451.1 s, `.originals/___ci9kmRc4.opus` byte-identical to the pristine download
 
-- [ ] **B2 · M** — "end here" (regression, fixed 2026-09-26)
+- [x] **B2 · M** — "end here" (regression, fixed 2026-09-26)
   - do: on S1, play, press *end here* around 408 s, adjust, *save trim*
   - expect: playback **stops on the mark** and stays on this track; the row's trim field fills
   - invariant: the save applies to the track you were editing, never the next one
   - evidence: the player title is unchanged; `trim_end` in the plan
+  - **result 2026-09-26:** pass — stayed on the track, paused at 61.4 s, handle read *Song ends at 1:01*, mark unsaved
 
-- [ ] **B3 · M** — a saved trim still skips the outro
+- [x] **B3 · M** — a saved trim still skips the outro
   - do: with B2 saved, play into the end mark
   - expect: it advances to the next track (or stops, if it is the last)
   - invariant: only *unsaved* marks stop playback
   - evidence: the player title
+  - **result 2026-09-26:** pass — playing into a saved end advanced *Ketzerei* → *Hexenjagd*. Note: once saved, the file itself ends at the mark, so `ended` and the end-mark check coincide
 
-- [ ] **B4 · M** — undo a trim
+- [x] **B4 · M** — undo a trim
   - do: clear both marks on S1, save
   - expect: restored from `.originals/`, byte-identical; `trimmed` back to `None`
   - invariant: clearing a trim is a restore, not a re-download — it works offline
   - evidence: `sha1sum`
+  - **result 2026-09-26:** pass — clearing both marks restored the file byte-identical to the pristine download (`trimmed` back to `None`)
 
-- [ ] **B5 · M★** — play a trimmed track
+- [x] **B5 · M★** — play a trimmed track
   - do: play the track you trimmed in B1, from the album view
   - expect: the player loads `?o=1` (the original) and previews the cut itself
   - invariant: the head is cut once, not twice
   - evidence: `audio.src`; position ≈ `trim_start` two seconds in
+  - **result 2026-09-26:** pass — the player requested `&o=1`, was served the 470.9 s original, and sat at 22.5 s after three seconds: the head is cut once
 
 - [ ] **B6 · M★⚠** — trim an `.m4a` track (needs A5)
   - do: set both marks on the m4a track from A5 and save
@@ -163,20 +169,23 @@ is working on the same library — nothing locks them against each other (G5).
     never a truncated or silent file
   - invariant: the playable file survives and the failure is reported on the track
   - evidence: `track.error`; duration unchanged; ffmpeg stderr
+  - **result 2026-09-26:** **FAIL, worse than predicted** — see the finding below. The trim read a stale `.opus` original left by an earlier format, wrote Ogg/Opus into the `.m4a`, and the tagger then raised an unhandled `MP4StreamInfoError`
 
 - [ ] **B7 · M★** — change the audio source of a trimmed track
   - do: trim S1, then switch it to `combined`
   - expect: it re-downloads, `trimmed` resets, the marks re-apply to the new original
   - invariant: the trim points are kept while the audio underneath is replaced
   - evidence: `plan.trimmed`; duration
+  - **result 2026-09-26:** **FAIL (deferred)** — switching a trimmed track to `combined` silently does not apply the trim (fresh 470.9 s file, `trimmed=None`); the **next** run applies it and corrupts the file exactly as in B6
 
-- [ ] **B8 · M★** — one trim for a whole channel
+- [x] **B8 · M★** — one trim for a whole channel
   - do: fetch S9, then set a front trim on S1 and press ⇉
   - expect: S9 is trimmed to the same points, in its own album, keeping its own original
   - invariant: the rule keys on the **uploader**, not the artist — S1 and S9 are different
     bands sharing one label channel, while S2 is the same band on its own channel and must
     **not** be touched
   - evidence: all three plans' `trim_start`/`trim_end`; the job log
+  - **result 2026-09-26:** pass on the rule — both *Napalm Records* tracks took the trim while the two *Lord Of The Lost* albums and the *xxFEUERSCHWANZxx* one were untouched, so it keys on the uploader, not the artist. It also exposed the persistence described below
 
 ---
 
@@ -600,6 +609,30 @@ these forms:
   group — while the track title was cleaned to `The Dead Don't Die (feat. xxFEUERSCHWANZxx)`.
   Same class as the label suffix fixed in `5f49752`: album naming does not share all of
   `clean_title`'s hygiene.
+
+### The trim/format defect, from B6, B7 and B8
+
+Four faults, one root. `original_path()` names the kept original `<video id>.opus` whatever the
+track's format is, and `apply()` always cuts into `.trim.opus` with `-c copy`.
+
+1. **Silent container corruption.** A track that was trimmed as `.opus`, then switched to
+   `combined`, is trimmed again from the **stale Opus original**: ffmpeg copies happily and the
+   result is written over the `.m4a`. `file` reports *Ogg data, Opus audio* for a `.m4a`.
+2. **An unhandled exception, and a stuck album.** `tag_file` dispatches on the suffix, so it
+   calls `MP4()` on Ogg content and raises `MP4StreamInfoError`. It is not caught: the run
+   aborts, and **every later run on that album raises the same thing** until someone removes
+   the file by hand. Switching the format back recovers it (re-download plus cleanup).
+3. **The plan and the disk disagree in silence.** After the crash the plan said `state=done`,
+   `trimmed=None`, `error=None`, while the file was 388 s of Ogg named `.m4a`.
+4. **A cleanly failed trim is not recorded.** With no stale original, ffmpeg refuses the m4a
+   ("Unsupported codec id in stream 0"), `run()` sets `track.error` — and then nothing saves
+   the plan, because no signature changed. The plan keeps `error=None` and advertises a trim
+   that never happened. In the web UI the warning goes to the logger, not the job log, so the
+   user sees **nothing at all**.
+
+And it outlives the format switch: `.originals/dGO_sx4By28.opus` still held AAC after the track
+was switched back to `.opus`, so every future trim of that track fails on a wrong-codec
+original. B8 ran into this while otherwise passing.
 
 ### Smaller observations, not cases
 
