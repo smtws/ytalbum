@@ -388,9 +388,10 @@ is working on the same library — nothing locks them against each other (G5).
     album: the fetched album adopted `LORD OF THE LOST`, leaving `Lord of the Lost/` only for the
     album the user had not touched. Better evidence arriving: the library's spelling was kept, one
     hint named both spellings and pointed at `ytalbum repair`, and no other album was renamed.
-    Following the hint's advice does converge, but not always in one pass: repair decides album by
-    album against the library as stored, so of three scratch albums pass 1 moved two onto the
-    MusicBrainz spelling and pass 2 the third (pass 3 a no-op)
+    Following the hint's advice converges in one pass: repair decides each artist key once, before
+    it renames anything, from every candidate the library holds — so three scratch albums in three
+    spellings all moved onto the MusicBrainz spelling in one run, and the run after it had nothing
+    to do (it needed two passes when the decision was made album by album)
 
 ---
 
@@ -614,14 +615,19 @@ the metadata, and the lyrics matcher can be asked directly.
   - evidence: the returned id and the first line of the text
   - **result 2026-09-26:** pass — #1948185, synced, *Mein lieber Herr Hauptmann…*, from a cold cache
 
-- [ ] **J8 · R★** — an instrumental refuses the sung words
+- [x] **J8 · R★** — an instrumental refuses the sung words
   - do: ask the matcher for *Viva Vendetta (Instrumental)* at 230 s
   - expect: no words, although the sung recording is the same length
   - invariant: only the title can separate an instrumental cut from the sung one
   - evidence: `status`; `text is None`
   - **result 2026-09-26:** **the case was wrong, not the code** — lrclib's search for a title containing *(Instrumental)* returns 0 rows, so `get()` answers `None`; the *no words* verdict is made by `update_track`. Assert end to end, not at the client
+  - **corrected expectation (P5, DESIGN.md §9.24):** no words **and** a length reference. Asking
+    with the marker in the query is what returned nothing, so the marker is now stripped from the
+    query alone. **Re-run from a cold cache against live lrclib: pass** — the query asked is
+    *Viva Vendetta*, `text is None`, status `none`, `length` 230.0; the same search *with* the
+    marker still returns 0 rows, which is the fault this closes
 
-- [ ] **J9 · R★** — a refused length is still remembered
+- [x] **J9 · R★** — a refused length is still remembered
   - do: ask the matcher for *Viva Vendetta* at 471 s
   - expect: no words, but a `length` comes back as the second opinion. It is the candidate
     **closest to our file**, which for a padded file is the least representative one: 248 s
@@ -629,6 +635,10 @@ the metadata, and the lyrics matcher can be asked directly.
   - invariant: that is what feeds the length chip for tracks MusicBrainz does not know
   - evidence: the returned object
   - **result 2026-09-26:** **the case was wrong, and found something** — the near miss is the candidate closest to *our* 471 s file (248 s), not the 230 s that eight of nine entries agree on. Expectation corrected below; the selector itself is now an open question
+  - **decided and fixed (P5, DESIGN.md §9.24):** the reference is the consensus of the same-artist
+    candidates — the commonest whole second, the median of the tied values on a tie. **Re-run from
+    a cold cache against live lrclib: pass** — the nine candidates came back as 229.0, 229.8,
+    229.8, 230.0 ×5 and 248.0, and the kept length is 230.0
 
 - [x] **J10 · R★** — a repeated length is real data
   - do: in the real library, look at S6's 24 tracks of 223 s

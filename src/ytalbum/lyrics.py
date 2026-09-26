@@ -21,8 +21,10 @@ import re
 import sqlite3
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import median
 from typing import Any, Protocol
 
 import httpx
@@ -43,9 +45,41 @@ SUFFIX = ".lrc"
 TIMESTAMPED = re.compile(r"^\s*\[\d{1,3}:\d{2}", re.M)
 # a title that says the recording has no singing: its words are the sung version's, not its
 NO_VOCALS = re.compile(r"\b(instrumentals?|karaoke|backing track)\b", re.I)
+# the same markers, with the bracket group around them, for the *query* (see `query_title`)
+MARKER = re.compile(r"[(\[]\s*(?:instrumental\s+version|instrumentals?|karaoke|backing\s+track)\s*[)\]]"
+                    r"|\s-\s*(?:instrumental\s+version|instrumentals?|karaoke|backing\s+track)\s*$"
+                    r"|\b(?:instrumental\s+version|instrumentals?|karaoke|backing\s+track)\b", re.I)
 
 # statuses kept in PlanTrack.lyrics
 SYNCED, PLAIN, INSTRUMENTAL, NONE = "synced", "plain", "instrumental", "none"
+
+
+def query_title(title: str) -> str:
+    """The title to ask lrclib for: without an "(Instrumental)" marker, and without anything else.
+
+    lrclib indexes recordings people submitted words for, so an instrumental cut has no entry of
+    its own and a title carrying the marker matches nothing at all — the track then had no length
+    reference either (J8), although the sung recording's length is exactly the reference it wants.
+    Only these markers go. A "(Live)" or any other bracket group is sent as it stands, because the
+    live cut really is a different recording and studio words must never attach to it.
+    """
+    cleaned = re.sub(r"\s{2,}", " ", MARKER.sub(" ", title)).strip(" -–—·|/,;")
+    return cleaned or title
+
+
+def consensus_length(durations: list[float]) -> float | None:
+    """What the candidates agree the song is: the commonest whole second, the median on a tie.
+
+    The nearest candidate is the wrong answer for a padded upload, because what is nearest to a
+    471 s video is whatever other padded copy exists (248 s for S1) — while the question the chip
+    asks is how long the song is (about 230 s). A tie is settled by the median of the tied values,
+    so the answer is never one that repeats less often than another.
+    """
+    if not durations:
+        return None
+    counts = Counter(round(d) for d in durations)
+    most = max(counts.values())
+    return float(median(sorted(seconds for seconds, n in counts.items() if n == most)))
 
 
 class LyricsError(Exception):
@@ -116,11 +150,12 @@ class Lrclib:
         if length is None:
             return None
         silent = bool(NO_VOCALS.search(title))  # "(instrumental)": the sung words are not its
+        asked = query_title(title)  # the marker is not part of any entry's name
         exact = None
         if album and length <= MAX_EXACT:
             # the exact endpoint wants lrclib's own album name and ±2s (measured 2026-09-25),
             # so it answers for real albums and never for our compilation names
-            params = {"artist_name": artist, "track_name": title, "duration": str(round(length))}
+            params = {"artist_name": artist, "track_name": asked, "duration": str(round(length))}
             if found := self._request("get", {**params, "album_name": album}):
                 exact = _pick([found], length, silent)
                 if exact and exact.text:
@@ -129,7 +164,7 @@ class Lrclib:
         # nobody has submitted lyrics, not only when a recording has none — 16 of the 18
         # entries for "Blöde Frage, Saufgelage" are such stubs, and one of them beat the
         # synced entry of the very same length because the exact endpoint answered first.
-        rows = self._request("search", {"artist_name": artist, "track_name": title}) or []
+        rows = self._request("search", {"artist_name": artist, "track_name": asked}) or []
         same = [
             row
             for row in rows
@@ -140,10 +175,11 @@ class Lrclib:
             return picked
         if exact:
             return exact  # the album's own entry, and nobody has words for this song
-        # nothing close enough to be this recording — but how long lrclib thinks the song
-        # is, is worth knowing: it is the second opinion on a file that carries an intro
-        near = min(same, key=lambda row: abs(row["duration"] - length), default=None)
-        return Lyrics(length=near["duration"]) if near else None
+        # Nothing close enough to be this recording — but how long lrclib thinks the song is, is
+        # worth knowing: it is the second opinion on a file that carries an intro. That is a
+        # question about the song, so every same-artist candidate answers it together.
+        agreed = consensus_length([row["duration"] for row in same])
+        return Lyrics(length=agreed) if agreed is not None else None
 
     def by_id(self, lrclib_id: int) -> Lyrics | None:
         """One known entry, for deciding whether a sidecar is still the one we wrote.
@@ -421,4 +457,4 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     return text
 
 
-__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "read_sidecar", "reconcile", "sidecar_lost", "update_track", "user_owns"]
+__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "consensus_length", "query_title", "read_sidecar", "reconcile", "sidecar_lost", "update_track", "user_owns"]

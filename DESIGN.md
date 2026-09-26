@@ -606,6 +606,48 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    with their album artist are all albums the user spelled themselves, which the first guard
    protects. A dry run runs the whole harmonisation too, so the preview is the outcome — it used
    to print the pre-harmonisation spelling and differ from what the fetch then wrote.
+   Two details cost a verification round each. An adopted spelling must carry the evidence *it*
+   has, not the evidence the album had: adopting while the album's own name came from MusicBrainz
+   left the `mb` marker on a shouted name, and repair then converged on the shouting, confidently.
+   And repair's older rule ("use the most common track artist when the album artist came from
+   YouTube") renames without leaving a marker, so the tracks' spelling lost a tie to another
+   mixed-case spelling in the library — alphabetically, which is a coin flip. Both fixed by naming
+   the evidence at the moment the spelling is taken; `user` is never inherited either, since it
+   would freeze the album against later harmonisation.
+   Repair also had to stop asking the question once per album. Deciding against the library *as
+   stored* meant an album already visited could not learn from evidence found later, so three
+   albums in three spellings took two passes to settle — "run repair" could mean "run it twice".
+   One scan now collects every candidate for an artist key (each album-level spelling with its
+   provenance, plus `track_spelling`'s answer where its guards hold), the key is **decided once**,
+   and every album of that key that is not the user's adopts it in the same pass. Same fixed point,
+   one scan instead of one per album, and the pass after it has nothing to do. A tie between two
+   equally common track spellings is settled by evidence and then by `spelling_rank`, because
+   `max(set(names), key=names.count)` settled it by set iteration order — which hash randomisation
+   makes differ between runs. On the real 246-album library repair changes nothing at all, verified
+   by copying every plan into a scratch tree and running the real `repair` over it.
+
+24. ✅ What lrclib says a song is long is a consensus, not a nearest miss (2026-09-26, from the
+   QA run). When no candidate fits our file, the length kept as the second opinion used to be the
+   candidate nearest to *our* length — which for a padded upload is the least representative one
+   there is: for the 471 s *Viva Vendetta* video, lrclib's nine entries read 229, 229.8, 229.8,
+   230, 230, 230, 230, 230 and 248, and the nearest was the 248. It is now the commonest whole
+   second (230), the median of the tied values when nothing repeats more than anything else. The
+   question is about the song, so every same-artist candidate answers it together.
+   The second half is the query. An instrumental cut has no entry of its own, so asking lrclib for
+   "Viva Vendetta (Instrumental)" returned **0 rows** — measured — and the track ended up with no
+   length reference at all, although the sung recording's length is exactly the reference it wants.
+   The query now drops the NO_VOCALS markers (instrumental, karaoke, backing track) and nothing
+   else: a "(Live)" or any other bracket group goes to lrclib as it stands, because a live cut
+   really is another recording and studio words must never attach to it. Refusing the *words* for
+   an instrumental is unchanged — the marker is still read from the track title, and only wordless
+   entries may match — so such a track now gets a length and still gets no lyrics.
+   What moves, measured read-only over the real library (stored plans plus the cached lrclib
+   bodies, no requests): 16 tracks' lrclib reference changes, most by a second or two and four by
+   20-50 s; **no album flag changes** (12 flagged before, 12 after, the same 7 "long" and 5
+   "stub"); and 4 per-track chips move, all between nothing and the muted 5 s band. 11 tracks in
+   2 albums cannot be computed from the cache, because their searches were made with the marker and
+   returned nothing — those are the ones that *gain* a reference, and only a lyrics pass will say
+   what it is.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

@@ -10,7 +10,7 @@ from test_incremental import FakeYouTube, opus_template, vol1
 
 from ytalbum.config import Config
 from ytalbum.download import load_plan, run, save_plan
-from ytalbum.lyrics import Lrclib, Lyrics, LyricsError, read_sidecar, sidecar_path, update_track
+from ytalbum.lyrics import Lrclib, Lyrics, LyricsError, consensus_length, query_title, read_sidecar, sidecar_path, update_track
 from ytalbum.models import Provenance
 from ytalbum.plan import build_plan
 from ytalbum.service import Service
@@ -70,6 +70,60 @@ def test_a_recording_of_another_length_is_refused_but_its_length_is_kept():
     assert found.text is None
     assert found.status == "none"
     assert found.length == 210.0
+
+
+def test_the_kept_length_is_what_the_candidates_agree_on():
+    """Not the nearest one: what is nearest to a padded upload is another padded copy."""
+    api, _ = responses(search=[{**ROW, "duration": d} for d in (230.0, 229.6, 248.0, 460.0)])
+    found = api.get("TUNGSTEN", "Lullaby", None, 471.0)
+    assert found.text is None
+    assert found.length == 230.0  # the commonest whole second, not the 248 s that sits closest
+
+
+@pytest.mark.parametrize(("durations", "expected"), [
+    ([230.0, 230.4, 248.0], 230.0),  # a clear mode
+    ([230.0, 230.0, 248.0, 248.0], 239.0),  # a tie: the median of the tied values
+    ([248.0], 248.0),  # a single candidate is its own consensus
+    ([], None),
+    ([230.0, 248.0, 471.0], 248.0),  # no repeat at all: every value is a mode, so the median
+])
+def test_the_consensus_length(durations, expected):
+    assert consensus_length(durations) == expected
+
+
+# -- the query -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("title", "asked"), [
+    ("Viva Vendetta (Instrumental)", "Viva Vendetta"),
+    ("Viva Vendetta [instrumental]", "Viva Vendetta"),
+    ("Viva Vendetta - Instrumental Version", "Viva Vendetta"),
+    ("Lullaby (Karaoke)", "Lullaby"),
+    ("Lullaby (Backing Track)", "Lullaby"),
+    ("Lullaby (Live in Hamburg)", "Lullaby (Live in Hamburg)"),  # a different recording, kept
+    ("Lullaby (Deluxe Edition)", "Lullaby (Deluxe Edition)"),
+    ("Instrumental", "Instrumental"),  # a song actually called that keeps its name
+])
+def test_only_the_no_vocals_marker_leaves_the_query(title, asked):
+    assert query_title(title) == asked
+
+
+def test_an_instrumental_is_asked_about_without_its_marker_and_keeps_the_length():
+    """J8: with the marker in the query lrclib answers nothing, so there was no length either."""
+    # an instrumental cut is as long as the sung one, so the candidates fit our file exactly
+    api, asked = responses(search=[{**ROW, "duration": 230.0}, {**ROW, "id": 43, "duration": 230.4}])
+    found = api.get("TUNGSTEN", "Lullaby (Instrumental)", None, 230.0)
+    assert [u.params["track_name"] for u in asked] == ["Lullaby"]  # the marker never reaches lrclib
+    assert found.text is None  # and the sung words are still refused
+    assert found.status == "none"
+    assert found.length == 230.0  # but the length reference it used to lack is there
+
+
+def test_a_live_marker_reaches_lrclib_and_attaches_no_words():
+    api, asked = responses(search=[{**ROW, "duration": 61.0}])
+    found = api.get("TUNGSTEN", "Lullaby (Live in Hamburg)", None, 61.0)
+    assert [u.params["track_name"] for u in asked] == ["Lullaby (Live in Hamburg)"]
+    assert found.lrclib_id == 42  # lrclib answered for the live title itself, so those are its words
 
 
 def test_the_kept_length_lands_in_the_plan(tmp_path, yt):
