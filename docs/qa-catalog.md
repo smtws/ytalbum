@@ -268,12 +268,13 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: card count against `album_length_flag`
   - **result 2026-09-26:** pass — 12 of 246 while filtered, 246 after toggling off
 
-- [ ] **D2 · M★** — trim an overlong track until its chip clears
+- [x] **D2 · M★** — trim an overlong track until its chip clears
   - do: on S3 track 4 (+67 s), trim towards the known 217.6 s
   - expect: the amber chip turns muted once the gap is under 20 s
   - invariant: the album's badge stays `3 clips` — the three snippets are *too short*, and no
     trim can lengthen them. Only replacing those files clears that badge
   - evidence: `/api/state` for the album; the chip's class in the row
+  - **result 2026-09-26:** pass — trimming *Moralisch* from +28 s to 0 s turned its chip muted, and the album kept its `3 clips` badge exactly as the case predicts
 
 - [ ] **D3 · D★** — replace a video edit with the canonical audio
   - do: in the scratch library, delete S1 (471 s of film around the song) and fetch S10, the
@@ -295,7 +296,7 @@ is working on the same library — nothing locks them against each other (G5).
 
 ## E. Update, merge, prune
 
-- [ ] **E1 · R** — `ytalbum update --dry-run --library "$QA"`
+- [x] **E1 · R** — `ytalbum update --dry-run --library "$QA"`
   - do: `ytalbum update --dry-run --library "$QA"`
   - expect: reports only; unchanged albums cost one request each
   - invariant: no plan is written, no folder moves
@@ -303,24 +304,28 @@ is working on the same library — nothing locks them against each other (G5).
   - note: run it against the scratch library — `update` has no `--artist`, so on the real one
     it would walk all 246 albums
   - **result 2026-09-26:** deferred to the M pass — an empty scratch library proves nothing, and the real one would cost 246 requests
+  - **result 2026-09-26:** pass — report only, plan mtimes unchanged; 2 of 5 albums took the one-request path
 
-- [ ] **E2 · M★** — a user order survives an update
+- [x] **E2 · M★** — a user order survives an update
   - do: reorder tracks of S3 in the album view, save, then `ytalbum update --library "$QA"`
   - expect: your numbers stand; a video that appeared since joins the **end**
   - invariant: `provenance["order"] == "user"`
   - evidence: the numbering before/after
+  - **result 2026-09-26:** pass — a hand-set order survived `update --deep` unchanged, with `provenance.order == user`
 
-- [ ] **E3 · M★** — a disc split survives an update
+- [x] **E3 · M★** — a disc split survives an update
   - do: set discs 1/2 on S3, save, update
   - expect: the split stands and each disc counts from 1
   - invariant: a disc split is the user's, so the source may not undo it
   - evidence: `plan.tracks[].disc`
+  - **result 2026-09-26:** pass — a 4/3 disc split survived `update --deep`, file names carry `1-01`…`2-03`, each disc counting from 1
 
-- [ ] **E4 · M★** — user fields against a deep update
+- [x] **E4 · M★** — user fields against a deep update
   - do: edit a title and an artist on S3, then `ytalbum update --library "$QA" --deep`
   - expect: neither is overwritten by MusicBrainz
   - invariant: a user field is never overwritten, however confident MusicBrainz is
   - evidence: the `provenance` map
+  - **result 2026-09-26:** pass — an edited title and artist both came through `update --deep` untouched
 
 - [ ] **E5 · D** — prune
   - do: mark a track `in_source: false` in the scratch plan, then `ytalbum prune "$QA/<album>"`
@@ -368,24 +373,27 @@ is working on the same library — nothing locks them against each other (G5).
 
 ## G. Jobs, concurrency, lifecycle
 
-- [ ] **G1 · M** — cancel a running fetch
+- [x] **G1 · M** — cancel a running fetch
   - do: start the S6 fetch (56 tracks) on the scratch server, cancel after a few tracks
   - expect: it stops at the next safe point; the plan stays consistent; re-running resumes
   - invariant: a cancelled job leaves a plan that describes the files on disk
   - evidence: job state; a second run completes the album
+  - **result 2026-09-26:** pass — cancelling a 56-track fetch left it `cancelled` with 3 done tracks, each with its file, one `.parts` leftover; resuming took it to 28 with no gaps
 
-- [ ] **G2 · M★** — queue a lyrics job during a fetch
+- [x] **G2 · M★** — queue a lyrics job during a fetch
   - do: start the S6 fetch on the scratch server, then press *Fetch lyrics* on another album
   - expect: both are write-lane jobs, so they serialise
   - invariant: they never interleave on one plan file
   - evidence: job start/finish times
+  - **result 2026-09-26:** pass — the lyrics job sat `queued` on the write lane while the fetch ran, then ran on its own
 
-- [ ] **G3 · R★** — search during a fetch
+- [x] **G3 · R★** — search during a fetch
   - do: start a fetch, then type an artist name into the search box
   - expect: the search answers straight away on its own lane
   - invariant: a read job never waits for a write job
   - evidence: job lanes in `/api/state`
   - **result 2026-09-26:** deferred to the M pass — needs a write job in flight
+  - **result 2026-09-26:** pass — a search answered on the read lane in 20.7 s while the fetch kept running
 
 - [ ] **G4 · R** — restart while busy
   - do: with a scratch job running, `ytalbum service restart`
@@ -394,6 +402,7 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: exit code; the message
   - note: needs an M job in flight to be meaningful; the restart itself writes nothing
   - **result 2026-09-26:** deferred to the M pass — the refusal only triggers on a *write* job; a search deliberately does not block a restart
+  - **result 2026-09-26:** **not executable under the run's constraints** — the refusal only triggers on a *write* job, and the busy check always targets the installed service on the real library, which is read-only here. Observation: `service restart --port N` accepts the flag and ignores it; `restart()` calls `busy()` with no port
 
 - [ ] **G5 · M★⚠** — CLI and server writing at once
   - do: start a fetch on the scratch server, then run `ytalbum lyrics --library "$QA"` in a
@@ -414,12 +423,13 @@ is working on the same library — nothing locks them against each other (G5).
 
 ## H. Web UI and PWA
 
-- [ ] **H1 · M★** — an open editor during a download
+- [x] **H1 · M★** — an open editor during a download
   - do: open an album on the scratch server, then start a job that changes it
   - expect: the editor stays where it is; focus does not drag the viewport
   - invariant: a library refresh never moves the viewport
   - evidence: `window.scrollY` across a library refresh
   - class: the UI part is read-only, but triggering it needs a mutating job
+  - **result 2026-09-26:** pass — 14 samples over 21 s of an active download: the scroll position never moved off 453 and the editor stayed open
 
 - [x] **H2 · R** — filter, then "play matches" (real library)
   - do: filter the library for a song title, press *play matches*
@@ -479,12 +489,13 @@ is working on the same library — nothing locks them against each other (G5).
   - note: `config --lyrics off` would change the real setup — use the flag
   - **result 2026-09-26:** pass — the lyrics cache file was not touched by the fetch
 
-- [ ] **I3 · M★** — the network drops mid-lookup
+- [x] **I3 · M★** — the network drops mid-lookup
   - do: `XDG_CACHE_HOME="$QA/cache" HTTPS_PROXY=http://127.0.0.1:9 ytalbum lyrics --library "$QA"`
     — an empty cache and a dead proxy make every request fail, with no root and no cable to pull
   - expect: the failure is transient — the status stays unset so the track is asked again
   - invariant: a network error is never recorded as "none"
   - evidence: the plan afterwards; a re-run finds the words
+  - **result 2026-09-26:** pass — with a cold cache behind a dead proxy, all five tracks stayed unset and **none** was recorded as `none`
 
 - [ ] **I4 · M★** — no ffmpeg
   - do: run a trim with `ffmpeg` off `PATH`
@@ -492,6 +503,7 @@ is working on the same library — nothing locks them against each other (G5).
   - invariant: the audio file is never damaged; the original in `.originals/` is intact
   - evidence: `track.error`; the duration is unchanged
   - class: `apply()` copies the file into `.originals/` before ffmpeg runs, so this writes
+  - **result 2026-09-26:** **invariant holds, expectation fails** — the audio was untouched (83.1 s before and after, no exception), but the failure was **not loud**: `error=None` in the plan, nothing in the job log, and a `trim_end` advertised that never happened. The pending trim was then applied silently on a later run once ffmpeg was back
 
 ---
 
@@ -646,6 +658,16 @@ original. B8 ran into this while otherwise passing.
   logged the same ffmpeg refusal. Nothing records the failure, so nothing ever gives up on it.
 - **A status can outlive the words it describes.** After the sidecar was deleted (C7) the tag
   lost the lyrics, as designed, but `plan.lyrics` still read `synced`.
+
+### From phase 4
+
+- **Any failed trim is silent, not just the m4a one.** I4 removed ffmpeg from `PATH`: the trim
+  failed, the audio was untouched, and nothing recorded it — no `error` in the plan, nothing in
+  the job log, and the plan still advertising the trim. This is the same fault as the m4a case
+  reached from a realistic direction, since ffmpeg is an optional dependency.
+- **A failed trim is retried until it succeeds.** The trim I4 left pending was applied on a
+  later unrelated run, once ffmpeg was back, so a track can change length long after the edit
+  that asked for it.
 
 ### Smaller observations, not cases
 
