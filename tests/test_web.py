@@ -870,3 +870,106 @@ def test_the_spelling_hint_names_both_ways_to_run_repair(tmp_path, opus_template
     _, log = settled(tmp_path, opus_template, [("LORD OF THE LOST", Provenance.YT_TITLE)], (LOTL, Provenance.MB))
     hint = next(line for line in log if "repair" in line)
     assert "ytalbum repair" in hint and "Repair library" in hint
+
+
+# -- the fetch preview (P11, DESIGN.md §9.28) ---------------------------------------------
+
+
+def previewing_server(library, opus_template, collection):
+    """A server whose YouTube answers with one fixed collection, so a preview can be driven."""
+    yt = FakeYouTube(opus_template)
+    yt.fetch = lambda url: collection
+    app = App(Config(musicbrainz=False), library, port=0,
+              service_factory=lambda job: Service(Config(musicbrainz=False), library, log=job.log.append, yt=yt))
+    srv = app.make_server()
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return app, srv, yt
+
+
+def single_collection():
+    """S1's shape: a label suffix in the title, which the plan is expected to drop."""
+    c = Collection.from_dict(json.loads((FIXTURES / "vol1_collection.json").read_text()))
+    c.source_url, c.source_id, c.is_playlist = "https://www.youtube.com/watch?v=" + "p" * 11, "p" * 11, False
+    c.entries = c.entries[:1]
+    c.entries[0].duration = 200
+    c.entries[0].music.album = None  # a label-channel upload has no YT Music album of its own
+    c.title = "LORD OF THE LOST - Viva Vendetta (Official Video) | Napalm Records"
+    c.channel = c.entries[0].channel = "Napalm Records"
+    c.entries[0].title = c.title  # for a single the video *is* the collection; both say the same
+    return c
+
+
+def test_a_preview_runs_on_the_read_lane_and_writes_nothing(library, opus_template):
+    app, srv, yt = previewing_server(library, opus_template, single_collection())
+    before = sorted(p.name for p in library.iterdir())
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{srv.server_address[1]}", timeout=10) as c:
+            job = c.post("/api/open", json={"q": single_collection().source_url}, headers=HDR).json()["job"]
+            assert job["lane"] == "read" and job["kind"] == "preview"
+            done = wait(c, job["id"])
+            assert done["state"] == "done"
+            plan = c.get(f"/api/job?id={job['id']}").json()["result"]["plan"]
+    finally:
+        srv.shutdown()
+    assert plan["album"] == "Viva Vendetta"  # the label suffix and the noise bracket are gone
+    assert plan["albumartist"] == "LORD OF THE LOST"
+    assert plan["folder"].startswith("LORD OF THE LOST/")
+    assert yt.downloads == []  # nothing fetched
+    assert sorted(p.name for p in library.iterdir()) == before  # and no folder made
+
+
+def test_what_the_preview_shows_is_what_the_fetch_writes(library, opus_template):
+    """The preview is the outcome: same code path, `dry` being the only difference."""
+    collection = single_collection()
+    app, srv, _ = previewing_server(library, opus_template, collection)
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{srv.server_address[1]}", timeout=10) as c:
+            job = c.post("/api/open", json={"q": collection.source_url}, headers=HDR).json()["job"]
+            wait(c, job["id"])
+            shown = c.get(f"/api/job?id={job['id']}").json()["result"]["plan"]
+
+            fetched = c.post("/api/fetch", json={"urls": [collection.source_url]}, headers=HDR).json()["job"]
+            assert wait(c, fetched["id"])["state"] == "done"
+    finally:
+        srv.shutdown()
+    written = next(p for _, p in iter_plans(library) if p.source_id == collection.source_id)
+    assert (written.albumartist, written.album, written.folder) == (shown["albumartist"], shown["album"], shown["folder"])
+    assert [(t.number, t.artist, t.title) for t in written.tracks] == [
+        (t["number"], t["artist"], t["title"]) for t in shown["tracks"]]
+
+
+def test_a_preview_of_an_album_already_here_says_so_and_keeps_the_users_edits(library, opus_template):
+    """Without the merge the preview would promise names the fetch would not write."""
+    collection = single_collection()
+    app, srv, _ = previewing_server(library, opus_template, collection)
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{srv.server_address[1]}", timeout=10) as c:
+            wait(c, c.post("/api/fetch", json={"urls": [collection.source_url]}, headers=HDR).json()["job"]["id"])
+            album_dir, plan = next((d, p) for d, p in iter_plans(library) if p.source_id == collection.source_id)
+            apply_user_edits(plan, {"album": "My Own Album Name"})
+            save_plan(plan, album_dir)
+
+            job = c.post("/api/open", json={"q": collection.source_url}, headers=HDR).json()["job"]
+            wait(c, job["id"])
+            result = c.get(f"/api/job?id={job['id']}").json()["result"]
+            log = "\n".join(c.get(f"/api/job?id={job['id']}").json()["log"])
+    finally:
+        srv.shutdown()
+    assert result["album_dir"]  # the preview says which folder it is already in
+    assert result["plan"]["album"] == "My Own Album Name"  # and shows the name a fetch would keep
+    assert result["plan"]["provenance"]["album"] == "user"
+    assert "already in the library" in log
+
+
+def test_the_direct_path_does_not_go_through_a_preview(library, opus_template):
+    """Shift+Go posts a fetch itself, so the preview never becomes a mandatory click."""
+    collection = single_collection()
+    app, srv, yt = previewing_server(library, opus_template, collection)
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{srv.server_address[1]}", timeout=10) as c:
+            job = c.post("/api/fetch", json={"urls": [collection.source_url]}, headers=HDR).json()["job"]
+            assert job["lane"] == "write"
+            assert wait(c, job["id"])["state"] == "done"
+    finally:
+        srv.shutdown()
+    assert yt.downloads  # it downloaded without any preview in between

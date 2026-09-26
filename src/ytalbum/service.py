@@ -156,9 +156,22 @@ class Service:
             self.log(f"  the single is named after its track: “{named}”")
 
         if dry or self.library is None:
+            # A preview is only worth having if it is the outcome, so it goes through what a real
+            # fetch goes through — the merge with what is already there and the harmonisation —
+            # and writes nothing. Without the merge it would show a fresh plan for an album whose
+            # stored one carries the user's own edits, and promise names the fetch would not write.
+            known_dir = None
+            if found := (find_plan(self.library, plan.source_id) if self.library and self.library.exists() else None):
+                known_dir, existing = found
+                fresh_ids = {t.video_id for t in plan.tracks}
+                new = sum(t.video_id not in {x.video_id for x in existing.tracks} for t in plan.tracks)
+                plan = merge_plans(existing, plan)
+                gone = sum(not t.in_source for t in plan.tracks)
+                self.log(f"already in the library as {known_dir.relative_to(self.library)}: "
+                         f"{len(fresh_ids)} in the source now, {new} new, {gone} no longer there")
             self._settle_artist(plan)  # read-only: a dry run shows the artist a fetch would write
             self.on_plan(plan)
-            return Outcome("dry", plan)
+            return Outcome("dry", plan, known_dir)
 
         if found := find_plan(self.library, plan.source_id):
             old_dir, existing = found

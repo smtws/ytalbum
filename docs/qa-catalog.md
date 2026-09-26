@@ -810,6 +810,57 @@ for real and a second copy of it under a shouted spelling of the same artist (`F
   - **result:** pass — "… 'ytalbum repair' (or “Repair library” in the web UI) unifies them on the
     better spelling", asserted in `test_web.py` as well so the two cannot drift apart
 
+## M. The fetch preview (P11, DESIGN §9.28)
+
+Added 2026-09-26. A scratch server on 8799 over an **empty** library inside the session scratchpad,
+so "writes nothing" could be seen rather than argued. Driven through the real page.
+
+- [x] **M1 · R** — preview a single with a label suffix (S1)
+  - do: paste `watch?v=___ci9kmRc4` and press Go
+  - expect: the names a fetch would write, and nothing on disk
+  - invariant: a preview is a read job: it must not block writes and must not write
+  - evidence: the panel; the library folder
+  - **result:** pass — *Lord of the Lost — Viva Vendetta*, `single · 1 tracks → Lord of the Lost/Viva
+    Vendetta`, "new to the library — nothing is written until you press Download". The label suffix
+    and `(Official Video)` are gone and the artist carries MusicBrainz' spelling, i.e. enrichment and
+    harmonisation have run. The library folder stayed empty
+
+- [x] **M2 · R** — Cancel
+  - do: press Cancel
+  - expect: nothing written, nothing queued
+  - evidence: `ls` of the library root
+  - **result:** pass — the library was still empty (not even an album folder)
+
+- [x] **M3 · M** — preview then Download, and compare (S9, the handle case)
+  - do: paste `watch?v=dGO_sx4By28`, read the preview, press Download
+  - expect: what was written is what was shown, character for character
+  - invariant: the preview is the outcome, because both come from one code path
+  - evidence: the preview panel against the stored plan
+  - **result:** pass — preview and plan both read album *The Dead Don’t Die feat. Feuerschwanz*,
+    artist `DOMINUM`, folder `DOMINUM/The Dead Don’t Die feat. Feuerschwanz`, track 1 with the same
+    title; no `@handle` anywhere, and the album name equals the track title (P7's rule) in both
+
+- [x] **M4 · R** — preview an album that is already here
+  - do: paste the same URL again
+  - expect: the "already in the library" state, and the plan as a fetch would keep it
+  - invariant: the merge happens in the preview too, or a user's edits would appear to be about to
+    be overwritten
+  - evidence: the panel line; the button label
+  - **result:** pass — "already in the library — downloading fetches what is missing and leaves your
+    edits alone", button "Download what is missing". **One blemish found here and fixed:** the line
+    first printed the server's absolute path; it now names the library-relative folder, and only
+    when the album would move. The offline test covers the edit-keeping half (an album renamed by the
+    user previews under the user's name, with `provenance.album = user`)
+
+- [x] **M5 · R** — the preview is not compulsory
+  - do: Shift+click Go on a URL
+  - expect: the fetch starts directly, no preview panel
+  - invariant: someone who does not want to look first must not be made to
+  - evidence: the job kind and lane
+  - **result:** covered offline — the direct path posts `/api/fetch` (write lane) with no preview job
+    in between. Shift on a form submit is captured on the form's capture phase, since a submit event
+    carries no modifier state
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -817,6 +868,7 @@ for real and a second copy of it under a shouted spelling of the same artist (`F
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the M cases (the fetch preview) | 5 | 1 blemish (M4, the absolute path), fixed | Run over an empty scratch library so "writes nothing" was observable. The preview already existed; the work was making it the outcome. |
 | 2026-09-26 | the L cases (repair from the web UI) | 3 | 0 | Scratch library with two spellings of one artist; the shouted folder was gone afterwards. Nothing measured on the real library: repair is a no-op there today (I-014, I-015). |
 | 2026-09-26 | the K8–K11 cases (per-track lyrics actions) | 4 | 0 | Driven through the real page on a scratch library inside the session scratchpad. The rejected entry stayed rejected across an explicit new lookup. |
 | 2026-09-26 | the K cases (the lyrics editor) | 7 | 1 defect found in the package under test (K7), 1 blemish (K3) | Both fixed before the commit. Driven through the real page against a freshly seeded scratch library. |

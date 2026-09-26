@@ -878,7 +878,7 @@ function showResult(job) {
     fill(panel, h("div", { class: "panel-head" }, h("h2", {}, "That did not work"), close),
       h("pre", {}, (job.log || []).slice(-8).join("\n")));
   } else if (job.kind === "preview") {
-    fill(panel, previewView(r.plan, close));
+    fill(panel, previewView(r.plan, close, r.album_dir));
   } else {
     fill(panel, pickView(r, close));
   }
@@ -886,16 +886,32 @@ function showResult(job) {
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function previewView(p, close) {
-  const rows = p.tracks.map((t) => h("tr", {}, h("td", { class: "num" }, t.number), h("td", {}, t.artist), h("td", {}, t.title),
-    h("td", { class: "src" }, provBadge(t.provenance.artist), provBadge(t.provenance.title))));
+// What a fetch would write, before anything is downloaded: the same plan the fetch then writes,
+// because it comes from the same code path with `dry` set (DESIGN.md §9.28).
+function previewView(p, close, known) {
+  const gone = p.tracks.filter((t) => t.in_source === false);
+  const rows = p.tracks.map((t) => h("tr", { class: t.in_source === false ? "muted" : "" },
+    h("td", { class: "num" }, t.number), h("td", {}, t.artist), h("td", {}, t.title),
+    h("td", { class: "src" }, provBadge(t.provenance.artist), provBadge(t.provenance.title),
+      t.in_source === false ? h("span", { class: "badge", title: "no longer in the source playlist; a fetch keeps the file, “Remove gone tracks” deletes it" }, "gone") : null)));
   return [
     h("div", { class: "panel-head" },
-      h("div", {}, h("h2", {}, `${p.albumartist} — ${p.album}`, p.year ? ` (${p.year})` : ""), h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.tracks.length} tracks → ${p.folder}`)),
+      h("div", {}, h("h2", {}, `${p.albumartist} — ${p.album}`, p.year ? ` (${p.year})` : ""),
+        h("div", { class: "muted" }, `${p.kind.replace("_", " ")} · ${p.tracks.length} tracks → ${p.folder}`),
+        known
+          // the server's absolute path is no business of the page: the folder above is the answer
+          ? h("div", { class: "muted" }, h("span", { class: "badge" }, "already in the library"),
+            `${known.replace(/\\/g, "/").endsWith(p.folder) ? "" : ` · it would move to ${p.folder}`}`
+            + `${gone.length ? ` · ${gone.length} track(s) no longer in the source` : ""}`
+            + " — downloading fetches what is missing and leaves your edits alone")
+          : h("div", { class: "muted" }, "new to the library — nothing is written until you press Download")),
       close),
     h("table", {}, h("tbody", {}, rows)),
     p.skipped?.length ? h("p", { class: "muted" }, `skipped: ${p.skipped.map((s) => `${s.title} (${s.reason})`).join("; ")}`) : null,
-    h("div", { class: "actions" }, h("button", { type: "button", onclick: (e) => { submit("fetch", { urls: [p.source_url] }, e.currentTarget).then(() => setTimeout(() => { $("#results").hidden = true; }, 1200)); } }, "Download")),
+    h("div", { class: "actions" },
+      h("button", { type: "button", onclick: (e) => { submit("fetch", { urls: [p.source_url] }, e.currentTarget).then(() => setTimeout(() => { $("#results").hidden = true; }, 1200)); } },
+        known ? "Download what is missing" : "Download"),
+      h("button", { class: "quiet", type: "button", onclick: () => { $("#results").hidden = true; } }, "Cancel")),
   ];
 }
 
@@ -1362,6 +1378,12 @@ $("#open").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const q = $("#q").value.trim();
   if (!q) return;
+  // A URL is previewed first, because seeing the names before the files are written is the whole
+  // point; shift skips it and downloads straight away for someone who does not want to look.
+  if (skipPreview && /^https?:/.test(q)) {
+    skipPreview = false;
+    return void submit("fetch", { urls: [q] }, ev.submitter || $("#open button"));
+  }
   const id = await submit("open", { q }, ev.submitter || $("#open button"));
   if (id) {
     waitingFor = id;
@@ -1369,6 +1391,11 @@ $("#open").addEventListener("submit", async (ev) => {
     $("#results").hidden = false;
   }
 });
+// a form submit carries no modifier state, so it is caught where the modifier is: on the way in
+let skipPreview = false;
+for (const event of ["click", "keydown"]) {
+  $("#open").addEventListener(event, (e) => { skipPreview = e.shiftKey === true; }, true);
+}
 // plain click: cheap check (one request per album); with shift: read every album fully
 $("#update").addEventListener("click", (e) => submit("update", { deep: e.shiftKey }, e.currentTarget));
 $("#repair").addEventListener("click", (e) => {

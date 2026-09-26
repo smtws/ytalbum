@@ -713,6 +713,26 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    the editor's Delete is the way to let it answer again (§9.26). Both are write jobs with the album
    in `Job.target`, so they are refused while a pass holds it, and a track with no file is refused.
 
+28. ✅ The fetch preview is the outcome (2026-09-26, the other half of backlog item 2). A preview of
+   a URL already existed — `/api/open` has always run `fetch(dry=True)` on the read lane and shown
+   the plan — so this slice is about the three ways it was not yet the truth, and about not making
+   it compulsory.
+   First, **an album already in the library was previewed as if it were new.** The dry branch
+   returned before the merge, so the plan shown was a fresh reading of YouTube: it promised names
+   that a real fetch would not write, because the fetch merges with the stored plan and keeps every
+   value the user has edited. The dry path now merges too (and logs "already in the library as …,
+   N new, M no longer there"), which costs nothing — nothing is saved — and makes the preview
+   answer the only question worth asking. The panel says which state it is in, and the button reads
+   "Download what is missing" rather than "Download".
+   Second, the preview showed no sign of tracks that have left the source; those rows are now marked
+   *gone*, as the album view marks them.
+   Third, **the preview must not become a compulsory click**: Shift+click on Go (or Shift+Enter)
+   posts the fetch directly, the same modifier convention as everywhere else in the UI. A form
+   submit carries no modifier state, so it is captured on the way in, on the form's capture phase.
+   One thing the page itself caught during verification: the in-library line printed the server's
+   absolute path, which is no business of a browser. It shows the library-relative folder, and only
+   mentions a move when the album would change folders.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a
