@@ -198,32 +198,36 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: job log line counts
   - **result 2026-09-26:** pass — two runs in a row reported the same `6 none, 2 synced, 1 instrumental` and retagged nothing
 
-- [ ] **C2 · M★** — trim a track that has synced lyrics, to a length that still matches
+- [x] **C2 · M★** — trim a track that has synced lyrics, to a length that still matches
   - do: on S3 track 4 (*Sex is Muss*, 285 s of file against a 217.6 s song, synced lyrics),
     trim the end towards ~218 s
   - expect: the words survive or are re-matched against the new length
   - invariant: timestamps are **never** shifted by the trim; a front trim makes the track be
     looked up again, an end trim need not
   - evidence: the first timestamp in the `.lrc`; `lyrics_id` before/after
+  - **result 2026-09-26:** pass — trimming to 218 s did not shift a single timestamp; the words were **re-matched** to the lrclib entry that fits the new length (#1949288 instead of #30840489, first line 00:27.69 against 00:27.71)
 
-- [ ] **C3 · M★** — trim to a length nothing matches, then clear it
+- [x] **C3 · M★** — trim to a length nothing matches, then clear it
   - do: trim S3 track 4 to about 250 s — a length no entry has — then clear the trim again
   - expect: the words go, then come back when the length is a known one again
   - invariant: no stale `.lrc` beside a track whose verdict is "none"
   - evidence: `plan.lyrics`; sidecar presence
+  - **result 2026-09-26:** pass — at 250 s nothing matched and the words went; clearing the trim brought the file back to 284.7 s and the original entry (#30840489) with it
 
-- [ ] **C4 · M** — rename a track that has lyrics
+- [x] **C4 · M** — rename a track that has lyrics
   - do: rename a track that has a `.lrc` in the album view, save
   - expect: the `.lrc` follows the audio and the tag is rewritten from it
   - invariant: `mbid` **and** `mb_length` are both cleared
   - evidence: file names; the `LYRICS` tag; the plan
+  - **result 2026-09-26:** pass — the `.lrc` followed the rename, the tag was rewritten from it, and `mbid` **and** `mb_length` were both cleared
 
-- [ ] **C5 · M★** — lyrics you wrote yourself
+- [x] **C5 · M★** — lyrics you wrote yourself
   - do: write a `.lrc` by hand, set `provenance["lyrics"] = "user"`,
     `ytalbum lyrics --library "$QA" --refetch`
   - expect: your file is untouched
   - invariant: a user provenance on lyrics outranks everything, `--refetch` included
   - evidence: `sha1sum` before/after
+  - **result 2026-09-26:** pass — a hand-written sidecar marked `user` came through `--refetch` byte-identical, and the tag carries those words
 
 - [ ] **C6 · D★** — a hand-written `.lrc` **without** the provenance mark
   - do: write a `.lrc` by hand, leave the provenance alone, then `ytalbum lyrics --library "$QA" --refetch`
@@ -231,11 +235,12 @@ is working on the same library — nothing locks them against each other (G5).
   - invariant: whatever is decided, the plan and the sidecar must not disagree afterwards
   - evidence: the sidecar diff
 
-- [ ] **C7 · M** — the file is the source of truth
+- [x] **C7 · M** — the file is the source of truth
   - do: delete a `.lrc`, then `ytalbum download "$QA/<album>"`
   - expect: the tag loses the words too
   - invariant: the tag never outlives the file it was copied from
   - evidence: `mutagen` tag absent
+  - **result 2026-09-26:** pass — deleting the `.lrc` removed the words from the tag on the next run. Note: `plan.lyrics` still reads `synced`, so the status outlives the words it describes
 
 - [x] **C8 · M★** — an instrumental never borrows the singer's words
   - do: run the lyrics pass over S2 (*Viva Vendetta (Instrumental)*, 230 s — the same length as
@@ -633,6 +638,14 @@ track's format is, and `apply()` always cuts into `.trim.opus` with `-c copy`.
 And it outlives the format switch: `.originals/dGO_sx4By28.opus` still held AAC after the track
 was switched back to `.opus`, so every future trim of that track fails on a wrong-codec
 original. B8 ran into this while otherwise passing.
+
+### Two more from phase 3
+
+- **A broken trim is retried for ever.** The DOMINUM track left with a wrong-codec original
+  re-attempted its trim on *every* pass over that library — each `lyrics` or `download` run
+  logged the same ffmpeg refusal. Nothing records the failure, so nothing ever gives up on it.
+- **A status can outlive the words it describes.** After the sidecar was deleted (C7) the tag
+  lost the lyrics, as designed, but `plan.lyrics` still read `synced`.
 
 ### Smaller observations, not cases
 
