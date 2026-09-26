@@ -314,6 +314,39 @@ def reordered(plan, sequence):
     return apply_user_edits(plan, {"tracks": [{"video_id": v, "number": n} for n, v in enumerate(sequence, 1)]})
 
 
+def five():
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:5]
+    return refresh_derived(plan)
+
+
+def typed(plan, positions):
+    """Post what the browser posts, with a number typed into some of the rows."""
+    edits = as_shown(plan)
+    for index, number in positions.items():
+        edits["tracks"][index]["number"] = str(number)
+    order = [t.video_id for t in plan.tracks]
+    apply_user_edits(plan, edits)
+    return [order.index(t.video_id) for t in plan.tracks]
+
+
+@pytest.mark.parametrize(("positions", "expected"), [
+    ({4: 3}, [0, 1, 4, 2, 3]),  # up, the case that always worked
+    ({0: 3}, [1, 2, 0, 3, 4]),  # down: used to land on 2, one short of what was typed
+    ({1: 4}, [0, 2, 3, 1, 4]),  # down: used to land on 3
+    ({0: 5}, [1, 2, 3, 4, 0]),  # to the last position, which sorting could never reach
+    ({4: 1}, [4, 0, 1, 2, 3]),  # to the first
+    ({0: 5, 4: 1}, [4, 1, 2, 3, 0]),  # one down and one up in the same save
+])
+def test_a_typed_number_is_the_position_the_track_lands_on(positions, expected):
+    """Sorting by the numbers can place a track before the one whose number it typed, never
+    after it — so a move down always fell one short and the end was unreachable."""
+    plan = five()
+    assert typed(plan, positions) == expected
+    assert [t.number for t in plan.tracks] == [1, 2, 3, 4, 5]
+    assert plan.provenance["order"] == Provenance.USER
+
+
 def test_collapsing_a_split_keeps_the_arrangement_the_user_set():
     """The numbers of a split are per disc, so sorting by them merges the discs like a zipper."""
     plan = build_plan(vol1())

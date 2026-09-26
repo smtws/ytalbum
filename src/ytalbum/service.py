@@ -549,7 +549,7 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
                 plan.provenance[name] = Provenance.USER
     by_id = {t.video_id: t for t in plan.tracks}
     was_on = {t.video_id: t.disc for t in plan.tracks}  # numbers count inside the disc they were on
-    typed: set[str] = set()  # tracks the user gave a new number to; theirs wins a tie
+    typed: dict[str, int] = {}  # tracks the user gave a new number to -> the position they typed
     discs_changed = order_changed = False
     for te in edits.get("tracks", []):
         t = by_id.get(te.get("video_id"))
@@ -567,7 +567,7 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
         if str(te.get("number", "")).strip().isdigit():
             wanted = max(1, int(te["number"]))
             if wanted != t.number:
-                typed.add(t.video_id)
+                typed[t.video_id] = wanted
                 order_changed = True
             t.number = wanted
         if str(te.get("disc", "")).strip().isdigit():
@@ -587,14 +587,33 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
     if order_changed:
         # the numbers first, read where they were typed: inside the disc the track was on, where
         # they are unique. Doing this against the *new* discs is what interleaved a collapse.
-        # a number the user just typed beats the same number left standing on another track:
-        # typing 1 on 2-04 means it leads, and 2-01 moves down
-        plan.tracks.sort(key=lambda t: (was_on.get(t.video_id, t.disc), t.number, t.video_id not in typed))
+        plan.tracks = placed(plan.tracks, was_on, typed)
     if discs_changed or order_changed:
         arrange(plan)  # then the discs, keeping that arrangement, counting each disc from 1
     if order_changed:
         plan.provenance["order"] = Provenance.USER  # the source may not renumber this album
     return refresh_derived(plan)
+
+
+def placed(tracks: list[PlanTrack], was_on: dict[str, int], typed: dict[str, int]) -> list[PlanTrack]:
+    """Put every track the user typed a number for on that position, inside the disc it was on.
+
+    A typed number is a position, in both directions and including the last one. Sorting by the
+    numbers cannot do that: a track moved *down* still sorts ahead of the track that holds the
+    position below its target, so typing 5 on the first of five tracks moved it to 4 and no typed
+    number could ever move a track to the end (DESIGN.md §9.22). So the typed tracks are taken
+    out of the arrangement and put back at the index they asked for, lowest number first, while
+    the untouched ones keep their relative order.
+    """
+    groups: dict[int, list[PlanTrack]] = {}
+    for t in tracks:
+        groups.setdefault(was_on.get(t.video_id, t.disc), []).append(t)
+    for disc, group in groups.items():
+        rest = [t for t in group if t.video_id not in typed]
+        for t in sorted((x for x in group if x.video_id in typed), key=lambda x: typed[x.video_id]):
+            rest.insert(min(typed[t.video_id] - 1, len(rest)), t)
+        groups[disc] = rest
+    return [t for disc in sorted(groups) for t in groups[disc]]
 
 
 def arrange(plan: AlbumPlan) -> AlbumPlan:

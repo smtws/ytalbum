@@ -574,6 +574,14 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    lead and moves 2-01 down. Prune then closes the gap on every album, per disc, and keeps
    `provenance["order"] = user`: that flag protects the sequence from the *source* renumbering it,
    and a deletion the user asked for is not the source — `delete_track` has always renumbered.
+   The sort had to go entirely in the end, because a number the user types is a *position* and
+   sorting cannot deliver one: a track moved down still sorts ahead of whatever holds the place
+   below its target, so typing 5 on the first of five tracks put it fourth, and no typed number
+   could move a track to the end at all — sorting can place a track before the one whose number
+   it typed, never after it. The upward move worked, which is why the asymmetry stayed hidden.
+   So the typed tracks are lifted out of the arrangement and put back at the index they asked
+   for, lowest number first, while the untouched ones keep their relative order (`placed`). Two
+   typed positions in one save, one up and one down, both land where they were asked to.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
