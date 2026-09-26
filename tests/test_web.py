@@ -13,7 +13,7 @@ from test_incremental import JPEG, FakeYouTube, opus_template, vol1
 from ytalbum.config import Config
 from ytalbum.download import iter_plans, load_plan, run, save_plan
 from ytalbum.models import Collection, Provenance
-from ytalbum.plan import build_plan, refresh_derived
+from ytalbum.plan import build_plan, merge_plans, refresh_derived
 from ytalbum.service import Service, apply_user_edits
 from ytalbum.web import App
 
@@ -973,3 +973,105 @@ def test_the_direct_path_does_not_go_through_a_preview(library, opus_template):
     finally:
         srv.shutdown()
     assert yt.downloads  # it downloaded without any preview in between
+
+
+# -- a way back from an edit (P12, DESIGN.md §9.29) ----------------------------------------
+
+
+def test_resetting_an_album_field_restores_what_ytalbum_derived():
+    plan = build_plan(vol1())
+    derived = plan.album
+    apply_user_edits(plan, {"album": "My Own Name"})
+    assert (plan.album, plan.provenance["album"]) == ("My Own Name", Provenance.USER)
+
+    apply_user_edits(plan, {"reset": ["album"]})
+    assert plan.album == derived
+    assert "album" not in plan.provenance  # ytalbum's again, and the next pass names its source
+    assert plan.folder.endswith(derived)  # the folder follows
+
+
+def test_resetting_a_track_field_restores_it_too():
+    plan = build_plan(vol1())
+    track = plan.tracks[0]
+    derived_title, derived_artist = track.title, track.artist
+    apply_user_edits(plan, {"tracks": [{"video_id": track.video_id, "title": "Mine", "artist": "Me"}]})
+    assert track.provenance["title"] == Provenance.USER
+
+    apply_user_edits(plan, {"tracks": [{"video_id": track.video_id, "reset": ["title", "artist"]}]})
+    assert (track.title, track.artist) == (derived_title, derived_artist)
+    assert "title" not in track.provenance and "artist" not in track.provenance
+    assert derived_title in track.filename  # and so does the file name
+
+
+def test_a_reset_and_an_edit_in_one_save_both_happen():
+    plan = build_plan(vol1())
+    derived = plan.album
+    apply_user_edits(plan, {"album": "My Own Name", "albumartist": "My Own Artist"})
+    apply_user_edits(plan, {"reset": ["album"], "albumartist": "Another Artist"})
+    assert plan.album == derived
+    assert (plan.albumartist, plan.provenance["albumartist"]) == ("Another Artist", Provenance.USER)
+
+
+def test_nothing_is_reset_that_was_not_derived():
+    plan = build_plan(vol1())
+    plan.auto.pop("album", None)  # an album from before `auto` was recorded
+    apply_user_edits(plan, {"album": "My Own Name"})
+    apply_user_edits(plan, {"reset": ["album"]})
+    assert plan.album == "My Own Name"  # kept: there is nothing to go back to
+    assert plan.provenance["album"] == Provenance.USER
+
+
+def test_resetting_the_order_lifts_the_flag_without_renumbering():
+    plan = build_plan(vol1())
+    order = [t.video_id for t in reversed(plan.tracks)]
+    apply_user_edits(plan, {"tracks": [{"video_id": v, "number": n} for n, v in enumerate(order, 1)]})
+    assert plan.provenance["order"] == Provenance.USER
+
+    apply_user_edits(plan, {"reset": ["order"]})
+    assert "order" not in plan.provenance
+    assert [t.video_id for t in plan.tracks] == order  # nothing moved now…
+    assert [t.number for t in plan.tracks] == list(range(1, len(order) + 1))
+
+    merged = merge_plans(plan, build_plan(vol1()))  # …but the source may order it again
+    assert [t.video_id for t in merged.tracks] == [t.video_id for t in build_plan(vol1()).tracks]
+
+
+def test_an_edited_field_survives_an_update_but_a_reset_one_does_not():
+    plan = build_plan(vol1())
+    derived = plan.tracks[0].title
+    apply_user_edits(plan, {"tracks": [{"video_id": plan.tracks[0].video_id, "title": "Mine"}]})
+    kept = merge_plans(plan, build_plan(vol1()))
+    assert kept.tracks[0].title == "Mine"  # the user's value wins a merge
+
+    apply_user_edits(kept, {"tracks": [{"video_id": kept.tracks[0].video_id, "reset": ["title"]}]})
+    again = merge_plans(kept, build_plan(vol1()))
+    assert again.tracks[0].title == derived  # and after a reset the source decides again
+
+
+def test_repair_unifies_an_album_artist_that_was_reset(tmp_path, opus_template):
+    """The point of the reset: the field is ytalbum's again, so harmonisation may touch it."""
+    from test_repair import service as repair_service
+
+    first = build_plan(vol1())
+    first.source_id, first.album = "PL-one", "Vol. 1"
+    first.albumartist, first.provenance["albumartist"] = "My Dark Lullabies", Provenance.PLAYLIST
+    refresh_derived(first)
+    run(first, tmp_path / first.folder, FakeYouTube(opus_template))
+    save_plan(first, tmp_path / first.folder)
+
+    second = build_plan(vol1())
+    second.source_id, second.album = "PL-two", "Vol. 2"
+    refresh_derived(second)
+    apply_user_edits(second, {"albumartist": "MY DARK LULLABIES"})  # shouted, and theirs
+    refresh_derived(second)
+    run(second, tmp_path / second.folder, FakeYouTube(opus_template))
+    save_plan(second, tmp_path / second.folder)
+
+    repair_service(tmp_path, opus_template).repair()
+    assert load_plan(tmp_path / second.folder).albumartist == "MY DARK LULLABIES"  # theirs is kept
+
+    plan = load_plan(tmp_path / second.folder)
+    apply_user_edits(plan, {"reset": ["albumartist"]})
+    save_plan(plan, tmp_path / second.folder)
+    repair_service(tmp_path, opus_template).repair()
+    assert {p.albumartist for _, p in iter_plans(tmp_path)} == {"My Dark Lullabies"}

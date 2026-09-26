@@ -248,5 +248,8 @@ textarea.lyrics-edit {
   width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .9em; line-height: 1.5; padding: .5rem; tab-size: 2;
 }
+button.badge.reset { cursor: pointer; border: 1px solid currentColor; font: inherit; font-size: .75rem; padding: 0 .35rem; }
+button.badge.reset:hover, button.badge.reset:focus-visible { filter: brightness(1.25); }
+.order-mark { display: flex; gap: .4rem; align-items: center; margin: -.25rem 0 .5rem; }
 .lyr.empty { opacity: .45; }
 .lyr.empty:hover, .lyr.empty:focus-visible { opacity: 1; }

@@ -65,13 +65,19 @@ column shows contradictions.
 
 Wanted: drag to reorder, rows renumbering live.
 
-## 5. No way back from an edit
+## 5. No way back from an edit — DONE (P12, DESIGN §9.29)
 
 The plan keeps the derived value (`auto`) for every field a user overrides, but the UI offers
 no "reset to what ytalbum found". An edited album artist is frozen out of harmonisation and
 repair with no visible way to opt back in.
 
 Wanted: a reset affordance per edited field, shown where the "from" column already says `user`.
+
+**Done:** the badge that says "you" is the button. It restores the value from `auto`, drops the USER
+mark, and saves through the ordinary edit path so folder, file names and tags follow. The order flag
+resets too, lifting the flag without renumbering anything now. Lyrics are not included — the
+editor's Delete is their way back. In this library 59 of 246 albums and 83 tracks would show the
+affordance.
 
 ## 6. Two silent-lag spots
 

@@ -724,8 +724,33 @@ def _inside(album_dir: Path, filename: str) -> Path | None:
     return path if path.parent == album_dir.resolve() and path.name == filename else None
 
 
+def reset_field(obj: AlbumPlan | PlanTrack, name: str) -> bool:
+    """Put one field back to what ytalbum derived, and stop calling it the user's.
+
+    The value matters more than the mark: `_merge_fields` decides a field is the user's by comparing
+    it with `auto` and re-asserts the USER provenance on every merge, so dropping the mark alone
+    would be undone by the next update (DESIGN.md §9.29). The provenance is dropped rather than
+    guessed at — `auto` records the derived *value*, never where it came from — and the next pass
+    that touches the field writes a truthful marker again.
+    """
+    if name == "order":
+        return isinstance(obj, AlbumPlan) and obj.provenance.pop("order", None) is not None
+    editable = EDITABLE_ALBUM if isinstance(obj, AlbumPlan) else EDITABLE_TRACK
+    if name not in editable or name not in obj.auto:
+        return False  # nothing was derived for it, so there is nothing to go back to
+    setattr(obj, name, obj.auto[name])
+    obj.provenance.pop(name, None)
+    return True
+
+
 def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
-    """Pure: copy editable fields from `edits` into the plan, marking changed ones as USER."""
+    """Pure: copy editable fields from `edits` into the plan, marking changed ones as USER.
+
+    `reset` (album-level, and per track) names fields to hand back to ytalbum; it is applied first,
+    so a save that resets one field and edits another does both.
+    """
+    for name in edits.get("reset") or []:
+        reset_field(plan, str(name))
     for name in EDITABLE_ALBUM:
         if name in edits:
             value = edits[name]
@@ -746,6 +771,8 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
         t = by_id.get(te.get("video_id"))
         if not t:
             continue
+        for name in te.get("reset") or []:
+            reset_field(t, str(name))
         if (choice := te.get("audio_choice")) in ("best", "combined") and choice != t.audio_choice:
             # switching means fetching the track again, in the other form
             t.audio_choice, t.ext = choice, "m4a" if choice == "combined" else "opus"

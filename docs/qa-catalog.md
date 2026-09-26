@@ -861,6 +861,52 @@ so "writes nothing" could be seen rather than argued. Driven through the real pa
     in between. Shift on a form submit is captured on the form's capture phase, since a submit event
     carries no modifier state
 
+## N. A way back from an edit (P12, DESIGN §9.29)
+
+Added 2026-09-26. Scratch library (S3, 7 tracks) inside the session scratchpad, server on 8799,
+through the real page.
+
+- [x] **N1 · M** — reset an album field
+  - do: change the album artist to `FEUERSCHWANZ (my spelling)`, save, then press the "you ↺" badge
+  - expect: the derived value is back, the field is ytalbum's again, and the folder follows
+  - invariant: the value matters more than the mark — a merge decides ownership by comparing the
+    value with `auto`, so a reset that only dropped the mark would be undone by the next update
+  - evidence: the plan; the folder on disk; the badge
+  - **result:** pass — back to `Feuerschwanz` with no `provenance.albumartist` at all, the folder
+    renamed from `FEUERSCHWANZ (my spelling)/` to `Feuerschwanz/`, and the badge became a plain
+    (absent) one, since nothing claims that value now
+
+- [x] **N2 · M** — reset a track field
+  - do: change track 1's title to `Ketzerei (my title)`, save, press its "you ↺"
+  - expect: the title and the file name go back
+  - evidence: the plan; the file on disk
+  - **result:** pass — `Ketzerei` again, provenance gone, file renamed back to
+    `Feuerschwanz - Sex Is Muss - 01 - Ketzerei.opus` and present (so the rename followed rather
+    than leaving a dangling name)
+
+- [x] **N3 · M** — the order flag, and what resetting it does *not* do
+  - do: reverse the album by typing positions, save; then press the reset on "Track order is yours"
+  - expect: the flag goes, and nothing is renumbered at that moment
+  - invariant: a button that silently rearranged 56 tracks would be a trap, so the tooltip says the
+    next update may reorder and the reset itself does not
+  - evidence: `provenance.order`; the track order before and after
+  - **result:** pass — flag `user` → absent, the reversed order untouched, the "Track order is
+    yours" line gone
+
+- [x] **N4 · M** — and then the source may order it again
+  - do: after N3, run "Update library" (full)
+  - expect: the album comes back in the source's order, files renamed
+  - evidence: the job log; the plan
+  - **result:** pass — the update logged renames for 5 of the 7 tracks and the order is the
+    playlist's again (*Ketzerei, Hexenjagd, Ringelpietz, Sex is Muss, Krieger des Mets, Ketzerei
+    (Summer Breeze 2016), Moralisch*). Watch the job: an earlier read of mine reported "no change"
+    while the update was still running
+
+- [x] **N5 · R** — nothing offered where nothing can be given back
+  - do: a field the user never touched; and a field whose plan has no `auto` entry
+  - expect: the plain badge in the first case; in the second, a badge that says why
+  - evidence: covered offline in `test_web.py` (the reset is a no-op and the value stays the user's)
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -868,6 +914,7 @@ so "writes nothing" could be seen rather than argued. Driven through the real pa
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the N cases (a way back from an edit) | 5 | 0 | Both field resets and the order flag driven through the page; the following update put the source's order back. |
 | 2026-09-26 | the M cases (the fetch preview) | 5 | 1 blemish (M4, the absolute path), fixed | Run over an empty scratch library so "writes nothing" was observable. The preview already existed; the work was making it the outcome. |
 | 2026-09-26 | the L cases (repair from the web UI) | 3 | 0 | Scratch library with two spellings of one artist; the shouted folder was gone afterwards. Nothing measured on the real library: repair is a no-op there today (I-014, I-015). |
 | 2026-09-26 | the K8–K11 cases (per-track lyrics actions) | 4 | 0 | Driven through the real page on a scratch library inside the session scratchpad. The rejected entry stayed rejected across an explicit new lookup. |

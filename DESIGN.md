@@ -733,6 +733,27 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    absolute path, which is no business of a browser. It shows the library-relative folder, and only
    mentions a move when the album would change folders.
 
+29. ✅ A value you overrode can be handed back (2026-09-26, backlog item 5). The plan has always
+   kept what the pipeline derived, in `auto`, for every field a user overrides — that is how a merge
+   knows which values are theirs — but the UI offered no way back. An edited album artist was frozen
+   out of harmonisation and repair with nothing to click, and the only route was editing the JSON.
+   The badge that says "you" **is** the way back now: where a field is the user's and something was
+   derived for it, the badge is a button that restores the derived value. What it drops matters less
+   than what it writes: `_merge_fields` decides a field is the user's by comparing the value with
+   `auto` and re-asserts the USER provenance on every merge, so dropping the mark alone would be
+   undone by the next update. The provenance is dropped rather than guessed at, because `auto`
+   records the derived *value* and never its source; the next pass that touches the field writes a
+   truthful marker again. Where nothing was derived (an album from before `auto` was kept) the badge
+   stays a badge and says why.
+   The order flag resets too, and only that: nothing is renumbered at the moment of the reset, but
+   the next update may put the album back in the source's order. The tooltip says so, because a
+   button that silently rearranges 56 tracks would be a trap.
+   Lyrics are deliberately not in this: the editor's Delete is their way back (§9.26), and two
+   affordances for one thing would only be two things to explain.
+   Measured read-only over the library this is for: 59 of 246 albums carry at least one overridden
+   field — 38 album artists, 20 years, 15 user orders, 3 album names — and 83 tracks (73 artists,
+   17 titles). Every one of them has an `auto` value behind it, so every one is resettable.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

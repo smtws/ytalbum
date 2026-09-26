@@ -503,6 +503,31 @@ function provBadge(p) {
   return p ? h("span", { class: `badge ${p === "mb" ? "mb" : p === "user" ? "user" : ""}` }, PROV[p] || p) : null;
 }
 
+// A value you overrode is yours until you say otherwise — so the badge that says "you" is also the
+// way back to what ytalbum found. Nothing is offered where nothing was derived (DESIGN.md §9.29).
+function resetMark(plan, track, name, label = null) {
+  const owner = track || plan;
+  if (owner.provenance?.[name] !== "user") return provBadge(owner.provenance?.[name]);
+  const derived = owner.auto?.[name];
+  if (derived === undefined || derived === null || derived === "") {
+    return h("span", { class: "badge user", title: "Yours. ytalbum derived nothing for this field, so there is nothing to go back to." }, PROV.user);
+  }
+  const what = label || name;
+  return h("button", { class: "badge user reset", type: "button",
+    title: `Yours${label ? ` (${label})` : ""}. Click to go back to what ytalbum found: “${derived}” — it is then ytalbum's again, and an update or repair may change it.`,
+    onclick: (e) => resetField(plan, track, name, e.currentTarget, `${what} → “${derived}”`) }, `${PROV.user} \u21ba`);
+}
+
+async function resetField(plan, track, name, button, what) {
+  const edits = track ? { tracks: [{ video_id: track.video_id, reset: [name] }] } : { reset: [name] };
+  const id = await submit("edit", { id: plan.source_id, edits }, button);
+  if (id == null) return;
+  const job = await jobSettled(id);
+  if (!job || job.state !== "done") return;
+  toast(`reset ${what}`, "done");
+  await refreshAlbumPanel();
+}
+
 // The .lrc file beside the track is the original; the tag is a copy of it, so what is
 // shown here is what a player reads.
 const HAS_WORDS = (t) => t.lyrics === "synced" || t.lyrics === "plain";
@@ -676,7 +701,7 @@ function renderAlbum() {
   const p = currentAlbum;
   const panel = $("#album");
   const field = (label, name, value, type = "text") =>
-    h("label", {}, h("span", {}, label, " ", provBadge(p.provenance[name])), h("input", { type, name, value: value ?? "" }));
+    h("label", {}, h("span", {}, label, " ", resetMark(p, null, name)), h("input", { type, name, value: value ?? "" }));
   const rows = p.tracks.map((t) =>
     h("tr", { "data-id": t.video_id, class: isPlaying(p.source_id, t.video_id) ? "playing" : "" },
       h("td", { class: "play" },
@@ -697,7 +722,9 @@ function renderAlbum() {
         lengthChip(t),
         t.channel ? h("button", { class: "quiet small", type: "button", title: `Apply this trim to every track from ${t.channel} in the library`,
           onclick: (e) => trimChannel(t, e.currentTarget) }, "⇉") : null),
-      h("td", { class: "src" }, provBadge(t.provenance.title)),
+      h("td", { class: "src" },
+        t.provenance.artist === "user" ? resetMark(p, t, "artist", "artist") : null,
+        resetMark(p, t, "title", "title")),
       h("td", { class: "src" },
         t.state === "done" ? h("span", { class: "badge ok" }, "✓")
           : t.error_kind === "no_audio_stream" ? h("button", { class: "quiet small", type: "button", title: t.error || "", onclick: (e) => askAudioChoice(p, t, e.currentTarget) }, "no audio — choose")
@@ -723,6 +750,12 @@ function renderAlbum() {
       h("button", { class: "quiet", type: "button", onclick: () => closeAlbum() }, "Close")),
     h("form", { id: "albumform", onsubmit: saveAlbum },
       h("div", { class: "fields" }, field("Album artist", "albumartist", p.albumartist), field("Album", "album", p.album), field("Year", "year", p.year, "number")),
+      p.provenance.order === "user"
+        ? h("div", { class: "muted order-mark" }, "Track order is yours ",
+          h("button", { class: "badge user reset", type: "button",
+            title: "The order you set is kept through every update. Click to hand it back: nothing is renumbered now, but the next update may put the album in the source's order again.",
+            onclick: (e) => resetField(p, null, "order", e.currentTarget, "the track order") }, `${PROV.user} \u21ba`))
+        : null,
       h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", { title: "position in the album" }, "#"), h("th", {}, "Artist"), h("th", {}, "Title"), h("th", { title: "each disc is numbered from 1" }, "disc"), h("th", { title: "cut the front / play until — for label idents and previews" }, "trim"), h("th", {}, "from"), h("th", {}, ""))), h("tbody", {}, rows)),
       skipped.length ? h("details", {}, h("summary", { class: "muted" }, `${skipped.length} skipped`), h("ul", {}, skipped)) : null,
       h("div", { class: "actions" },
