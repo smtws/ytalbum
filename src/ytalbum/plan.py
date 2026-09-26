@@ -210,6 +210,38 @@ def drop_album_name(album: str, tracks: list[PlanTrack]) -> int:
     return len(hits)
 
 
+def name_single_after_its_song(plan: AlbumPlan) -> str | None:
+    """A single is one song, so its album name is that song's name. Returns the new name or None.
+
+    `build_plan` reads the album name off the *video* title, and enrichment then improves the
+    track only — so the album kept `The Dead Don't Die (feat. @xxFEUERSCHWANZxx)` while its one
+    track became MusicBrainz' `The Dead Don't Die feat. Feuerschwanz`, and the folder carried the
+    uploader's handle (DESIGN.md §9.25). Applied after enrichment, in the fetch and in `repair`.
+
+    An album name the user chose is never touched. A track title they chose *is* followed, and the
+    album's provenance is then left as it was rather than set to `user`: marking it would freeze
+    the album, so a later edit of the same track title would stop reaching it.
+    """
+    if plan.kind != Kind.SINGLE or len(plan.tracks) != 1:
+        return None
+    if plan.provenance.get("album") == Provenance.USER:
+        return None
+    title = plan.tracks[0].title.strip()
+    return title if title and title != plan.album else None
+
+
+def set_single_album_name(plan: AlbumPlan) -> str | None:
+    """Apply `name_single_after_its_song` to the plan. Returns the name it set, or None."""
+    wanted = name_single_after_its_song(plan)
+    if wanted is None:
+        return None
+    plan.album = plan.auto["album"] = wanted
+    if (source := plan.tracks[0].provenance.get("title")) and source != Provenance.USER:
+        plan.provenance["album"] = source
+    refresh_derived(plan)
+    return wanted
+
+
 def renumber(plan: AlbumPlan) -> AlbumPlan:
     """Close the gaps after a deletion (single-disc albums only)."""
     if all(t.disc == 1 for t in plan.tracks):

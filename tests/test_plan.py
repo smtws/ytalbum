@@ -222,6 +222,51 @@ def test_a_singles_album_name_loses_the_noise_bracket_too():
     assert plan.album == "Deathmetal Jumpscare"
 
 
+def test_a_single_is_named_after_its_song(monkeypatch):
+    """The album read the video's title while the track read MusicBrainz' — one song, one name."""
+    from ytalbum.models import Provenance
+    from ytalbum.plan import set_single_album_name
+
+    plan = build_plan(single("DOMINUM - The Dead Don't Die (feat. @xxFEUERSCHWANZxx)", "DOMINUM"))
+    plan.tracks[0].title = "The Dead Don't Die feat. Feuerschwanz"  # what enrichment leaves behind
+    plan.tracks[0].provenance["title"] = Provenance.MB
+    assert set_single_album_name(plan) == "The Dead Don't Die feat. Feuerschwanz"
+    assert plan.album == plan.tracks[0].title
+    assert plan.provenance["album"] == Provenance.MB  # named from where the title came
+    assert plan.folder.endswith("The Dead Don't Die feat. Feuerschwanz")
+    assert "@" not in plan.tracks[0].filename
+
+
+def test_an_album_name_the_user_chose_is_not_renamed_after_the_song():
+    from ytalbum.models import Provenance
+    from ytalbum.plan import set_single_album_name
+
+    plan = build_plan(single("DOMINUM - The Dead Don't Die", "DOMINUM"))
+    plan.album, plan.provenance["album"] = "My Own Name", Provenance.USER
+    plan.tracks[0].title = "The Dead Don't Die feat. Feuerschwanz"
+    assert set_single_album_name(plan) is None
+    assert plan.album == "My Own Name"
+
+
+def test_a_title_the_user_chose_is_followed_without_freezing_the_album():
+    from ytalbum.models import Provenance
+    from ytalbum.plan import set_single_album_name
+
+    plan = build_plan(single("DOMINUM - The Dead Don't Die", "DOMINUM"))
+    plan.tracks[0].title, plan.tracks[0].provenance["title"] = "My Own Title", Provenance.USER
+    assert set_single_album_name(plan) == "My Own Title"
+    assert plan.provenance.get("album") != Provenance.USER  # or a later edit would stop reaching it
+
+
+def test_an_album_of_several_tracks_keeps_its_own_name():
+    plan = build_plan(load_collection("vol1_collection.json"))
+    from ytalbum.plan import set_single_album_name
+
+    before = plan.album
+    assert set_single_album_name(plan) is None
+    assert plan.album == before
+
+
 def test_a_single_from_a_label_channel_is_not_named_after_the_label():
     """The video's own title is the album name here, and on a label channel it ends in one."""
     raw = "LORD OF THE LOST - Viva Vendetta (Official Video) | Napalm Records"

@@ -429,3 +429,62 @@ def test_a_length_read_from_another_recording_is_given_up(tmp_path, opus_templat
     saved = load_plan(tmp_path / plan.folder)
     assert saved.tracks[0].mb_length is None
     assert saved.tracks[1].mb_length == 208.2  # the accepted one keeps it
+
+
+# -- a single is named after its song (DESIGN.md §9.25) -----------------------------------
+
+
+def a_single(tmp_path, opus_template, album, title, album_prov=Provenance.PLAYLIST):
+    """A one-track album on disk whose album name and track title disagree."""
+    plan = build_plan(vol1())
+    plan.kind, plan.source_id = "single", "PL-single"
+    plan.tracks = plan.tracks[:1]
+    plan.album, plan.provenance["album"] = album, album_prov
+    plan.tracks[0].title, plan.tracks[0].provenance["title"] = title, Provenance.MB
+    refresh_derived(plan)
+    album_dir = tmp_path / plan.folder
+    run(plan, album_dir, FakeYouTube(opus_template))
+    save_plan(plan, album_dir)
+    return tmp_path, plan
+
+
+def test_repair_names_an_existing_single_after_its_song(tmp_path, opus_template):
+    tmp_path, plan = a_single(tmp_path, opus_template, "The Dead Don't Die (feat. @xxHANDLExx)",
+                             "The Dead Don't Die feat. Feuerschwanz")
+    old_dir = tmp_path / plan.folder
+
+    service(tmp_path, opus_template).repair()
+    saved = next(p for _, p in iter_plans(tmp_path))
+    assert saved.album == "The Dead Don't Die feat. Feuerschwanz"
+    assert saved.album == saved.tracks[0].title
+    assert not old_dir.exists()  # the folder followed
+    moved = tmp_path / saved.folder
+    assert (moved / saved.tracks[0].filename).exists()  # and so did the file
+    assert "@" not in saved.tracks[0].filename
+
+
+def test_repair_leaves_a_single_whose_name_the_user_chose(tmp_path, opus_template):
+    tmp_path, plan = a_single(tmp_path, opus_template, "My Own Name", "Some Other Title",
+                             album_prov=Provenance.USER)
+    service(tmp_path, opus_template).repair()
+    saved = next(p for _, p in iter_plans(tmp_path))
+    assert saved.album == "My Own Name"
+
+
+def test_a_fetched_single_is_named_after_its_enriched_track(tmp_path, opus_template):
+    """The fetch path: enrichment renames the track, and the album follows it."""
+    collection = vol1()
+    collection.source_id = collection.source_url = "v" * 11
+    collection.is_playlist = False
+    collection.entries = collection.entries[:1]
+    collection.entries[0].duration = 200  # a two-second fixture entry counts as unusable
+    collection.title = "DOMINUM - The Dead Don't Die (feat. @xxHANDLExx)"
+    collection.channel = "DOMINUM"
+
+    svc = Service(Config(library_root=tmp_path, musicbrainz=False), tmp_path, yt=FakeYouTube(opus_template))
+    svc.yt.fetch = lambda url: collection
+    outcome = svc.fetch(collection.source_url)
+    saved = next(p for _, p in iter_plans(tmp_path))
+    assert saved.kind == "single"
+    assert saved.album == saved.tracks[0].title  # one song, one name, whatever enrichment left
+    assert "@" not in saved.album and "@" not in outcome.album_dir.name

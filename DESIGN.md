@@ -653,6 +653,21 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    a track's *words* are refused, so the two behaviours stay identical rather than drifting apart —
    which is the property worth keeping here.
 
+25. ✅ A single is one song, so its album name is that song's name (2026-09-26, the user's decision:
+   "consistency is more important here than file storage operations", so folder renames are
+   accepted). `build_plan` reads a single's album name off the *video* title and enrichment then
+   improves the **track** only, so the two drifted apart in the one place a user sees both: S9's
+   album read `The Dead Don't Die (feat. @xxFEUERSCHWANZxx)`, the uploader's handle and all, while
+   its one track read MusicBrainz' `The Dead Don't Die feat. Feuerschwanz` — and the folder was
+   named after the album. After enrichment (and in `repair`, for singles already on disk) the album
+   name is set to the track's title, folder and file names following through the existing relocate
+   path. Guards: only `kind == SINGLE` with exactly one track, and never an album name the user
+   chose. A track title the user chose *is* followed, but the album's provenance is then left as it
+   was rather than set to `user` — marking it would freeze the album, so a later edit of the same
+   title would stop reaching it. Measured read-only before shipping: the library holds exactly one
+   single, whose name is the user's own and already equal to its track title, so `repair` renames
+   nothing; the rule is for what arrives next.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

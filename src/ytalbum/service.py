@@ -23,7 +23,7 @@ from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost, user_owns
 from .lyrics import default_cache_path as lyrics_cache_path
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
-from .plan import build_plan, drop_album_name, merge_plans, refresh_derived, renumber, wanted_folder
+from .plan import build_plan, drop_album_name, merge_plans, refresh_derived, renumber, set_single_album_name, wanted_folder
 from .search import SearchResult, search_artist
 from .titles import key as text_key
 from .titles import move_feat, strip_self_feat
@@ -152,6 +152,8 @@ class Service:
             # album-wide judgement is made again, on the final titles
             if dropped := drop_album_name(plan.album, plan.tracks):
                 self.log(f"  {dropped} track title(s) lost the repeated album name")
+        if named := set_single_album_name(plan):  # a single is its song, under whatever name it ended up with
+            self.log(f"  the single is named after its track: “{named}”")
 
         if dry or self.library is None:
             self._settle_artist(plan)  # read-only: a dry run shows the artist a fetch would write
@@ -516,6 +518,8 @@ class Service:
                     plan.albumartist = plan.auto["albumartist"] = max(set(names), key=names.count)
             self._adopt_track_spelling(plan)  # an album that disagrees with its own tracks
             self._apply_spelling(plan, decided)
+            if named := set_single_album_name(plan):
+                self.log(f"the single is named after its track: “{named}”")
             # a plan can be right while the folder is not: the album artist was unified
             # earlier without moving anything (fixed 2026-09-24, but the folders remain)
             misplaced = album_dir != self.library / wanted_folder(plan)
