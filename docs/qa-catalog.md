@@ -234,6 +234,7 @@ is working on the same library — nothing locks them against each other (G5).
   - expect (honest): it is overwritten. Decide whether an unmarked sidecar should be protected
   - invariant: whatever is decided, the plan and the sidecar must not disagree afterwards
   - evidence: the sidecar diff
+  - **result 2026-09-26:** **confirmed as written** — the unmarked sidecar was overwritten by `--refetch` (`f6ed83…` → `b20f39…`). Behaviour is as predicted; whether it should be is the product decision
 
 - [x] **C7 · M** — the file is the source of truth
   - do: delete a `.lrc`, then `ytalbum download "$QA/<album>"`
@@ -276,7 +277,7 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: `/api/state` for the album; the chip's class in the row
   - **result 2026-09-26:** pass — trimming *Moralisch* from +28 s to 0 s turned its chip muted, and the album kept its `3 clips` badge exactly as the case predicts
 
-- [ ] **D3 · D★** — replace a video edit with the canonical audio
+- [x] **D3 · D★** — replace a video edit with the canonical audio
   - do: in the scratch library, delete S1 (471 s of film around the song) and fetch S10, the
     same recording as an audio upload
   - expect: the gap against MusicBrainz collapses from +241 s to about 0, and the chip clears
@@ -284,6 +285,7 @@ is working on the same library — nothing locks them against each other (G5).
     would prove nothing about replacing an edit with its release
   - evidence: `length_gap` before and after; `mb_length` unchanged at 229.8 s
   - class: destructive because it deletes an album, even a scratch one
+  - **result 2026-09-26:** pass — replacing the 451 s video edit with the canonical 230 s audio collapsed the gap from +221 s to 0 s
 
 - [x] **D4 · R★** — an album nobody has a length for
   - do: open an album whose tracks MusicBrainz and lrclib both lack (any live or fan compilation without a release match)
@@ -327,11 +329,12 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: the `provenance` map
   - **result 2026-09-26:** pass — an edited title and artist both came through `update --deep` untouched
 
-- [ ] **E5 · D** — prune
+- [x] **E5 · D** — prune
   - do: mark a track `in_source: false` in the scratch plan, then `ytalbum prune "$QA/<album>"`
   - expect: only that track's files are deleted; the rest renumber and retag
   - invariant: its `.lrc` and `.originals/` entry go with it
   - evidence: the directory listing; `tracktotal`
+  - **result 2026-09-26:** pass with one gap — the pruned track's audio and `.lrc` went and the rest retagged to `tracktotal` 6, but its **`.originals/` copy stayed behind**. `delete_track` removes the original; `prune` does not, so a pruned trimmed track leaves a full-size orphan
 
 - [ ] **E6 · D★** — prune an album whose order you set
   - do: set a custom order on S3, save, mark a track `in_source: false`, then prune it
@@ -339,6 +342,7 @@ is working on the same library — nothing locks them against each other (G5).
     prune leave a user order alone
   - invariant: whatever is decided, the tracks keep their relative order
   - evidence: numbering before/after
+  - **result 2026-09-26:** **observe-only, as instructed (R-002); album restored afterwards.** The renumbering is decided by discs, not by provenance: on a **multi-disc** album prune left the gap (1, 2, 4 …), on a **single-disc** album it renumbered 1..n and closed it, rewriting the numbers the user chose. Relative order was preserved in both. Also observed: collapsing a disc split back to one disc re-sorts by (disc, number) and **reshuffles the user's arrangement**
 
 - [ ] **E7 · M★** — a spelling that differs from the library's
   - do: in the scratch library, edit S1's album artist to `LORD OF THE LOST` (which marks it
@@ -346,28 +350,32 @@ is working on the same library — nothing locks them against each other (G5).
   - expect: S2 lands in that same folder under your spelling — one artist folder, not two
   - invariant: a spelling you chose outranks MusicBrainz' when the library is harmonised
   - evidence: `ls "$QA"`; both plans' `albumartist`
+  - **result 2026-09-26:** **fails as written** — a fetch does not unify the spellings: seeding produced `LORD OF THE LOST/` and `Lord Of The Lost/` side by side, and only `repair` merged them (finally onto the MusicBrainz spelling). See the phase-1 finding
 
 ---
 
 ## F. Deletion (scratch library only)
 
-- [ ] **F1 · D** — delete one track
+- [x] **F1 · D** — delete one track
   - do: press ✕ on a track in the album view and confirm
   - expect: audio, `.lrc` and `.originals/` entry all go; the rest renumber and retag
   - invariant: no other track loses a file; only the numbering and totals change
   - evidence: the directory listing; the plan
+  - **result 2026-09-26:** pass — audio, `.lrc` and `.originals/` copy all went, the rest renumbered and `tracktotal` retagged to 6
 
-- [ ] **F2 · D** — delete an album holding a file you put there
+- [x] **F2 · D** — delete an album holding a file you put there
   - do: drop a `notes.txt` into a scratch album, then delete the album
   - expect: ytalbum's files go, your file and the folder stay, and the log says so
   - invariant: ytalbum only deletes what it wrote
   - evidence: the folder contents; the log line
+  - **result 2026-09-26:** pass — ytalbum's files went, my `notes.txt` and the folder stayed, and the log named the file it kept
 
-- [ ] **F3 · D★** — delete then re-fetch the same source
+- [x] **F3 · D★** — delete then re-fetch the same source
   - do: delete a scratch album, then fetch the same URL again
   - expect: a clean album with no leftovers from the previous copy
   - invariant: a fresh fetch starts from nothing — no orphan `.lrc`, no stale original
   - evidence: the file count; a fresh plan
+  - **result 2026-09-26:** pass — the re-fetch came back with one track, a fresh plan and no stale `.originals/`; the user's file was still there
 
 ---
 
@@ -668,6 +676,15 @@ original. B8 ran into this while otherwise passing.
 - **A failed trim is retried until it succeeds.** The trim I4 left pending was applied on a
   later unrelated run, once ffmpeg was back, so a track can change length long after the edit
   that asked for it.
+
+### From phase 5
+
+- **Prune keeps the original, delete removes it.** `delete_track` unlinks `.originals/<id>.opus`;
+  `prune` does not. A pruned track that had been trimmed leaves a full-size orphan nothing will
+  ever read again.
+- **Merging discs reshuffles a user's order.** Setting every track back to disc 1 re-sorts by
+  (disc, number), so tracks that were 2-01…2-03 land among the disc-1 numbers. A split is
+  reversible on paper but not in arrangement.
 
 ### Smaller observations, not cases
 
