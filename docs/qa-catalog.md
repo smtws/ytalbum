@@ -4,7 +4,7 @@ Hand-run checks from a user's point of view, aimed at the places where **feature
 trimming a track that has lyrics, renaming one that MusicBrainz matched, pruning an album whose
 order you set yourself. The pytest suite covers the pieces; this covers the seams.
 
-Derived from the code as of 2026-09-26 (379 tests at the time of writing, 458 after the fixes it produced; 246 albums in the reference library).
+Derived from the code as of 2026-09-26 (379 tests when it was written, 516 after the fixes it produced and the seven backlog packages that followed; 246 albums in the reference library). Sections A–J are the original catalog, K–Q were added with the features they cover.
 
 ## How to use it
 
@@ -775,7 +775,7 @@ server on 8799, through the real page.
   - **result:** covered offline in `test_web.py` (the job name in the message, "no file yet",
     "no lrclib match"); the live album has every track downloaded and no long pass to race
 
-## L. Repair from the web UI (P10)
+## L. Repair from the web UI (P10, the decision is in DESIGN §12)
 
 Added 2026-09-26. A scratch library inside the session scratchpad, seeded with one album fetched
 for real and a second copy of it under a shouted spelling of the same artist (`FEUERSCHWANZ` /
@@ -1053,6 +1053,7 @@ escaping an event handler, so the call is now guarded.
 | 2026-09-26 | the M cases (the fetch preview) | 5 | 1 blemish (M4, the absolute path), fixed | Run over an empty scratch library so "writes nothing" was observable. The preview already existed; the work was making it the outcome. |
 | 2026-09-26 | the L cases (repair from the web UI) | 3 | 0 | Scratch library with two spellings of one artist; the shouted folder was gone afterwards. Nothing measured on the real library: repair is a no-op there today (I-014, I-015). |
 | 2026-09-26 | the K8–K11 cases (per-track lyrics actions) | 4 | 0 | Driven through the real page on a scratch library inside the session scratchpad. The rejected entry stayed rejected across an explicit new lookup. |
+| 2026-09-26 | the backlog packages, `067f1ae..3a07b5c` | sections K–Q, 33 cases | 4 defects found in the packages under test, all fixed before their commits | P8 lyrics editor, P9 per-track lyrics actions, P10 repair in the UI, P11 the fetch preview, P12 a way back from an edit, P13 opening an album asks the disk, P14 the ⏱ mark leads to a cut, P15 reordering by dragging. Every case driven through the real page on a scratch library; the real library was read-only throughout. 516 tests at the end. |
 | 2026-09-26 | the K cases (the lyrics editor) | 7 | 1 defect found in the package under test (K7), 1 blemish (K3) | Both fixed before the commit. Driven through the real page against a freshly seeded scratch library. |
 | 2026-09-26 | re-runs after the fixes, `1e3da95..456d83e` | B6, B7, B8, I4, E5, E6, C5, C6, C7, E7, J5, J8, J9 + the split/merge round trip | all pass | Nine commits: trim integrity and its two mirrors, the lyrics ownership contract and its follow-up, order and prune, artist unification, repair's one-pass decision, the consensus length reference. 458 tests at the end, from 379. |
 

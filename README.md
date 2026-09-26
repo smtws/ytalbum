@@ -38,8 +38,15 @@ Comes with a command line and a small web app for the library.
 - **It fetches the lyrics** where [LRCLIB](https://lrclib.net) has them (roughly three of
   four tracks, half of those with timestamps) and writes them both as a `.lrc` file beside
   the audio and into the tags, so tag-readers and players that want a sidecar both find them.
+  Timed lines are clickable — the song jumps there — and the line being sung is marked as it
+  plays, which is how a file that carries an intro shows itself: the words drift away from what
+  you hear.
 - **Every value knows where it came from** (MusicBrainz, YouTube Music, the video title,
-  or you), and anything you edit yourself is never overwritten by a later update.
+  or you), and anything you edit yourself is never overwritten by a later update — and can be
+  handed back: the badge that says "you" restores what ytalbum derived.
+- **You can fix an album where you can see it.** Drag rows to reorder (or Alt+↑/↓), set trim
+  points from what you are hearing and watch the length come right before you save, write or
+  correct lyrics in the panel that shows them, and run the offline tidy-up from a button.
 - **Re-runs are cheap.** An update checks each album with a single request and only does
   real work when the playlist actually changed.
 - **You can find what you have.** Filter the library by album, artist **or song** — matches
@@ -105,9 +112,9 @@ idle minutes.
 | | |
 |---|---|
 | ![Album view](docs/screenshots/album.jpg) | ![Channel listing](docs/screenshots/search.jpg) |
-| **Album view:** drag a row by its grip to reorder (Alt+↑/↓ without a mouse, Escape cancels; dropping a row among another disc's rows moves it there), cover, editable fields, where each value came from — and a value you changed can be handed back: the "you" badge is a button that restores what ytalbum derived, after which an update or repair may change it again — position, disc and trim points, per-track delete. The trim column says how far the file is from the length MusicBrainz and LRCLIB know — amber for a wide gap, red when it is far too short to be that song at all. ♪ marks a track whose lyrics are here — click it to read them (from the `.lrc` beside the file), and click a line to play from there — while the song plays, the line being sung is marked, so a file that carries an intro shows itself by drifting. The same panel writes: edit or write the words yourself (they are then yours and no lookup replaces them), ask LRCLIB about that one track again, or reject a wrong match so it is never offered for that track again. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** a URL is previewed first — the album artist, album name, kind, year, folder and track list a fetch would write, marked "already in the library" when it is one, with nothing written until you press Download (Shift+click on Go skips the preview). Here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
+| **Album view:** the cover, every field editable, and where each value came from. Drag a row by its grip to reorder it; the ⏱ column says how far the file is from the length MusicBrainz and LRCLIB know; ♪ opens the lyrics, to read or to write. | **A URL or an artist name:** a URL is previewed first — what a fetch would write, and whether the album is already here — and nothing is downloaded until you say so. A name searches instead: here a curator's channel, every playlist it publishes, "in library" markers, tick what you want. |
 | ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
-| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. "Repair library" in the header runs the offline tidy-up (below) and asks first. | **Library:** one artist's albums, narrowed further by the filter with the matches highlighted, ▶ plays all of them, and "check for new albums" asks YouTube for that artist alone. ♪ counts the tracks whose lyrics are here; ⏱ marks an album that is not the length it should be. |
+| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library:** one artist's albums, narrowed by the filter with the matches highlighted, ▶ plays all of them, and "check for new albums" asks YouTube for that artist alone. ♪ counts the tracks whose lyrics are here; ⏱ marks an album that is not the length it should be. |
 
 The compilations throughout these screenshots are
 [**My Dark Lullabies**](https://www.youtube.com/@MyDarkLullabies) — *"a curated collection
@@ -135,7 +142,11 @@ keep it and everything is repeatable.
 - **Nothing is decided on half-knowledge.** If any video can't be read (bot check, network),
   the run changes nothing at all instead of classifying or renaming from a partial view.
 - **Trimming is non-destructive.** The untouched original goes to `.originals/`, cuts are
-  made from it with `ffmpeg -c copy`, and clearing the trim restores it byte for byte.
+  made from it with `ffmpeg -c copy`, and clearing the trim restores it byte for byte. Marks are
+  set while listening — "start here", "end here", drag the handles, or arrow keys for tenths —
+  and the bar says what the cut would leave against the length MusicBrainz or LRCLIB knows, so
+  the gap can be watched closing before anything is saved. A cut track is played from its
+  original, because the marks count from the start of the video.
 
 More detail, including what was measured and deliberately rejected, is in
 [DESIGN.md](DESIGN.md).
@@ -250,6 +261,7 @@ network.
 | `/api/edit` | `{id, edits}` | Album and track fields, trim points, audio choice; renames and retags. |
 | `/api/trim_channel` | `{channel, start, end}` | The same trim for every track from one uploader. |
 | `/api/prune` | `{id}` | Delete tracks that left the playlist. |
+| `/api/lyrics` | `{id, refetch?}` | Look up the lyrics of one album's tracks that have none yet; `refetch` asks about every track again (never about lyrics you wrote). |
 | `/api/save_lyrics` | `{id, video_id, text}` | Write the lyrics of one track as given: the `.lrc` beside it, the `LYRICS` tag, marked as yours. Empty `text` removes them. Nothing is looked up, and it is refused while another job holds that album. |
 | `/api/lyrics_track` | `{id, video_id, reject?}` | Ask LRCLIB about one track again. With `reject`, the entry it gave is remembered as wrong for this track and never offered for it again — no later lookup, `--refetch` included, can pick it. |
 | `/api/delete_track` | `{id, video_id}` | Delete one track. |
@@ -291,9 +303,10 @@ while searches and previews run alongside.
   instance) cannot be read without a subscription. ytalbum then writes nothing at all rather
   than an album with no tracks, and an album already downloaded is never touched by a later
   update that can no longer read its source.
-- **The track order is yours if you change it.** Edit the position of a track and the album
+- **The track order is yours if you change it.** Drag a row or type a position, and the album
   keeps that order through every later update; a video that appears afterwards joins the end
-  instead of pushing your arrangement around. Until you change it, the source decides.
+  instead of pushing your arrangement around. Until you change it, the source decides — and you
+  can hand the order back, after which the source arranges it again.
 - **Multi-disc albums** are supported — file names carry `1-07`, `discnumber` is tagged, and
   a split survives updates. The album view has a disc column after the title, on
   every album, and each disc is numbered from 1 again when you change it.
@@ -304,10 +317,11 @@ while searches and previews run alongside.
   timestamps — LRCLIB is contributed by its users, so folk, ritual and instrumental music is
   where the gaps are. A lyric is only accepted when its length is within three seconds of
   your file's, because a title-only match is how a cover version's words end up on the
-  original. The `.lrc` beside the file is the original: delete it and the tag goes with it on
-  the next pass, and a lyric you edited or wrote yourself is recognised as yours — by its
-  bytes, not by a flag you have to set — and kept through every later pass, including
-  `--refetch`. To get the lrclib version back, delete your file and run `--refetch`.
+  original. The `.lrc` beside the file is the original: delete it and the tag goes with it, and
+  a lyric you wrote or edited — in the web UI or with any editor — is recognised as yours by its
+  bytes, not by a flag you have to set, and kept through every later pass including `--refetch`.
+  Delete your own version to let LRCLIB answer again. A wrong match can be rejected for good, so
+  no later lookup offers that entry for that track.
 - **The bot check** can stop any run. ytalbum then changes nothing and asks you to try
   later; a browser login makes it rare.
 - **It only knows its own library.** Music you already own elsewhere is invisible to it, so
@@ -378,7 +392,7 @@ distributed under the GPL.
 ## Tests
 
 ```sh
-uv run pytest        # 458 tests, offline, ~17 s
+uv run pytest        # 516 tests, offline, ~40 s
 ```
 
 They run against recorded YouTube and MusicBrainz responses in `design-fixtures/` and mock

@@ -119,7 +119,7 @@ chip's own colours, updating as the marks move — so the gap can be watched clo
 Plus *▶ from start* to hear the start mark, a line saying when the untouched original is playing, and
 marks rounded to a tenth of a second.
 
-## 8. Documentation cleanup — LAST BUT ONE
+## 8. Documentation cleanup — DONE (P16)
 
 Added 2026-09-26 by the owner, to run after every code item above is done. README, DESIGN and the
 catalog grew by nine slices and four catalog sections in one day, each written as the change
@@ -129,9 +129,33 @@ match the UI as it is now (editor, per-track lyrics actions, repair button, prev
 badges), check every count, every "§9.x" pointer and every "fixed in Px" note, and keep DESIGN's
 slice log as the history it is rather than rewriting it.
 
+**Done:** README's album-view caption had grown by accretion across six packages into an unreadable
+paragraph — what belongs to a newcomer moved into the feature list, the captions are captions again.
+The test count and the suite's runtime were stale (458/~17 s → 516/~40 s), `POST /api/lyrics` was
+missing from the API table, and the lyrics-ownership rule was stated twice. DESIGN's slice log is
+untouched; §12 gained the decisions of the day, one line each with its pointer, including the one
+(repair behind a confirm) that lived only in a commit message.
+
 ## 9. Retake the screenshots — LAST
 
 Added 2026-09-26 by the owner. `docs/screenshots/` and the README's images show the UI before the
 lyrics editor, the reset badges, the repair button and the preview states existed. Retake them at
 the same sizes on the final code. Rule, unchanged: every screenshot shows **My Dark Lullabies**
 only — the repo does not display full artist discographies.
+
+## 10. JavaScript test harness for `app.js` — OPEN, not decided
+
+`src/ytalbum/webui/app.js` is around 1,500 lines and carries real logic: the length target while
+trimming, the drag-and-drop arrangement and its live renumbering, the lyrics panel and its ownership
+display, the reset affordance, the player's trim marks and the filter's folding. None of it has a
+unit test. What holds today is that the arithmetic lives in Python where it is tested
+(`plan.trimmed_gap`, `plan.length_gap`, `placed`, `arrange`, `reset_field`), and every browser
+behaviour is exercised through Playwright in `docs/qa-catalog.md` sections H and K–Q — which is
+evidence, but it is not a suite that runs on every push.
+
+The cost of the alternative is real: a runner (node's own `--test`, or vitest), and `app.js` split
+into importable pieces or given an export shim, which is a refactor of a file that currently has no
+build step at all — a property worth keeping.
+
+**The user's call**, not the reviewer's and not mine. Raised by the assistant at the end of the
+backlog; deliberately left open rather than decided quietly in a feature package (DESIGN §9.31).

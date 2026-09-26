@@ -857,3 +857,33 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
 - Library root is configurable (§7).
 - v3 lives on a **new branch** in this repo, which became `main` (`github.com/smtws/ytalbum`).
 - Intro/outro trimming: yes, later — after the rest is stable (slice 8).
+
+### Decisions of 2026-09-26 (the QA run and the backlog that came out of it)
+
+- A lyric is the user's by its **bytes**, not by a flag they set; the record of what we wrote
+  decides, and where there is no record, lrclib is asked about the entry we stored (§9.21).
+- Deleting your own lyric gives the mark up with it, so `--refetch` can answer again (§9.21).
+- The lyrics panel **writes**, and the editor never looks anything up — a save can then never be
+  answered by replacing the words just typed (§9.26).
+- A rejected lrclib entry is remembered **per track** and never offered for it again, which is what
+  a deleted file could not say (§9.27).
+- A fetch renames only the album it is fetching; the library's spelling wins and `repair` is what
+  upgrades the rest (§9.23).
+- `repair` decides each artist's spelling once, before it renames anything (§9.23).
+- A length reference lrclib contributes is the **consensus** of its candidates, not the nearest
+  one, and the query drops only the instrumental markers (§9.24).
+- A single's album name follows its own track's title (§9.25).
+- **Repair is reachable from the web UI, behind a confirm rather than a preview** (P10, catalog L):
+  a preview would need a pass that reports without writing, which is the fetch preview's job and
+  not repair's. This decision lives nowhere else.
+- The fetch preview merges with what is in the library, so it shows what a fetch would write rather
+  than a fresh reading of YouTube; Shift+click skips it (§9.28).
+- Resetting a field drops its provenance rather than guessing it, because `auto` records the derived
+  value and never its source (§9.29).
+- Opening an album reconciles its lyrics with the disk; the library grid deliberately does not
+  (§9.30).
+- A number the user **typed** counts in the disc they are putting the track on; one left alone counts
+  where the track was (§9.32).
+- **No JavaScript test harness inside a feature package** (§9.31): the arithmetic lives in Python
+  where it is tested and the browser cases are the evidence for the rest. Whether the repo gets one
+  is open — `docs/backlog.md` item 10.
