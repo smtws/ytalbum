@@ -242,7 +242,11 @@ tr.lyrics .line .at { color: var(--muted); font-variant-numeric: tabular-nums; m
 tr.lyrics .line.now { background: var(--accent); color: var(--accent-ink); }
 tr.lyrics .line.now .at { color: inherit; opacity: .7; }
 tr.lyrics .lyrics-panel { display: grid; gap: .4rem; }
+/* `button.small` carries `margin-left: auto` so a lone small button sits at the end of its row
+   (the job rows' "log", the album head). A row of several of them is a group, not three things
+   pushed apart — without this they stood at the far left, middle and right of the panel. */
 tr.lyrics .lyrics-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+tr.lyrics .lyrics-actions > button { margin-left: 0; }
 tr.lyrics .lyrics-actions .muted { font-size: .85em; }
 textarea.lyrics-edit {
   width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
