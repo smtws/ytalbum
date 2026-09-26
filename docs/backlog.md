@@ -136,12 +136,20 @@ missing from the API table, and the lyrics-ownership rule was stated twice. DESI
 untouched; §12 gained the decisions of the day, one line each with its pointer, including the one
 (repair behind a confirm) that lived only in a commit message.
 
-## 9. Retake the screenshots — LAST
+## 9. Retake the screenshots — DONE (P17)
 
 Added 2026-09-26 by the owner. `docs/screenshots/` and the README's images show the UI before the
 lyrics editor, the reset badges, the repair button and the preview states existed. Retake them at
 the same sizes on the final code. Rule, unchanged: every screenshot shows **My Dark Lullabies**
 only — the repo does not display full artist discographies.
+
+**Done:** all four retaken on the finished code from the installed service and the real library,
+read-only, same sizes (`library.jpg` 1920×1080, `search.jpg` and `settings.jpg` 1280×860) except
+`album.jpg`, which is 1184×1441 rather than 1185×1142 because the album view has genuinely grown —
+a grip column, the lyrics panel's three actions, the reset badges. Paths in the settings capture are
+rewritten in the DOM before the shot, as the previous one did: nothing is saved, and the user's home
+directory does not belong in a public README. The first capture found the invisible reset badge
+(fixed in 914a22a) and a second cosmetic defect, reported separately.
 
 ## 10. JavaScript test harness for `app.js` — OPEN, not decided
 
