@@ -248,8 +248,14 @@ textarea.lyrics-edit {
   width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .9em; line-height: 1.5; padding: .5rem; tab-size: 2;
 }
-button.badge.reset { cursor: pointer; border: 1px solid currentColor; font: inherit; font-size: .75rem; padding: 0 .35rem; }
-button.badge.reset:hover, button.badge.reset:focus-visible { filter: brightness(1.25); }
+/* a badge that is also a button: it must look like the badge it replaces, so it takes the
+   badge's transparent background — inheriting the button default painted accent on accent and
+   the label could not be read at all (found in a screenshot, not by any DOM check) */
+button.badge.reset {
+  cursor: pointer; background: transparent; color: var(--accent); border: 1px solid var(--accent);
+  font: inherit; font-size: .72rem; padding: .05rem .4rem; line-height: inherit;
+}
+button.badge.reset:hover, button.badge.reset:focus-visible { background: var(--accent); color: var(--accent-ink); }
 .order-mark { display: flex; gap: .4rem; align-items: center; margin: -.25rem 0 .5rem; }
 .grip {
   cursor: grab; touch-action: none; user-select: none; color: var(--muted);

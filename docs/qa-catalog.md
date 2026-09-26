@@ -1059,9 +1059,15 @@ escaping an event handler, so the call is now guarded.
 
 ### Evidence methods that lied
 
-Five of my own checks produced a false result, or none at all, before the software did anything
+Six of my own checks produced a false result, or none at all, before the software did anything
 wrong. Use these forms:
 
+- **A DOM assertion proves an element exists, not that anyone can see it.** P12's reset affordance
+  was checked by `outerHTML`, `textContent`, class names and the plan after the click — all passing,
+  all blind to contrast. `button.badge.reset` inherited the button default's accent *background*
+  while `.badge.user` gave it accent *text*, so "you ↺" shipped as an empty purple pill and stayed
+  that way through two more packages. It was obvious in the first screenshot anyone looked at. A
+  picture is the only test of contrast, truncation and overlap; assertions cannot see any of them.
 - **A scripted doc edit that matches nothing succeeds.** `str.replace` returns the string
   unchanged when its target is absent, so a heredoc that rewrites a paragraph, writes the file and
   exits 0 can leave the document untouched — twice here, both times because an earlier edit in the
