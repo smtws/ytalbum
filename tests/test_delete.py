@@ -8,7 +8,7 @@ from mutagen.oggopus import OggOpus
 from test_incremental import FakeYouTube, opus_template, vol1
 
 from ytalbum.config import Config
-from ytalbum.download import load_plan, run
+from ytalbum.download import load_plan, run, save_plan
 from ytalbum.plan import build_plan, merge_plans
 from ytalbum.service import Service
 from ytalbum.trim import ORIGINALS
@@ -86,3 +86,25 @@ def test_deleting_something_unknown_fails_cleanly(library):
     assert service.delete_track(plan.source_id, "nope").status == "failed"
     assert service.delete_album("nope").status == "failed"
     assert len(list((tmp_path / plan.folder).glob("*.opus"))) == 13  # nothing touched
+
+
+def test_prune_takes_the_kept_original_with_it(tmp_path, opus_template):
+    """delete_track has always removed it; prune left a full-size orphan behind."""
+    from ytalbum.trim import kept_originals
+
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:3]
+    album_dir = tmp_path / plan.folder
+    run(plan, album_dir, FakeYouTube(opus_template))
+    gone = plan.tracks[1]
+    gone.trim_start = 0.2                       # so an original is kept for it
+    run(plan, album_dir, FakeYouTube(opus_template))
+    assert kept_originals(album_dir, gone), "the trim kept an original"
+
+    gone.in_source = False
+    save_plan(plan, album_dir)
+    Service(Config(musicbrainz=False), tmp_path, yt=FakeYouTube(opus_template)).prune(album_dir)
+
+    assert not kept_originals(album_dir, gone), "and prune must take it along"
+    assert not (album_dir / gone.filename).exists()
+    assert len(load_plan(album_dir).tracks) == 2

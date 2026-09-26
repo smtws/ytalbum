@@ -108,3 +108,167 @@ def test_trim_channel_covers_the_whole_library(tmp_path, opus_template):
     napalm = [t for t in saved.tracks if t.channel == channel]
     assert len(napalm) == 2 and all(t.trim_start == 0.2 and t.trimmed for t in napalm)
     assert all(t.trimmed is None for t in saved.tracks if t.channel != channel)
+
+
+# -- the original is kept in the track's own format (DESIGN.md §9.20) --------------------
+
+
+@pytest.fixture
+def aac(tmp_path):
+    """What a track taken from the combined stream looks like: AAC in an MP4 container."""
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    path = tmp_path / "tone.m4a"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=10", "-c:a", "aac", str(path)], check=True)
+    return path
+
+
+def m4a_track(plan):
+    t = plan.tracks[0]
+    t.ext, t.filename = "m4a", Path(t.filename).with_suffix(".m4a").name
+    return t
+
+
+def test_an_m4a_track_is_cut_into_its_own_container(tmp_path, aac):
+    from ytalbum.trim import holds, original_path
+
+    plan = build_plan(vol1())
+    track = m4a_track(plan)
+    shutil.copy(aac, tmp_path / track.filename)
+    track.trim_start, track.trim_end = 2.0, 7.0
+
+    assert apply(tmp_path, track, tmp_path / track.filename) is True
+    assert original_path(tmp_path, track).name.endswith(".m4a")  # not ".opus"
+    assert holds(tmp_path / track.filename, "m4a"), "the cut must stay an MP4 file"
+    assert holds(original_path(tmp_path, track), "m4a")
+    assert 4.5 < duration(tmp_path / track.filename) < 5.5
+
+
+def test_an_m4a_track_round_trips(tmp_path, aac):
+    plan = build_plan(vol1())
+    track = m4a_track(plan)
+    path = tmp_path / track.filename
+    shutil.copy(aac, path)
+    before = path.read_bytes()
+
+    track.trim_start = 3.0
+    apply(tmp_path, track, path)
+    track.trim_start = None
+    apply(tmp_path, track, path)
+    assert path.read_bytes() == before  # restored byte for byte
+    track.trim_start = 4.0
+    assert apply(tmp_path, track, path) is True  # and can be cut again
+
+
+def test_an_original_of_another_format_is_never_cut_from(tmp_path, aac, tone):
+    """The B6 case: a track switched to the combined stream still had its opus original."""
+    from ytalbum.trim import ORIGINALS
+
+    plan = build_plan(vol1())
+    track = m4a_track(plan)
+    path = tmp_path / track.filename
+    shutil.copy(aac, path)
+    (tmp_path / ORIGINALS).mkdir()
+    shutil.copy(tone, tmp_path / ORIGINALS / f"{track.video_id}.opus")  # the leftover
+    track.trimmed = "1.00-"  # the file on disk is already cut: nothing to take a fresh one from
+    track.trim_start = 2.0
+
+    with pytest.raises(RuntimeError, match="nothing to cut from"):
+        apply(tmp_path, track, path)
+    assert path.read_bytes() == aac.read_bytes(), "the audio must be left alone"
+
+
+def test_a_leftover_original_is_replaced_when_the_file_is_untouched(tmp_path, aac, tone):
+    from ytalbum.trim import ORIGINALS, holds, original_path
+
+    plan = build_plan(vol1())
+    track = m4a_track(plan)
+    path = tmp_path / track.filename
+    shutil.copy(aac, path)
+    (tmp_path / ORIGINALS).mkdir()
+    stale = tmp_path / ORIGINALS / f"{track.video_id}.opus"
+    shutil.copy(tone, stale)
+    track.trimmed = None  # the file on disk *is* the untouched download
+    track.trim_start = 2.0
+
+    assert apply(tmp_path, track, path) is True
+    assert holds(original_path(tmp_path, track), "m4a")
+    assert not stale.exists(), "the previous format's copy is dead weight"
+
+
+def test_ffmpeg_missing_is_reported_and_changes_nothing(tmp_path, tone, monkeypatch):
+    plan = build_plan(vol1())
+    track = plan.tracks[0]
+    path = tmp_path / track.filename
+    shutil.copy(tone, path)
+    before = path.read_bytes()
+    monkeypatch.setenv("PATH", "/nonexistent")
+    track.trim_start = 2.0
+
+    with pytest.raises(RuntimeError, match="could not trim"):
+        apply(tmp_path, track, path)
+    assert path.read_bytes() == before
+    assert track.trimmed is None
+
+
+# -- a failed trim is never silent, and one bad file is not the album's problem ----------
+
+
+def test_a_failed_trim_is_written_down_and_reported(tmp_path, opus_template, monkeypatch):
+    """It used to set track.error and then never save the plan, so nothing survived the run."""
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:2]
+    album_dir = tmp_path / "album"
+    yt = FakeYouTube(opus_template)
+    run(plan, album_dir, yt)
+
+    events = []
+    plan.tracks[0].trim_start = 2.0
+    monkeypatch.setenv("PATH", "/nonexistent")  # no ffmpeg
+    run(plan, album_dir, yt, on_track=lambda t, what: events.append((t.number, what)))
+
+    saved = load_plan(album_dir)
+    assert "could not trim" in (saved.tracks[0].error or ""), "the reason must survive in the plan"
+    assert (1, "trim failed") in events, "and reach the job log"
+    assert saved.tracks[0].trim_start == 2.0, "the request itself stays, to be retried"
+    assert saved.tracks[0].trimmed is None
+
+
+def test_the_retry_clears_the_error_and_announces_itself(tmp_path, opus_template, monkeypatch):
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:1]
+    album_dir = tmp_path / "album"
+    yt = FakeYouTube(opus_template)
+    run(plan, album_dir, yt)
+    plan.tracks[0].trim_start = 0.2
+    monkeypatch.setenv("PATH", "/nonexistent")
+    run(plan, album_dir, yt)
+    monkeypatch.undo()
+
+    events = []
+    run(plan, album_dir, yt, on_track=lambda t, what: events.append(what))
+    saved = load_plan(album_dir)
+    assert "trimmed" in events, "applying it later is an event of its own"
+    assert saved.tracks[0].error is None
+    assert saved.tracks[0].trimmed == "0.20-"
+
+
+def test_one_unreadable_file_fails_its_own_track_only(tmp_path, opus_template):
+    """A file whose contents do not match its name used to abort the whole album's run."""
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:3]
+    album_dir = tmp_path / "album"
+    yt = FakeYouTube(opus_template)
+    run(plan, album_dir, yt)
+
+    broken = album_dir / plan.tracks[1].filename
+    broken.write_bytes(b"this is not audio")
+    plan.tracks[1].tagged = None  # force a retag of that track
+
+    events = []
+    run(plan, album_dir, yt, download=False, on_track=lambda t, what: events.append((t.number, what)))
+    saved = load_plan(album_dir)
+    assert saved.tracks[1].state == "failed"
+    assert "cannot be tagged" in (saved.tracks[1].error or "")
+    assert (2, "failed") in events
+    assert [t.state for t in saved.tracks] == ["done", "failed", "done"], "the others are untouched"

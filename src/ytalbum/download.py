@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+from mutagen import MutagenError
 from yt_dlp.utils import DownloadError
 
 from .cover import square_if_padded
@@ -123,27 +124,39 @@ def run(
         final = album_dir / track.filename
 
         if track.state == "done" and final.exists():
-            cut = False
+            cut = failed_trim = False
             try:
                 if cut := apply_trim(album_dir, track, final):
                     track.tagged = None  # the new file needs its tags again
+                    track.error = None  # a trim that was refused before has now gone through
                     if track.lyrics is not None and lyrics is not None:
                         track.lyrics = None  # the file is a different length: match it again
                     on_track(track, "trimmed")
             except RuntimeError as e:
-                track.error = str(e)
+                # the trim points stay: they are what the user asked for, and the next run tries
+                # again. What must not happen is losing the reason it did not happen this time.
+                track.error, failed_trim = str(e), True
                 log.warning("%s: %s", track.filename, e)
+                on_track(track, "trim failed")
             measured = cut or track.file_length is None  # measured once, then only when it changes
             if measured:
                 track.file_length = audio_length(final)
             looked_up = lyrics is not None and track.lyrics is None
             text = update_track(lyrics, plan, track, album_dir, final) if looked_up else read_sidecar(album_dir, track)
-            if track.tagged != signature(plan, track, cover, text):
-                track.tagged = tag_file(final, plan, track, cover, text)
+            try:
+                if track.tagged != signature(plan, track, cover, text):
+                    track.tagged = tag_file(final, plan, track, cover, text)
+                    save_plan(plan, album_dir)
+                    on_track(track, f"lyrics ({track.lyrics})" if looked_up and text else "retagged")
+                elif looked_up or measured or failed_trim:
+                    save_plan(plan, album_dir)  # the lookup, the length, or why the trim did not happen
+            except (MutagenError, OSError) as e:
+                # this file is not what its name says, so nothing can be written to it. One bad
+                # file fails its own track; the rest of the album still runs.
+                track.state, track.error, track.tagged = "failed", f"cannot be tagged: {e}", None
                 save_plan(plan, album_dir)
-                on_track(track, f"lyrics ({track.lyrics})" if looked_up and text else "retagged")
-            elif looked_up or measured:
-                save_plan(plan, album_dir)  # the lookup or the length we just measured
+                log.warning("%s: %s", track.filename, e)
+                on_track(track, "failed")
             continue
         if not track.in_source or not download:
             continue  # gone from the playlist, or we are only tidying up files
@@ -153,7 +166,10 @@ def run(
                 tmp = yt.download_audio(track.video_id, parts, track.audio_choice)
                 text = update_track(lyrics, plan, track, album_dir, tmp) if lyrics else None
                 track.file_length = audio_length(tmp)
-                track.tagged = tag_file(tmp, plan, track, cover, text)
+                try:
+                    track.tagged = tag_file(tmp, plan, track, cover, text)
+                except MutagenError as e:
+                    raise RuntimeError(f"downloaded file cannot be tagged: {e}") from e
                 os.replace(tmp, final)
                 track.state, track.error, track.error_kind = "done", None, None
                 break

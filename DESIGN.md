@@ -514,6 +514,22 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    against its studio version reads as two minutes off. `mb_length` is now only written when
    the recording is accepted, and `repair` gives up the ones already stored.
 
+20. ✅ A trim keeps the track's own format, and a failure says so (2026-09-26, from the QA
+   run). The kept original was named `<video id>.opus` whatever the track was, and the cut was
+   always written into `.trim.opus` with `-c copy`. A track trimmed as opus and then switched
+   to the combined stream was therefore re-cut from the *previous format's* original: ffmpeg
+   copied Opus into a file named `.m4a`, the tagger called `MP4()` on it and raised, and that
+   exception aborted every later run over the album until the file was deleted by hand — while
+   the plan still read `state=done, trimmed=None, error=None`. Now the original carries the
+   track's extension, the cut keeps the track's container, and a kept original that is not what
+   its name says is never cut from: if the file on disk is still the untouched download a fresh
+   original is taken from it, otherwise the trim is refused with the recovery path named. No
+   original is ever invented from an already-cut file. Two further faults came out of the same
+   case: a trim that fails **was never recorded** — `run()` set `track.error` and then saved
+   nothing, so with ffmpeg missing the plan advertised a trim that never happened and the web UI
+   showed nothing at all — and a file that cannot be tagged now fails **its own track** instead
+   of the album's run. Prune also gives up the kept original, as `delete_track` always did.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

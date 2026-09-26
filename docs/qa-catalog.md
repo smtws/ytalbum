@@ -161,7 +161,7 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: `audio.src`; position ≈ `trim_start` two seconds in
   - **result 2026-09-26:** pass — the player requested `&o=1`, was served the 470.9 s original, and sat at 22.5 s after three seconds: the head is cut once
 
-- [ ] **B6 · M★⚠** — trim an `.m4a` track (needs A5)
+- [x] **B6 · M★⚠** — trim an `.m4a` track (needs A5)
   - do: set both marks on the m4a track from A5 and save
   - expect (suspected defect): `original_path` hardcodes `.opus` and `apply()` remuxes into
     `.trim.opus` with `-c copy`, so AAC into an Opus container should fail
@@ -170,13 +170,15 @@ is working on the same library — nothing locks them against each other (G5).
   - invariant: the playable file survives and the failure is reported on the track
   - evidence: `track.error`; duration unchanged; ffmpeg stderr
   - **result 2026-09-26:** **FAIL, worse than predicted** — see the finding below. The trim read a stale `.opus` original left by an earlier format, wrote Ogg/Opus into the `.m4a`, and the tagger then raised an unhandled `MP4StreamInfoError`
+  - **re-run after P1: pass** — the m4a trim produced a 112 s file that is still an MP4 container, the original was kept as `dGO_sx4By28.m4a`, no error
 
-- [ ] **B7 · M★** — change the audio source of a trimmed track
+- [x] **B7 · M★** — change the audio source of a trimmed track
   - do: trim S1, then switch it to `combined`
   - expect: it re-downloads, `trimmed` resets, the marks re-apply to the new original
   - invariant: the trim points are kept while the audio underneath is replaced
   - evidence: `plan.trimmed`; duration
   - **result 2026-09-26:** **FAIL (deferred)** — switching a trimmed track to `combined` silently does not apply the trim (fresh 470.9 s file, `trimmed=None`); the **next** run applies it and corrupts the file exactly as in B6
+  - **re-run after P1: pass** — switching the trimmed track back to opus and running the next pass applied the same trim in the opus container (112 s, ogg); nothing was corrupted
 
 - [x] **B8 · M★** — one trim for a whole channel
   - do: fetch S9, then set a front trim on S1 and press ⇉
@@ -186,6 +188,7 @@ is working on the same library — nothing locks them against each other (G5).
     **not** be touched
   - evidence: all three plans' `trim_start`/`trim_end`; the job log
   - **result 2026-09-26:** pass on the rule — both *Napalm Records* tracks took the trim while the two *Lord Of The Lost* albums and the *xxFEUERSCHWANZxx* one were untouched, so it keys on the uploader, not the artist. It also exposed the persistence described below
+  - **re-run after P1: pass** — the Napalm Records track took the trim and applied it, the Lord Of The Lost track stayed untouched, and no stale original got in the way
 
 ---
 
@@ -335,6 +338,7 @@ is working on the same library — nothing locks them against each other (G5).
   - invariant: its `.lrc` and `.originals/` entry go with it
   - evidence: the directory listing; `tracktotal`
   - **result 2026-09-26:** pass with one gap — the pruned track's audio and `.lrc` went and the rest retagged to `tracktotal` 6, but its **`.originals/` copy stayed behind**. `delete_track` removes the original; `prune` does not, so a pruned trimmed track leaves a full-size orphan
+  - **re-run after P1: pass** — the pruned track's `.originals` copy went with it
 
 - [ ] **E6 · D★** — prune an album whose order you set
   - do: set a custom order on S3, save, mark a track `in_source: false`, then prune it
@@ -505,13 +509,14 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: the plan afterwards; a re-run finds the words
   - **result 2026-09-26:** pass — with a cold cache behind a dead proxy, all five tracks stayed unset and **none** was recorded as `none`
 
-- [ ] **I4 · M★** — no ffmpeg
+- [x] **I4 · M★** — no ffmpeg
   - do: run a trim with `ffmpeg` off `PATH`
   - expect: it fails loudly, on that track
   - invariant: the audio file is never damaged; the original in `.originals/` is intact
   - evidence: `track.error`; the duration is unchanged
   - class: `apply()` copies the file into `.originals/` before ffmpeg runs, so this writes
   - **result 2026-09-26:** **invariant holds, expectation fails** — the audio was untouched (83.1 s before and after, no exception), but the failure was **not loud**: `error=None` in the plan, nothing in the job log, and a `trim_end` advertised that never happened. The pending trim was then applied silently on a later run once ffmpeg was back
+  - **re-run after P1: pass** — audio untouched, `could not trim: … 'ffmpeg'` recorded on the track, and a `trim failed` event reached the job log
 
 ---
 

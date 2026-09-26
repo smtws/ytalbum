@@ -27,7 +27,7 @@ from .plan import build_plan, drop_album_name, merge_plans, refresh_derived, ren
 from .search import SearchResult, search_artist
 from .titles import key as text_key
 from .titles import move_feat, strip_self_feat
-from .trim import ORIGINALS, original_path
+from .trim import ORIGINALS, kept_originals
 from .youtube import BOT_CHECK, Cancelled, YouTube, channel_base_url
 
 log = logging.getLogger(__name__)
@@ -333,6 +333,8 @@ class Service:
             if path and path.exists():
                 path.unlink()
             remove_sidecar(album_dir, t.filename)
+            for kept in kept_originals(album_dir, t):
+                kept.unlink()  # the untouched download goes with the track, as in delete_track
             self.log(f"removed {t.number:02d} {t.artist} - {t.title}" + ("" if path else " (unsafe file name ignored)"))
         plan.tracks = [t for t in plan.tracks if t.in_source]
         if all(t.disc == 1 for t in plan.tracks):  # gone tracks were numbered last; close any gap
@@ -448,7 +450,7 @@ class Service:
         track = next((t for t in plan.tracks if t.video_id == video_id), None)
         if not track:
             return Outcome("failed", message="no such track")
-        for path in (_inside(album_dir, track.filename), original_path(album_dir, track)):
+        for path in (_inside(album_dir, track.filename), *kept_originals(album_dir, track)):
             if path and path.exists():
                 path.unlink()
         remove_sidecar(album_dir, track.filename)
@@ -465,7 +467,7 @@ class Service:
             return Outcome("failed", message=f"unknown album {source_id}")
         album_dir, plan = found
         for track in plan.tracks:
-            for path in (_inside(album_dir, track.filename), original_path(album_dir, track)):
+            for path in (_inside(album_dir, track.filename), *kept_originals(album_dir, track)):
                 if path and path.exists():
                     path.unlink()
             remove_sidecar(album_dir, track.filename)
