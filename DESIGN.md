@@ -559,6 +559,22 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    was never noticed. A trim, finally, clears the status to force a re-match; for a lyric of
    yours it now restores the status from the words on disk instead of leaving the track blank.
 
+22. ✅ The arrangement is the order the tracks are in, not the numbers (2026-09-26, from the QA
+   run). Two faults with one cause. Prune closed the numbering gap on a single-disc album and
+   left it on a multi-disc one — `1, 2, 4 …` in the tags — because the decision was made by
+   `if all(t.disc == 1)`, not by any rule about order. And collapsing a disc split back to one
+   disc reshuffled the album: the numbers of a split are per disc, so `1-01…1-03 / 2-01…2-03`
+   sorted by `(disc, number)` interleaved into 1, 1, 2, 2, 3, 3. A split was reversible on paper
+   but not in arrangement. The fix names what the arrangement actually is: the order the tracks
+   stand in, which is the order the album view shows and the order the browser posts back.
+   `renumber_discs` is therefore `arrange`, and it no longer sorts at all — it groups by disc and
+   counts each disc from 1. Where a sort *is* wanted, because the user typed numbers, it happens
+   first and against the disc each track **was** on, where the numbers are unique; a number just
+   typed also beats the same number left standing on another track, so typing 1 on 2-04 makes it
+   lead and moves 2-01 down. Prune then closes the gap on every album, per disc, and keeps
+   `provenance["order"] = user`: that flag protects the sequence from the *source* renumbering it,
+   and a deletion the user asked for is not the source — `delete_track` has always renumbered.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

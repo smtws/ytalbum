@@ -304,6 +304,48 @@ def test_putting_everything_back_on_one_disc_renumbers_straight_through():
     assert " - 1-01 - " not in plan.tracks[0].filename  # no disc prefix on a single-disc album
 
 
+def as_shown(plan, disc=None):
+    """What the browser posts on save: every row, with the number and disc it shows."""
+    return {"tracks": [{"video_id": t.video_id, "number": str(t.number),
+                        "disc": str(disc if disc else t.disc)} for t in plan.tracks]}
+
+
+def reordered(plan, sequence):
+    return apply_user_edits(plan, {"tracks": [{"video_id": v, "number": n} for n, v in enumerate(sequence, 1)]})
+
+
+def test_collapsing_a_split_keeps_the_arrangement_the_user_set():
+    """The numbers of a split are per disc, so sorting by them merges the discs like a zipper."""
+    plan = build_plan(vol1())
+    order = [t.video_id for t in reversed(plan.tracks)]
+    reordered(plan, order)
+    apply_user_edits(plan, as_shown(plan) | {"tracks": [{"video_id": t.video_id, "number": str(t.number),
+                                                         "disc": "2" if i >= 6 else "1"}
+                                                        for i, t in enumerate(plan.tracks)]})
+    assert [t.video_id for t in plan.tracks] == order  # splitting moves nothing
+    assert [(t.disc, t.number) for t in plan.tracks] == [(1, n) for n in range(1, 7)] + [(2, n) for n in range(1, 8)]
+
+    apply_user_edits(plan, as_shown(plan, disc=1))  # and putting it back on one disc moves nothing
+    assert [t.video_id for t in plan.tracks] == order
+    assert [(t.disc, t.number) for t in plan.tracks] == [(1, n) for n in range(1, 14)]
+
+
+def test_a_merge_and_a_renumber_in_one_save_put_the_track_where_it_was_asked():
+    """The number is read where it was typed: inside the disc the track was on."""
+    plan = build_plan(vol1())
+    apply_user_edits(plan, {"tracks": [{"video_id": t.video_id, "disc": "2"} for t in plan.tracks[6:]]})
+    was = [t.video_id for t in plan.tracks]
+    moved = plan.tracks[9].video_id  # 2-04, asked to lead its disc while the discs collapse
+    edits = as_shown(plan, disc=1)
+    for te in edits["tracks"]:
+        if te["video_id"] == moved:
+            te["number"] = "1"
+    apply_user_edits(plan, edits)
+    assert [t.video_id for t in plan.tracks] == was[:6] + [moved] + [v for v in was[6:] if v != moved]
+    assert [t.number for t in plan.tracks] == list(range(1, 14))
+    assert plan.provenance["order"] == Provenance.USER
+
+
 @pytest.mark.parametrize("value", ["", "0", "-3", "abc", None])
 def test_nonsense_disc_values_are_ignored(value):
     plan = build_plan(vol1())

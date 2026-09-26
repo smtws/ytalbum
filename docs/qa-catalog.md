@@ -352,14 +352,28 @@ is working on the same library — nothing locks them against each other (G5).
   - evidence: the directory listing; `tracktotal`
   - **result 2026-09-26:** pass with one gap — the pruned track's audio and `.lrc` went and the rest retagged to `tracktotal` 6, but its **`.originals/` copy stayed behind**. `delete_track` removes the original; `prune` does not, so a pruned trimmed track leaves a full-size orphan
   - **re-run after P1: pass** — the pruned track's `.originals` copy went with it
+  - **re-run after P3: pass** — a trimmed track pruned from the scratch album took its audio, its
+    `.lrc` and `ayFhgxdRV-Q.opus` in `.originals/` with it
 
-- [ ] **E6 · D★** — prune an album whose order you set
+- [x] **E6 · D★** — prune an album whose order you set
   - do: set a custom order on S3, save, mark a track `in_source: false`, then prune it
   - expect (open question): gaps close, so your numbers change. Confirm that is wanted, or make
     prune leave a user order alone
   - invariant: whatever is decided, the tracks keep their relative order
   - evidence: numbering before/after
   - **result 2026-09-26:** **observe-only, as instructed (R-002); album restored afterwards.** The renumbering is decided by discs, not by provenance: on a **multi-disc** album prune left the gap (1, 2, 4 …), on a **single-disc** album it renumbered 1..n and closed it, rewriting the numbers the user chose. Relative order was preserved in both. Also observed: collapsing a disc split back to one disc re-sorts by (disc, number) and **reshuffles the user's arrangement**
+  - **decision (P3, DESIGN.md §9.22):** the gap closes on **every** album, per disc, and the user
+    order flag stays set. What the flag protects is the sequence against the *source*, and a
+    deletion the user asked for is not the source; `delete_track` has always renumbered. What must
+    never change is the relative order — and that is now what the code is built on, rather than
+    the numbers.
+  - **run to a conclusion after P3 (no longer observe-only):** pass in all three shapes.
+    Single disc: dropping track 3 of 5 left the arrangement intact, numbers 1…4 with no gap, flag
+    still `user`, and the victim's audio, `.lrc` and kept original gone. Multi-disc: dropping 1-02
+    of a 2/2 split left `{disc 1: [1], disc 2: [1, 2]}` — closed per disc, order and flag kept
+    (this is the `1, 2, 4 …` case). Split/merge round trip: a reversed arrangement survived the
+    split, and collapsing it back to one disc returned exactly the same order, numbered 1…n, with
+    the file names following and no `1-01` prefix left behind
 
 - [ ] **E7 · M★** — a spelling that differs from the library's
   - do: in the scratch library, edit S1's album artist to `LORD OF THE LOST` (which marks it
@@ -625,6 +639,10 @@ the metadata, and the lyrics matcher can be asked directly.
 Three of my own checks produced a false result before the software did anything wrong. Use
 these forms:
 
+- **The specimens carry the scars of earlier cases.** Case C4 renamed a track to *Sex is Muss
+  (QA rename)*, which silently took it out of lrclib's reach — so a later lyrics case run against
+  that specimen reported a FAIL that was nothing to do with the code under test. Check a specimen's
+  current title and status before using it as evidence, or pick one no earlier case touched.
 - **File-state comparison**: `find … -printf '%T@ %p\n' | sort`. Unsorted, directory order
   alone changes the hash and a dry run looks like a write.
 - **Page state**: `queue`, `qi`, `state` are top-level `let` bindings — global, but **not**

@@ -337,9 +337,10 @@ class Service:
                 kept.unlink()  # the untouched download goes with the track, as in delete_track
             self.log(f"removed {t.number:02d} {t.artist} - {t.title}" + ("" if path else " (unsafe file name ignored)"))
         plan.tracks = [t for t in plan.tracks if t.in_source]
-        if all(t.disc == 1 for t in plan.tracks):  # gone tracks were numbered last; close any gap
-            for number, t in enumerate(plan.tracks, 1):
-                t.number = number
+        # Close the gap the removed tracks leave — on every album, not only single-disc ones:
+        # a player showing 1, 2, 4 is a defect in the tags, and what a user order protects is
+        # the arrangement, which counting the discs off in their own order keeps exactly.
+        arrange(plan)
         save_plan(plan, album_dir)
         return self.execute(plan, album_dir)  # renames/retags only (tracktotal changed)
 
@@ -547,6 +548,8 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
                 setattr(plan, name, value)
                 plan.provenance[name] = Provenance.USER
     by_id = {t.video_id: t for t in plan.tracks}
+    was_on = {t.video_id: t.disc for t in plan.tracks}  # numbers count inside the disc they were on
+    typed: set[str] = set()  # tracks the user gave a new number to; theirs wins a tie
     discs_changed = order_changed = False
     for te in edits.get("tracks", []):
         t = by_id.get(te.get("video_id"))
@@ -563,7 +566,9 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
             t.trim_start, t.trim_end = start, end
         if str(te.get("number", "")).strip().isdigit():
             wanted = max(1, int(te["number"]))
-            order_changed |= wanted != t.number
+            if wanted != t.number:
+                typed.add(t.video_id)
+                order_changed = True
             t.number = wanted
         if str(te.get("disc", "")).strip().isdigit():
             disc = max(1, int(te["disc"]))
@@ -579,20 +584,34 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
                     # length: the two belong together, and a length that outlives its recording
                     # is a false reference that `repair` would later drop on its own
                     t.mbid = t.mb_length = None
+    if order_changed:
+        # the numbers first, read where they were typed: inside the disc the track was on, where
+        # they are unique. Doing this against the *new* discs is what interleaved a collapse.
+        # a number the user just typed beats the same number left standing on another track:
+        # typing 1 on 2-04 means it leads, and 2-01 moves down
+        plan.tracks.sort(key=lambda t: (was_on.get(t.video_id, t.disc), t.number, t.video_id not in typed))
     if discs_changed or order_changed:
-        renumber_discs(plan)  # sorts by what was asked for, then counts each disc from 1
+        arrange(plan)  # then the discs, keeping that arrangement, counting each disc from 1
     if order_changed:
         plan.provenance["order"] = Provenance.USER  # the source may not renumber this album
     return refresh_derived(plan)
 
 
-def renumber_discs(plan: AlbumPlan) -> AlbumPlan:
-    """Each disc counts from 1, in the order the tracks stand — what a split needs."""
-    plan.tracks.sort(key=lambda t: (t.disc, t.number))
-    counters: dict[int, int] = {}
+def arrange(plan: AlbumPlan) -> AlbumPlan:
+    """Group the tracks by disc and count each disc from 1, in the order its tracks stand.
+
+    The arrangement is the order the tracks are in — the order the album view shows — and this
+    only groups and counts it. Sorting by `(disc, number)` as well, which is what this used to
+    do, reshuffles an album whenever the numbers are not unique across the discs: collapsing
+    1-01…1-03 / 2-01…2-03 back to one disc interleaved them (DESIGN.md §9.22).
+    """
+    by_disc: dict[int, list[PlanTrack]] = {}
     for t in plan.tracks:
-        counters[t.disc] = counters.get(t.disc, 0) + 1
-        t.number = counters[t.disc]
+        by_disc.setdefault(t.disc, []).append(t)
+    plan.tracks = [t for disc in sorted(by_disc) for t in by_disc[disc]]
+    for group in by_disc.values():
+        for number, t in enumerate(group, 1):
+            t.number = number
     return plan
 
 

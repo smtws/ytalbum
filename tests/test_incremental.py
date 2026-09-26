@@ -315,6 +315,49 @@ def test_prune_deletes_only_gone_tracks_and_retags_the_rest(tmp_path, yt):
     assert len(yt.downloads) == 13  # nothing downloaded again
 
 
+def pruned(tmp_path, yt, discs=1, drop=2):
+    """An album on disk with a user order, one track gone from the source, then pruned."""
+    from ytalbum.config import Config
+    from ytalbum.download import save_plan
+    from ytalbum.service import Service
+
+    plan = build_plan(vol1())
+    album_dir = tmp_path / plan.folder
+    run(plan, album_dir, yt)
+    plan = load_plan(album_dir)
+    plan.tracks.reverse()  # an arrangement of their own
+    if discs == 2:
+        for i, t in enumerate(plan.tracks):
+            t.disc = 1 if i < 6 else 2
+    for disc in sorted({t.disc for t in plan.tracks}):
+        for n, t in enumerate([x for x in plan.tracks if x.disc == disc], 1):
+            t.number = n
+    plan.provenance["order"] = Provenance.USER
+    order = [t.video_id for t in plan.tracks]
+    plan.tracks[drop].in_source = False
+    save_plan(plan, album_dir)
+    Service(Config(musicbrainz=False), tmp_path, yt=yt).prune(album_dir)
+    return load_plan(album_dir), album_dir, [v for v in order if v != order[drop]]
+
+
+def test_prune_closes_the_gap_and_leaves_a_user_order_alone(tmp_path, yt):
+    saved, album_dir, order = pruned(tmp_path, yt)
+    assert [t.video_id for t in saved.tracks] == order  # the arrangement is theirs
+    assert [t.number for t in saved.tracks] == list(range(1, 13))  # and no gap is left in it
+    assert saved.provenance["order"] == Provenance.USER  # the flag is not spent by pruning
+    assert OggOpus(album_dir / saved.tracks[0].filename)["tracktotal"] == ["12"]
+
+
+def test_prune_closes_the_gap_per_disc_on_a_multi_disc_album(tmp_path, yt):
+    """It used to renumber single-disc albums and leave 1, 2, 4 … on multi-disc ones."""
+    saved, album_dir, order = pruned(tmp_path, yt, discs=2)
+    assert [t.video_id for t in saved.tracks] == order
+    assert [(t.disc, t.number) for t in saved.tracks] == [(1, n) for n in range(1, 6)] + [(2, n) for n in range(1, 8)]
+    assert saved.provenance["order"] == Provenance.USER
+    kept = album_dir / saved.tracks[0].filename
+    assert kept.exists() and OggOpus(kept)["discnumber"] == ["1"]  # the file names follow too
+
+
 def test_prune_never_deletes_outside_the_album(tmp_path, yt):
     from ytalbum.config import Config
     from ytalbum.download import save_plan
