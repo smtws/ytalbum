@@ -241,3 +241,12 @@ tr.lyrics .line.timed:hover, tr.lyrics .line.timed:focus-visible { background: v
 tr.lyrics .line .at { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3.2rem; }
 tr.lyrics .line.now { background: var(--accent); color: var(--accent-ink); }
 tr.lyrics .line.now .at { color: inherit; opacity: .7; }
+tr.lyrics .lyrics-panel { display: grid; gap: .4rem; }
+tr.lyrics .lyrics-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+tr.lyrics .lyrics-actions .muted { font-size: .85em; }
+textarea.lyrics-edit {
+  width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .9em; line-height: 1.5; padding: .5rem; tab-size: 2;
+}
+.lyr.empty { opacity: .45; }
+.lyr.empty:hover, .lyr.empty:focus-visible { opacity: 1; }

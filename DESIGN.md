@@ -668,6 +668,29 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    single, whose name is the user's own and already equal to its track title, so `repair` renames
    nothing; the rule is for what arrives next.
 
+26. ✅ The lyrics panel writes as well as reads (2026-09-26, backlog item 1). The whole ownership
+   contract of §9.21 is about words a user writes by hand, and the only door to it was the file
+   system: find the audio file, name a sidecar with the same stem, write LRC syntax, run a pass.
+   The ♪ button now opens a panel that edits, and it appears for a track with no words at all
+   (faint) and for one LRCLIB calls instrumental, since those are exactly the tracks whose words
+   somebody would want to write. Saving does in one step what `reconcile` does when it *finds* an
+   edited file: the sidecar is written as entered, the user mark set, the hash recorded, the status
+   derived from the text (`synced` when a line carries a timestamp, else `plain`), the LYRICS tag
+   rewritten from the file, the plan saved. **Nothing is looked up** — an editor that asked LRCLIB
+   could answer a save by replacing the words just typed. An empty save is a *clear*, not an empty
+   file, and it drops the mark with the words, so a later `--refetch` may bring LRCLIB's version
+   back exactly as deleting the file by hand does.
+   The retag goes through the ordinary pass (`run(..., download=False)`, no lyrics client) rather
+   than a second tagging path, so there is one place that writes tags. The write itself is a job in
+   the write lane like every other library change, and jobs now carry the album they hold
+   (`Job.target`), so a save is **refused** while a pass is working on that album instead of racing
+   it — a pass would retag from the very file the save is about to write. A `fetch` is named by its
+   URL and only learns the album id while it runs, so it is not one of the jobs that check can see;
+   that is a known gap, not a silent one. A track that is not `done` has no file to put words
+   beside and is refused too.
+   Nothing about the contract needed a special case for the editor: a sidecar it wrote, then edited
+   again on disk, is still the user's, and deleted on disk it follows §9.21 like any other.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

@@ -5,7 +5,7 @@ reviewer after the QA run (`docs/qa-catalog.md`, fixes `1e3da95..bd0fe6f`, v0.2.
 code and the run's evidence rather than from clicking through the UI. Ordered by how much a
 daily user would feel each one. The owner agreed to start with item 1.
 
-## 1. Lyrics editor — IN PROGRESS (P8)
+## 1. Lyrics editor — DONE (P8, DESIGN §9.26)
 
 The lyrics panel is read-only ("click to read") while the whole ownership contract
 (DESIGN §9.21) is about files a user writes by hand. To fix one line or add words LRCLIB lacks,
@@ -17,6 +17,13 @@ records the hash, rewrites the tag and derives the status from the text — the 
 contract already performs for files found on disk, just triggered from the UI. Clearing removes
 the sidecar with the P2 semantics (status `none`, mark dropped, `--refetch` may bring LRCLIB's
 back). No lag: the panel shows ownership immediately.
+
+**Done:** the ♪ button opens a panel that reads *and* writes, and it is now shown for a track with
+no words at all (faint) and for one LRCLIB calls instrumental, so lyrics can be created rather than
+only read. `POST /api/save_lyrics` runs as a write job, refuses while another job holds that album,
+and refuses a track that is not `done`. Saving writes the sidecar, marks it yours, records the hash,
+derives `synced`/`plain` from the text and rewrites the tag; an empty save clears. Nothing is looked
+up, so the editor can never replace your words with LRCLIB's.
 
 ## 2. The UI sends people to a terminal
 
@@ -59,6 +66,11 @@ gone. Safe, but a user would call it a bug.
 
 Wanted: reconcile the album's lyrics state when the album view is opened (read-only check,
 cheap), or a filesystem watcher. Item 1 removes the lag for edits made in the UI itself.
+
+*After P8:* the lag is now only for changes made **outside** the UI, since the editor refreshes the
+row and the panel itself. The panel also reads the file on every open, so opening it shows the
+current words even when the row's ♪ is stale — which shrinks this item to the marker and the badge
+counts rather than the words themselves.
 
 ## 7. The ⏱ chip is a diagnosis, not an action
 

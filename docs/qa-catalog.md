@@ -655,6 +655,82 @@ the metadata, and the lyrics matcher can be asked directly.
 
 ---
 
+## K. The lyrics editor (P8, DESIGN §9.26)
+
+Added 2026-09-26 with the editor itself. Run against a freshly seeded scratch library (S1 and S3)
+on a scratch server at 8799, driven through the real page with Playwright; the sidecar, the tag
+and the plan were read on disk after each step.
+
+- [x] **K1 · M** — write lyrics for a track that has none
+  - do: open S3, click the faint ♪ on track 1 (*Ketzerei*, status `none`), press "Write lyrics",
+    type two timestamped lines, Save
+  - expect: the words are on disk, marked as yours, and in the tag
+  - invariant: nothing is looked up — an editor that asked LRCLIB could answer a save by
+    replacing what was just typed
+  - evidence: the `.lrc`; `lyrics`/`lyrics_sha`/`provenance` in the plan; the `LYRICS` tag
+  - **result:** pass — a ♪ is now offered on every downloaded track, faint when there are no words.
+    The panel said "no words yet" and offered "Write lyrics" with no Delete. After Save:
+    `.lrc` written with one trailing newline, `lyrics=synced`, `lyrics_sha=5e1fb9f6e6a231de`,
+    `provenance.lyrics=user`, tag identical to the file, and the job log read
+    "Save your lyrics for Ketzerei"
+
+- [x] **K2 · M** — edit LRCLIB's words
+  - do: on track 4 (*Sex is Muss*, LRCLIB #30840489, 42 lines), press Edit, change one line, Save
+  - expect: the file is yours from then on, with the edit in the tag too
+  - invariant: the panel shows who owns the words, immediately
+  - evidence: the panel header; the `.lrc`; the tag
+  - **result:** pass — the textarea opened prefilled with all 42 lines; after Save the panel came
+    back at once showing the edited line and a **yours** badge in place of the lrclib link, and on
+    disk `provenance.lyrics=user`, a new `lyrics_sha`, the tag equal to the file. `lyrics_id` is
+    deliberately kept (it is how P2 recognises a file as ours)
+
+- [x] **K3 · M** — clear from the editor
+  - do: Edit that track again, press Delete
+  - expect: the `.lrc` and the tag go, the status becomes `none`, the mark is dropped
+  - invariant: a clear is the same act as deleting the file by hand (§9.21)
+  - evidence: the folder; the plan; the tag
+  - **result:** pass — sidecar gone, `lyrics=none`, `lyrics_sha=None`, no `provenance.lyrics`, tag
+    absent; the row's ♪ went faint and the panel offered "Write lyrics" again, with no wait for the
+    poll. One blemish found and fixed here: the header still cited `lrclib #30840489` beside
+    "no words yet", because the id is kept — the link is now shown only when there are words
+
+- [x] **K4 · R** — a save while a pass holds the album
+  - do: start a `--refetch` of S3, then POST a save for one of its tracks
+  - expect: refused, with the job named; nothing written
+  - invariant: a pass retags from the sidecar, so the two must not interleave
+  - evidence: the status code and message; the file
+  - **result:** pass — `HTTP 400: “Look up all lyrics of Sex Is Muss” is working on this album —
+    wait for it, then save again`, and the user's file was untouched. Known gap, stated in
+    DESIGN §9.26: a `fetch` is named by its URL and learns the album id while it runs, so the
+    check cannot see it
+
+- [x] **K5 · M** — what a later lyrics run does to both
+  - do: after K1 and K3, run `--refetch` over the album
+  - expect: the words written in the editor are kept; the cleared track gets LRCLIB's back
+  - invariant: the mark protects a file, and a clear gives it up (§9.21)
+  - evidence: both sidecars and both provenance entries
+  - **result:** pass — *Ketzerei* still reads `[00:12.00] Ketzerei, written by hand` with
+    `provenance.lyrics=user`; *Sex is Muss* came back with LRCLIB's own first line (without the K2
+    edit) and no mark
+
+- [x] **K6 · R** — a track with no file, and a track from another album
+  - do: POST a save for a track in state `pending`, and for a `video_id` of a different album
+  - expect: refused, with a message that says which
+  - invariant: `sidecar_path` is the only path builder; nothing is written outside the album folder
+  - evidence: the status codes
+  - **result:** covered offline in `test_web.py` (400 "no file yet", 400 "no such track"), since the
+    scratch album has every track downloaded
+
+- [x] **K7 · R** — an open panel survives a refresh
+  - do: keep a panel open while a job runs and the page polls
+  - expect: the words stay on screen
+  - invariant: a rebuild of the table must not close what you are reading
+  - evidence: the panel after a poll-driven re-render
+  - **result:** **found as a defect and fixed in this package** — the first save wrote the file
+    correctly but the panel vanished, because every re-render rebuilt the table and dropped the
+    row. Open panels are now remembered and restored after any render, which also stops a poll
+    closing lyrics you are reading while a download runs
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -662,6 +738,7 @@ the metadata, and the lyrics matcher can be asked directly.
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the K cases (the lyrics editor) | 7 | 1 defect found in the package under test (K7), 1 blemish (K3) | Both fixed before the commit. Driven through the real page against a freshly seeded scratch library. |
 | 2026-09-26 | re-runs after the fixes, `1e3da95..456d83e` | B6, B7, B8, I4, E5, E6, C5, C6, C7, E7, J5, J8, J9 + the split/merge round trip | all pass | Nine commits: trim integrity and its two mirrors, the lyrics ownership contract and its follow-up, order and prune, artist unification, repair's one-pass decision, the consensus length reference. 458 tests at the end, from 379. |
 
 ### Evidence methods that lied

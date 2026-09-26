@@ -474,6 +474,7 @@ function markAlbum(id) {
 
 async function openAlbum(id) {
   markAlbum(id);
+  if (currentAlbum?.source_id !== id) openLyrics.clear(); // another album, another set of panels
   try {
     currentAlbum = await api(`/api/album?id=${encodeURIComponent(id)}`);
   } catch (e) {
@@ -504,29 +505,122 @@ function provBadge(p) {
 
 // The .lrc file beside the track is the original; the tag is a copy of it, so what is
 // shown here is what a player reads.
+const HAS_WORDS = (t) => t.lyrics === "synced" || t.lyrics === "plain";
+const openLyrics = new Set(); // video ids whose lyrics panel is open, so a refresh keeps them
+
 function lyricsMark(p, t) {
-  if (t.lyrics === "instrumental") return h("span", { class: "badge", title: "LRCLIB has no words for this one — its entry is marked instrumental" }, "no words");
-  if (t.lyrics !== "synced" && t.lyrics !== "plain") return null;
-  return h("button", { class: "quiet small lyr", type: "button",
-    title: t.lyrics === "synced" ? "Lyrics with timestamps — click to read" : "Lyrics without timestamps — click to read",
-    onclick: (e) => toggleLyrics(e.currentTarget, p, t) }, "\u266a");
+  if (t.state !== "done") return null; // no file yet, so nothing to put words beside
+  const title = HAS_WORDS(t)
+    ? (t.lyrics === "synced" ? "Lyrics with timestamps — click to read or edit" : "Lyrics without timestamps — click to read or edit")
+    : t.lyrics === "instrumental"
+      ? "LRCLIB has no words for this one (its entry is marked instrumental) — click to write your own"
+      : "No lyrics — click to write them";
+  return h("button", { class: "quiet small lyr" + (HAS_WORDS(t) ? "" : " empty"), type: "button", title,
+    onclick: (e) => toggleLyrics(e.currentTarget, p, t) }, t.lyrics === "instrumental" && !HAS_WORDS(t) ? "no words" : "\u266a");
 }
 
 async function toggleLyrics(button, p, t) {
   const row = button.closest("tr");
-  if (row.nextElementSibling?.classList.contains("lyrics")) return row.nextElementSibling.remove();
+  if (row.nextElementSibling?.classList.contains("lyrics")) {
+    openLyrics.delete(t.video_id);
+    return row.nextElementSibling.remove();
+  }
   button.classList.add("working");
   try {
-    const d = await api(`/api/lyrics?id=${encodeURIComponent(p.source_id)}&v=${encodeURIComponent(t.video_id)}`);
-    const where = d.status === "synced" ? "with timestamps" : "plain text";
-    row.after(h("tr", { class: "lyrics", "data-id": t.video_id }, h("td", { colspan: "8" },
-      h("div", { class: "muted" }, `${t.artist} — ${t.title} · ${where}`,
-        d.lrclib_id ? h("a", { href: `https://lrclib.net/api/get/${d.lrclib_id}`, target: "_blank", rel: "noopener", title: "the entry these words come from" }, ` \u00b7 lrclib #${d.lrclib_id}`) : null),
-      d.text ? lyricsLines(p, t, d.text) : h("pre", {}, "The .lrc file is gone — the next lyrics run fetches it again."))));
+    row.after(await lyricsRow(p, t));
+    openLyrics.add(t.video_id);
   } catch (e) {
     toast(e.message, "failed");
   }
   button.classList.remove("working");
+}
+
+// A poll, a save or any other refresh rebuilds the table; an open panel has to come back with
+// it, or reading along while a job runs would close the words in front of you.
+async function reopenLyrics() {
+  const p = currentAlbum;
+  if (!p) return;
+  for (const id of [...openLyrics]) {
+    const row = document.querySelector(`#album tbody tr[data-id="${CSS.escape(id)}"]`);
+    const track = p.tracks.find((x) => x.video_id === id);
+    if (!row || !track) {
+      openLyrics.delete(id);
+      continue;
+    }
+    if (row.nextElementSibling?.classList.contains("lyrics")) continue;
+    try {
+      row.after(await lyricsRow(p, track));
+    } catch { /* the album moved or the track is gone; the next render tidies up */ }
+    if (currentAlbum !== p) return; // the user opened another album meanwhile
+  }
+}
+
+async function lyricsRow(p, t, editing = false) {
+  const d = await api(`/api/lyrics?id=${encodeURIComponent(p.source_id)}&v=${encodeURIComponent(t.video_id)}`);
+  return h("tr", { class: "lyrics", "data-id": t.video_id }, h("td", { colspan: "8" }, lyricsPanel(p, t, d, editing)));
+}
+
+// Reading and writing are the same panel: the .lrc beside the track is the original either way,
+// and saving here does exactly what the ownership contract does for a file edited on disk.
+function lyricsPanel(p, t, d, editing) {
+  const where = d.text ? (d.status === "synced" ? "with timestamps" : "plain text") : "no words yet";
+  const head = h("div", { class: "muted" }, `${t.artist} — ${t.title} · ${where}`,
+    d.owner === "user"
+      ? h("span", { class: "badge", title: "Your words. A lyrics run never replaces them — delete them to let LRCLIB answer again." }, "yours")
+      : d.lrclib_id && d.text  // the id is kept after a clear (it is how a file is recognised as ours), but with no words it would read as if lrclib had some
+        ? h("a", { href: `https://lrclib.net/api/get/${d.lrclib_id}`, target: "_blank", rel: "noopener", title: "the entry these words come from" }, ` \u00b7 lrclib #${d.lrclib_id}`)
+        : null);
+  if (editing) return h("div", { class: "lyrics-panel" }, head, lyricsEditor(p, t, d));
+  return h("div", { class: "lyrics-panel" }, head,
+    d.text ? lyricsLines(p, t, d.text) : h("pre", {}, t.lyrics === "instrumental"
+      ? "LRCLIB has no words for this recording. You can write them yourself."
+      : "No .lrc beside this track. Write the words here, or let a lyrics run look them up."),
+    h("div", { class: "lyrics-actions" },
+      h("button", { class: "quiet small", type: "button", onclick: (e) => editLyrics(e.currentTarget, p, t, true) },
+        d.text ? "Edit" : "Write lyrics")));
+}
+
+function lyricsEditor(p, t, d) {
+  const area = h("textarea", { class: "lyrics-edit", spellcheck: "false",
+    rows: Math.min(26, Math.max(8, d.text.split("\n").length + 2)) });
+  area.value = d.text;
+  return h("div", {}, area,
+    h("div", { class: "lyrics-actions" },
+      h("button", { class: "small", type: "button", onclick: (e) => saveLyrics(e.currentTarget, p, t, area.value) }, "Save"),
+      h("button", { class: "quiet small", type: "button", onclick: (e) => editLyrics(e.currentTarget, p, t, false) }, "Cancel"),
+      d.text ? h("button", { class: "quiet small danger", type: "button",
+        title: "Remove the .lrc beside this track. Its tag goes with it, and a later “look up all again” may fetch LRCLIB's words.",
+        onclick: (e) => saveLyrics(e.currentTarget, p, t, "") }, "Delete") : null,
+      h("span", { class: "muted" }, "A line like [01:23.45] Words becomes clickable and follows the song.")));
+}
+
+// swap the panel between reading and editing without asking the server again
+async function editLyrics(button, p, t, editing) {
+  const row = button.closest("tr.lyrics");
+  try {
+    row.replaceWith(await lyricsRow(p, t, editing));
+  } catch (e) {
+    toast(e.message, "failed");
+  }
+}
+
+async function saveLyrics(button, p, t, text) {
+  const id = await submit("save_lyrics", { id: p.source_id, video_id: t.video_id, text }, button);
+  if (id == null) return;
+  const job = await jobSettled(id);
+  if (!job || job.state !== "done") return; // submit() already showed why
+  openLyrics.add(t.video_id);
+  await refreshAlbumPanel(); // renders the new ♪ and puts the panel back, with the saved words
+}
+
+async function jobSettled(id, tries = 120) {
+  for (let i = 0; i < tries; i++) {
+    const job = await api(`/api/job?id=${id}`).catch(() => null);
+    if (!job) return null;
+    if (!["queued", "running"].includes(job.state)) return job;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
 }
 
 const LRC_LINE = /^\s*\[(\d{1,3}):(\d{2}(?:[.:]\d{1,3})?)\]\s*(.*)$/;
@@ -625,6 +719,7 @@ function renderAlbum() {
         h("a", { href: p.source_url, target: "_blank", rel: "noopener" }, "open on YouTube"))));
   panel.hidden = false;
   markAlbumFields();
+  reopenLyrics();
 }
 
 // The value of an input cannot be highlighted character by character — the whole field is

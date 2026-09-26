@@ -70,6 +70,7 @@ class Job:
     kind: str
     label: str
     lane: str = "write"  # "write" changes the library and runs alone; "read" runs beside it
+    target: str | None = None  # the album (source_id) this job holds, where it knows it
     state: str = "queued"  # queued | running | done | failed | blocked | cancelled
     log: list[str] = field(default_factory=list)
     cancel: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -100,8 +101,8 @@ class Jobs:
         for lane in self._queues:
             threading.Thread(target=self._work, args=(lane,), name=f"ytalbum-jobs-{lane}", daemon=True).start()
 
-    def submit(self, kind: str, label: str, action: Callable[[Service], Any]) -> Job:
-        job = Job(next(self._ids), kind, label, lane="read" if kind in self.READ_ONLY else "write")
+    def submit(self, kind: str, label: str, action: Callable[[Service], Any], target: str | None = None) -> Job:
+        job = Job(next(self._ids), kind, label, lane="read" if kind in self.READ_ONLY else "write", target=target)
         with self._lock:
             self._jobs[job.id] = job
         self._queues[job.lane].put((job, action))
@@ -117,6 +118,14 @@ class Jobs:
     def busy(self, lane: str | None = None) -> bool:
         """Something is queued or running (by default in any lane)."""
         return any(j.state in ("queued", "running") and lane in (None, j.lane) for j in self._jobs.values())
+
+    def working_on(self, target: str) -> Job | None:
+        """The queued or running write job that has this album in its hands, if there is one.
+
+        Only jobs that know their album can be found this way: a `fetch` is named by its URL and
+        learns the album id while it runs, so it is not one of them.
+        """
+        return next((j for j in self._jobs.values() if j.target == target and j.state in ("queued", "running")), None)
 
     def cancel(self, job_id: int) -> Job | None:
         """Queued: will never run. Running: stops at the next safe point."""
@@ -315,7 +324,8 @@ class App:
         track = next((t for t in plan.tracks if t.video_id == video_id), None)
         if not track:
             return None
-        return {"status": track.lyrics, "lrclib_id": track.lyrics_id, "text": read_sidecar(album_dir, track) or ""}
+        return {"status": track.lyrics, "lrclib_id": track.lyrics_id, "text": read_sidecar(album_dir, track) or "",
+                "owner": track.provenance.get("lyrics"), "state": track.state}
 
     def audio_path(self, source_id: str, video_id: str, original: bool = False) -> Path | None:
         """The finished track's file — looked up in the plan, never taken from the request.
@@ -466,11 +476,12 @@ class App:
                 label = f"Update {artist}" if artist else "Update the library"
                 return self.jobs.submit("update", label + (" (full)" if deep else ""), lambda s: s.update_all(deep=deep, artist=artist))
             case "prune":
-                found = self.album(str(body.get("id", "")))
+                source_id = str(body.get("id", ""))
+                found = self.album(source_id)
                 if not found:
                     raise ValueError("unknown album")
                 album_dir = found[0]
-                return self.jobs.submit("prune", f"Remove gone tracks from {found[1].album}", lambda s: s.prune(album_dir))
+                return self.jobs.submit("prune", f"Remove gone tracks from {found[1].album}", lambda s: s.prune(album_dir), target=source_id)
             case "trim_channel":
                 channel = str(body.get("channel", "")).strip()
                 if not channel:
@@ -488,13 +499,13 @@ class App:
                     raise ValueError("unknown album or track")
                 track = next((t for t in found[1].tracks if t.video_id == video_id), None)
                 label = f"{track.artist} - {track.title}" if track else video_id
-                return self.jobs.submit("delete", f"Delete {label}", lambda s: s.delete_track(source_id, video_id))
+                return self.jobs.submit("delete", f"Delete {label}", lambda s: s.delete_track(source_id, video_id), target=source_id)
             case "delete_album":
                 source_id = str(body.get("id", ""))
                 found = self.album(source_id)
                 if not found:
                     raise ValueError("unknown album")
-                return self.jobs.submit("delete", f"Delete album {found[1].album}", lambda s: s.delete_album(source_id))
+                return self.jobs.submit("delete", f"Delete album {found[1].album}", lambda s: s.delete_album(source_id), target=source_id)
             case "lyrics":
                 source_id = str(body.get("id", ""))
                 found = self.album(source_id)
@@ -502,13 +513,30 @@ class App:
                     raise ValueError("unknown album")
                 refetch = bool(body.get("refetch"))
                 verb = "Look up all lyrics of" if refetch else "Fetch lyrics for"
-                return self.jobs.submit("lyrics", f"{verb} {found[1].album}", lambda s: s.fetch_lyrics(refetch=refetch, source_id=source_id))
+                return self.jobs.submit("lyrics", f"{verb} {found[1].album}", lambda s: s.fetch_lyrics(refetch=refetch, source_id=source_id), target=source_id)
+            case "save_lyrics":
+                source_id, video_id = str(body.get("id", "")), str(body.get("video_id", ""))
+                found = self.album(source_id)
+                if not found or not video_id:
+                    raise ValueError("unknown album or track")
+                track = next((t for t in found[1].tracks if t.video_id == video_id), None)
+                if not track:
+                    raise ValueError("no such track in this album")
+                if track.state != "done":
+                    raise ValueError(f"{track.title}: there is no file yet to put lyrics beside")
+                if running := self.jobs.working_on(source_id):
+                    # the pass would retag from the file this save is about to write
+                    raise ValueError(f"“{running.label}” is working on this album — wait for it, then save again")
+                text = str(body.get("text", ""))
+                what = "Clear the lyrics of" if not text.strip() else "Save your lyrics for"
+                return self.jobs.submit("lyrics", f"{what} {track.title}",
+                                        lambda s: s.save_lyrics(source_id, video_id, text), target=source_id)
             case "edit":
                 source_id = str(body.get("id", ""))
                 if not self.album(source_id):
                     raise ValueError("unknown album")
                 edits = body.get("edits") or {}
-                return self.jobs.submit("edit", f"Save {self.describe(source_id)}", lambda s: s.apply_edits(source_id, edits))
+                return self.jobs.submit("edit", f"Save {self.describe(source_id)}", lambda s: s.apply_edits(source_id, edits), target=source_id)
         raise ValueError(f"unknown action {action!r}")
 
     def describe(self, url: str) -> str:

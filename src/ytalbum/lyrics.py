@@ -395,7 +395,8 @@ def reconcile(album_dir: Path, track: PlanTrack, audio: Path) -> tuple[str | Non
 # -- one track ---------------------------------------------------------------------------
 
 
-def _status_of(text: str) -> str:
+def status_of(text: str) -> str:
+    """Which kind of lyric this text is: timestamped or not. The only judge of that status."""
     return SYNCED if TIMESTAMPED.search(text) else PLAIN
 
 
@@ -416,7 +417,7 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     if track.provenance.get("lyrics") == Provenance.USER:
         text = read_sidecar(album_dir, track)
         if text and track.lyrics is None:  # a trim cleared the status; the words are still yours
-            track.lyrics = _status_of(text)
+            track.lyrics = status_of(text)
         return text
     if (existing := read_sidecar(album_dir, track)) and track.lyrics_sha is None and track.lyrics_id:
         # about to replace a sidecar we have no record of. Ask lrclib what the entry we stored
@@ -424,12 +425,12 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
         # no answer at all means we keep it and ask again another day.
         stored = _ask_by_id(api, track.lyrics_id)
         if stored is None:
-            track.lyrics = _status_of(existing)  # whoever wrote them, these words are here
+            track.lyrics = status_of(existing)  # whoever wrote them, these words are here
             log.info("%s: cannot check whose lyrics these are — keeping them", track.title)
             return existing
         if (stored.text or "").strip() != existing:
             track.provenance["lyrics"] = Provenance.USER
-            track.lyrics = _status_of(existing)  # the status describes the words on disk, now yours
+            track.lyrics = status_of(existing)  # the status describes the words on disk, now yours
             log.info("%s: the lyrics beside this track differ from the entry we saved — they are yours", track.title)
             return existing
         track.lyrics_sha = sidecar_sha(album_dir, track)  # ours after all; record it and carry on
@@ -457,4 +458,4 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     return text
 
 
-__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "consensus_length", "query_title", "read_sidecar", "reconcile", "sidecar_lost", "update_track", "user_owns"]
+__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "consensus_length", "query_title", "read_sidecar", "reconcile", "sidecar_lost", "status_of", "update_track", "user_owns"]

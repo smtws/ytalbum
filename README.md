@@ -237,6 +237,7 @@ network.
 | `GET /api/thumb?u=<url>` | A thumbnail, fetched by the server (allow-listed hosts only, cached). |
 | `GET /api/audio?id=<source-id>&v=<video-id>` | The track's audio, with `Range` support so players can seek. |
 | `GET /api/job?id=<n>` | One job with its full log and result. |
+| `GET /api/lyrics?id=<source-id>&v=<video-id>` | One track's lyrics as the `.lrc` beside it has them, with `status`, `lrclib_id` and `owner` (`user` when they are yours). |
 
 ### Writing (POST, JSON body, header `X-Ytalbum: 1`)
 
@@ -248,6 +249,7 @@ network.
 | `/api/edit` | `{id, edits}` | Album and track fields, trim points, audio choice; renames and retags. |
 | `/api/trim_channel` | `{channel, start, end}` | The same trim for every track from one uploader. |
 | `/api/prune` | `{id}` | Delete tracks that left the playlist. |
+| `/api/save_lyrics` | `{id, video_id, text}` | Write the lyrics of one track as given: the `.lrc` beside it, the `LYRICS` tag, marked as yours. Empty `text` removes them. Nothing is looked up, and it is refused while another job holds that album. |
 | `/api/delete_track` | `{id, video_id}` | Delete one track. |
 | `/api/delete_album` | `{id}` | Delete an album (files ytalbum owns; anything else is kept). |
 | `/api/details` | `{refs: [{id, url}]}` | Ask for track counts and covers of search hits; a background runner fills them in. |

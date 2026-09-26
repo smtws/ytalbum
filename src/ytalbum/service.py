@@ -19,7 +19,7 @@ from typing import Any
 from .config import Config
 from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, relocate, run, save_plan
 from .enrich import enrich
-from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost, user_owns
+from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost, status_of, user_owns, write_sidecar
 from .lyrics import default_cache_path as lyrics_cache_path
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
@@ -469,6 +469,41 @@ class Service:
         counts = Counter(t.lyrics or "not looked up" for _, plan in albums for t in plan.tracks if t.state == "done")
         self.log("lyrics: " + (", ".join(f"{n} {what}" for what, n in counts.most_common()) or "no tracks"))
         return outcomes
+
+    def save_lyrics(self, source_id: str, video_id: str, text: str) -> Outcome:
+        """Write the words a user typed beside one track — or clear them — and retag it.
+
+        This is the one door into the ownership contract from the UI side: it does by hand what
+        `reconcile` does when it finds an edited file (DESIGN.md §9.21, §9.26). Nothing is looked
+        up, so a user is never told their words were replaced by lrclib's.
+        """
+        found = self.find_album(source_id)
+        if not found:
+            return Outcome("failed", message=f"unknown album {source_id}")
+        album_dir, plan = found
+        track = next((t for t in plan.tracks if t.video_id == video_id), None)
+        if not track:
+            return Outcome("failed", message="no such track in this album")
+        if track.state != "done":
+            return Outcome("failed", message=f"{track.title}: there is no file yet to put lyrics beside")
+        if body := text.strip():
+            write_sidecar(album_dir, track, body)  # records lyrics_sha as the bytes it wrote
+            track.lyrics = status_of(body)
+            track.provenance["lyrics"] = Provenance.USER
+            self.log(f"wrote your lyrics for {track.title} ({track.lyrics})")
+        else:
+            # empty is a clear, not an empty file — and it gives the mark up with the words, so
+            # `--refetch` may bring lrclib's back, exactly as deleting the file by hand does
+            remove_sidecar(album_dir, track.filename)
+            track.lyrics, track.lyrics_sha = "none", None
+            track.provenance.pop("lyrics", None)
+            self.log(f"removed the lyrics of {track.title}")
+        save_plan(plan, album_dir)
+        # retag through the ordinary pass, with no lyrics client: it rewrites the LYRICS tag from
+        # the sidecar as every pass does, and downloads nothing
+        run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False)
+        save_plan(plan, album_dir)
+        return Outcome("ok", plan, album_dir)
 
     def _lyrics_pass(self, plan: AlbumPlan, album_dir: Path, api: LyricsAPI) -> Outcome:
         run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False, lyrics=api)

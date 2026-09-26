@@ -456,7 +456,7 @@ def test_the_marker_reads_the_lrc_file_beside_the_track(lyrics_server):
     track = app.album(album_id)[1].tracks[0]
 
     got = c.get(f"/api/lyrics?id={album_id}&v={track.video_id}").json()
-    assert got == {"status": "synced", "lrclib_id": 11, "text": FakeLyrics.LRC}
+    assert got == {"status": "synced", "lrclib_id": 11, "text": FakeLyrics.LRC, "owner": None, "state": "done"}
 
     # the file is the original: remove it and the UI says so instead of showing a stale tag
     from ytalbum.lyrics import sidecar_path
@@ -512,3 +512,150 @@ def test_the_grid_carries_the_length_flag(server):
         t.file_length, t.mb_length = 40.0, 200.0
     save_plan(plan, album_dir)
     assert app.albums()[0]["length"] == {"way": "stub", "n": len(plan.tracks), "of": len(plan.tracks)}
+
+
+# -- the lyrics editor (DESIGN.md §9.26) --------------------------------------------------
+
+
+def saved(c, album_id, video_id, text):
+    """POST what the editor posts, and wait for the write job."""
+    job = c.post("/api/save_lyrics", json={"id": album_id, "video_id": video_id, "text": text}, headers=HDR).json()["job"]
+    return wait(c, job["id"])
+
+
+def sidecar_of(app, album_id, track):
+    from ytalbum.lyrics import sidecar_path
+
+    return sidecar_path(app.album(album_id)[0], track.filename)
+
+
+def tagged_of(app, album_id, track):
+    from ytalbum.tag import tagged_lyrics
+
+    return tagged_lyrics(app.album(album_id)[0] / track.filename)
+
+
+MINE = "[00:02.00] words of my own\n[00:09.00] second line"
+
+
+def test_the_editor_writes_the_sidecar_the_mark_the_hash_and_the_tag(lyrics_server):
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    assert track.lyrics is None  # nothing looked up yet: the editor is the only writer here
+
+    assert saved(c, album_id, track.video_id, MINE)["state"] == "done"
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert sidecar_of(app, album_id, fresh).read_text() == MINE + "\n"  # one trailing newline
+    assert fresh.provenance["lyrics"] == "user"
+    assert fresh.lyrics == "synced"  # derived from the text, not from anything lrclib said
+    assert fresh.lyrics_sha and len(fresh.lyrics_sha) == 16
+    assert tagged_of(app, album_id, fresh) == MINE  # the tag is a copy of the file
+    assert api.asked == []  # nothing was looked up
+    got = c.get(f"/api/lyrics?id={album_id}&v={fresh.video_id}").json()
+    assert (got["owner"], got["status"], got["text"]) == ("user", "synced", MINE)
+
+
+def test_plain_text_is_recognised_as_plain(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    saved(c, album_id, track.video_id, "just words\nno timestamps")
+    assert next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id).lyrics == "plain"
+
+
+def test_editing_over_lrclibs_words_makes_them_yours_and_a_refetch_keeps_them(lyrics_server):
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    track = app.album(album_id)[1].tracks[0]
+    assert track.lyrics_sha and "lyrics" not in track.provenance  # lrclib's, recorded as ours
+
+    saved(c, album_id, track.video_id, MINE)
+    wait(c, c.post("/api/lyrics", json={"id": album_id, "refetch": True}, headers=HDR).json()["job"]["id"])
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert sidecar_of(app, album_id, fresh).read_text() == MINE + "\n"  # survived --refetch
+    assert fresh.provenance["lyrics"] == "user"
+    assert tagged_of(app, album_id, fresh) == MINE
+
+
+def test_clearing_drops_the_words_the_mark_and_the_tag(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    saved(c, album_id, track.video_id, MINE)
+
+    assert saved(c, album_id, track.video_id, "   ")["state"] == "done"  # empty is a clear
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert not sidecar_of(app, album_id, fresh).exists()
+    assert fresh.lyrics == "none" and fresh.lyrics_sha is None
+    assert "lyrics" not in fresh.provenance
+    assert tagged_of(app, album_id, fresh) is None
+
+
+def test_a_refetch_brings_lrclibs_words_back_after_a_clear(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    saved(c, album_id, track.video_id, MINE)
+    saved(c, album_id, track.video_id, "")
+
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])  # a plain pass
+    assert not sidecar_of(app, album_id, track).exists()  # a clear is not a request for new words
+    wait(c, c.post("/api/lyrics", json={"id": album_id, "refetch": True}, headers=HDR).json()["job"]["id"])
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert sidecar_of(app, album_id, fresh).read_text().strip() == FakeLyrics.LRC
+    assert "lyrics" not in fresh.provenance
+
+
+def test_a_track_that_is_not_downloaded_has_nowhere_to_put_lyrics(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    album_dir, plan = app.album(album_id)
+    plan.tracks[1].state = "pending"
+    save_plan(plan, album_dir)
+
+    r = c.post("/api/save_lyrics", json={"id": album_id, "video_id": plan.tracks[1].video_id, "text": MINE}, headers=HDR)
+    assert r.status_code == 400
+    assert "no file yet" in r.text
+    assert not sidecar_of(app, album_id, plan.tracks[1]).exists()
+
+
+def test_a_track_from_another_album_is_refused(lyrics_server, opus_template):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    other = second_album(app.library, opus_template)
+
+    r = c.post("/api/save_lyrics", json={"id": album_id, "video_id": other.tracks[0].video_id, "text": MINE}, headers=HDR)
+    assert r.status_code == 400
+    assert "no such track" in r.text
+
+
+def test_the_editor_refuses_while_a_job_holds_the_album(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    held = app.jobs.submit("lyrics", "a long pass", lambda s: time.sleep(2), target=album_id)
+
+    r = c.post("/api/save_lyrics", json={"id": album_id, "video_id": track.video_id, "text": MINE}, headers=HDR)
+    assert r.status_code == 400
+    assert "a long pass" in r.text and "wait for it" in r.text
+    wait(c, held.id)
+    assert saved(c, album_id, track.video_id, MINE)["state"] == "done"  # and it works afterwards
+
+
+def test_a_sidecar_the_editor_wrote_is_recognised_on_disk_without_a_special_case(lyrics_server):
+    """reconcile() must see the editor's file as the user's, like any other file it finds."""
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    saved(c, album_id, track.video_id, MINE)
+
+    album_dir = app.album(album_id)[0]
+    sidecar_of(app, album_id, track).write_text(MINE + "\nand a line added on disk\n")
+    wait(c, c.post("/api/lyrics", json={"id": album_id, "refetch": True}, headers=HDR).json()["job"]["id"])
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert "added on disk" in sidecar_of(app, album_id, fresh).read_text()
+    assert fresh.provenance["lyrics"] == "user"
+    assert "added on disk" in (tagged_of(app, album_id, fresh) or "")
+    assert album_dir == app.album(album_id)[0]  # nothing moved
