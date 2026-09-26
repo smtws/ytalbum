@@ -12,6 +12,9 @@ class NoLyrics:
     def get(self, artist, title, album=None, length=None):
         return None
 
+    def by_id(self, lrclib_id):
+        return None
+
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path_factory, monkeypatch):

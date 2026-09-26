@@ -125,6 +125,7 @@ class PlanTrack:
     lyrics: str | None = None  # synced | plain | instrumental | none; None = not looked up yet
     lyrics_id: int | None = None  # the lrclib entry the text came from
     lyrics_length: float | None = None  # seconds of the recording lrclib matched (or refused on)
+    lyrics_sha: str | None = None  # of the sidecar bytes *we* wrote; anything else is the user's
     file_length: float | None = None  # seconds of audio actually on disk, after any trim
 
 

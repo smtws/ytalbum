@@ -217,9 +217,18 @@ def test_a_miss_is_remembered_too(tmp_path):
 class FakeLyrics:
     """Answers for every track, or nothing for the ones named in `without`."""
 
-    def __init__(self, without: set[str] = frozenset(), synced: bool = True) -> None:
+    def __init__(self, without: set[str] = frozenset(), synced: bool = True, stored: str | None = SYNCED_LRC,
+                 by_id_error: bool = False) -> None:
         self.without, self.synced = without, synced
+        self.stored, self.by_id_error = stored, by_id_error  # what the entry we saved holds now
         self.asked: list[tuple[str, str, float | None]] = []
+        self.by_id_asked: list[int] = []
+
+    def by_id(self, lrclib_id):
+        self.by_id_asked.append(lrclib_id)
+        if self.by_id_error:
+            raise LyricsError("lrclib is busy")
+        return Lyrics(synced=self.stored, lrclib_id=lrclib_id) if self.stored else None
 
     def get(self, artist, title, album, length):
         self.asked.append((artist, title, length))
@@ -301,13 +310,149 @@ def test_the_sidecar_follows_a_renamed_track(tmp_path, yt):
     assert OggOpus(album_dir / track.filename)["lyrics"] == [SYNCED_LRC]  # still tagged
 
 
-def test_deleting_the_sidecar_takes_the_tag_with_it(tmp_path, yt):
+def test_deleting_the_sidecar_takes_the_tag_and_the_status_with_it(tmp_path, yt):
     """The .lrc is the truth: the tag is rewritten from it, never kept."""
     plan, album_dir = album(tmp_path, yt, FakeLyrics())
     track = plan.tracks[0]
     sidecar_path(album_dir, track.filename).unlink()
     run(plan, album_dir, yt, download=False)
     assert "lyrics" not in OggOpus(album_dir / track.filename)
+    # and the plan stops claiming words that are not there any more
+    assert track.lyrics == "none"
+    assert track.lyrics_sha is None
+    assert load_plan(album_dir).tracks[0].lyrics == "none"  # saved, not just held in memory
+
+
+# -- whose lyrics are these? (DESIGN.md §9.21) -------------------------------------------
+
+
+def edited(album_dir, track, text="mine, not lrclib's\n"):
+    sidecar_path(album_dir, track.filename).write_text(text)
+
+
+def test_our_own_sidecar_is_recognised_as_ours_and_replaced(tmp_path, yt):
+    api = FakeLyrics()
+    plan, album_dir = album(tmp_path, yt, api)
+    track = plan.tracks[0]
+    assert track.lyrics_sha  # we wrote it, so we know its bytes
+
+    track.lyrics = None  # what --refetch does
+    run(plan, album_dir, yt, download=False, lyrics=api)
+    assert track.provenance.get("lyrics") is None  # still ours
+    assert api.by_id_asked == []  # the record answered it; no need to ask lrclib
+    assert read_sidecar(album_dir, track) == SYNCED_LRC
+
+
+def test_an_edited_sidecar_becomes_the_users_and_survives_a_refetch(tmp_path, yt):
+    api = FakeLyrics()
+    plan, album_dir = album(tmp_path, yt, api)
+    track = plan.tracks[0]
+    edited(album_dir, track)
+
+    track.lyrics = None
+    run(plan, album_dir, yt, download=False, lyrics=api)
+    assert track.provenance["lyrics"] == Provenance.USER
+    assert read_sidecar(album_dir, track) == "mine, not lrclib's"
+    assert OggOpus(album_dir / track.filename)["lyrics"] == ["mine, not lrclib's"]
+    assert track.lyrics == "plain"  # the status follows the words that are actually there
+
+
+def test_an_edited_sidecar_survives_a_lookup_that_answers_nothing(tmp_path, yt):
+    plan, album_dir = album(tmp_path, yt, FakeLyrics())
+    track = plan.tracks[0]
+    edited(album_dir, track, SYNCED_LRC.replace("three", "III") + "\n")
+
+    track.lyrics = None
+    run(plan, album_dir, yt, download=False, lyrics=FakeLyrics(without={t.title for t in plan.tracks}))
+    assert track.provenance["lyrics"] == Provenance.USER
+    assert read_sidecar(album_dir, track).endswith("III")
+    assert track.lyrics == "synced"
+
+
+def test_an_edited_sidecar_survives_the_lookup_a_trim_triggers(tmp_path, yt):
+    api = FakeLyrics()
+    plan, album_dir = album(tmp_path, yt, api)
+    track = plan.tracks[0]
+    edited(album_dir, track)
+
+    track.trim_start = 0.2  # clears the status and asks again against the new length
+    run(plan, album_dir, yt, download=False, lyrics=api)
+    assert track.provenance["lyrics"] == Provenance.USER
+    assert read_sidecar(album_dir, track) == "mine, not lrclib's"
+
+
+def legacy(tmp_path, yt, api, text=None):
+    """An album from before we recorded what we wrote: a sidecar, an id, no hash."""
+    plan, album_dir = album(tmp_path, yt, api)
+    track = plan.tracks[0]
+    if text is not None:
+        sidecar_path(album_dir, track.filename).write_text(text)
+    track.lyrics_sha = None
+    return plan, album_dir, track
+
+
+def test_a_legacy_sidecar_lrclib_confirms_is_ours(tmp_path, yt):
+    api = FakeLyrics()
+    plan, album_dir, track = legacy(tmp_path, yt, api)
+
+    track.lyrics = None
+    run(plan, album_dir, yt, download=False, lyrics=api)
+    assert api.by_id_asked == [7]  # the tag could not tell; lrclib could
+    assert track.provenance.get("lyrics") is None
+    assert track.lyrics_sha  # recorded now, so it is never asked again
+
+
+def test_a_legacy_sidecar_lrclib_contradicts_is_the_users(tmp_path, yt):
+    """The common case: the edit is older than the last pass, so the tag agrees with it."""
+    api = FakeLyrics()
+    plan, album_dir, track = legacy(tmp_path, yt, api, text="mine, from years ago\n")
+    run(plan, album_dir, yt, download=False)  # a pass that writes the tag from the edited file
+    assert OggOpus(album_dir / track.filename)["lyrics"] == ["mine, from years ago"]
+    track.lyrics_sha = None  # as a legacy plan would look
+    track.provenance.pop("lyrics", None)
+
+    track.lyrics = None
+    run(plan, album_dir, yt, download=False, lyrics=api)
+    assert api.by_id_asked == [7]
+    assert track.provenance["lyrics"] == Provenance.USER
+    assert read_sidecar(album_dir, track) == "mine, from years ago"
+    assert track.lyrics == "plain"  # the status describes the words that are there
+
+
+def test_a_legacy_sidecar_that_differs_from_the_tag_needs_no_network(tmp_path, yt):
+    api = FakeLyrics()
+    plan, album_dir, track = legacy(tmp_path, yt, api, text="edited since the last pass\n")
+
+    track.lyrics = None
+    run(plan, album_dir, yt, download=False, lyrics=api)
+    assert api.by_id_asked == []  # the tag already proved it was touched
+    assert track.provenance["lyrics"] == Provenance.USER
+    assert read_sidecar(album_dir, track) == "edited since the last pass"
+
+
+def test_a_sidecar_we_have_no_id_for_is_the_users(tmp_path, yt):
+    plan, album_dir = album(tmp_path, yt, None)
+    track = plan.tracks[0]
+    sidecar_path(album_dir, track.filename).write_text("brought along from elsewhere\n")
+
+    api = FakeLyrics()
+    run(plan, album_dir, yt, download=False, lyrics=api)
+    assert track.provenance["lyrics"] == Provenance.USER
+    assert api.asked == [(t.artist, t.title, pytest.approx(1.0, abs=0.1)) for t in plan.tracks[1:]]
+    assert read_sidecar(album_dir, track) == "brought along from elsewhere"
+
+
+def test_a_legacy_sidecar_lrclib_cannot_answer_about_is_kept_undecided(tmp_path, yt):
+    plan, album_dir, track = legacy(tmp_path, yt, FakeLyrics())
+
+    track.lyrics = None
+    api = FakeLyrics(by_id_error=True)
+    run(plan, album_dir, yt, download=False, lyrics=api)
+    assert api.by_id_asked == [7] and api.asked == []  # not looked up: the file was left alone
+    assert read_sidecar(album_dir, track) == SYNCED_LRC  # kept
+    assert track.lyrics == "synced"  # not left blank; the words are there either way
+    assert track.lyrics_sha is None  # and still undecided: asked again another day
+    assert track.provenance.get("lyrics") is None
 
 
 def test_lyrics_the_user_wrote_are_never_overwritten(tmp_path, yt):
@@ -409,6 +554,25 @@ def test_refetch_asks_again_but_leaves_the_users_own_lyrics_alone(tmp_path, opus
     assert len(api.asked) == 3  # only the other track was asked about again
     assert read_sidecar(album_dir, saved.tracks[0]) == "mine"
     assert saved.tracks[0].provenance["lyrics"] == Provenance.USER
+
+
+def test_refetch_brings_a_deleted_lyric_back(tmp_path, opus_template):
+    """Deleting the file only says "not this text" — asking again is how you get words back."""
+    album_dir = library(tmp_path, opus_template)
+    api = FakeLyrics()
+    service(tmp_path, api).fetch_lyrics()
+    plan = load_plan(album_dir)
+    sidecar_path(album_dir, plan.tracks[0].filename).unlink()
+
+    service(tmp_path, api).fetch_lyrics()  # an ordinary pass leaves it deleted
+    saved = load_plan(album_dir)
+    assert saved.tracks[0].lyrics == "none"
+    assert not sidecar_path(album_dir, saved.tracks[0].filename).exists()
+
+    service(tmp_path, api).fetch_lyrics(refetch=True)
+    saved = load_plan(album_dir)
+    assert saved.tracks[0].lyrics == "synced"
+    assert read_sidecar(album_dir, saved.tracks[0]) == SYNCED_LRC
 
 
 def test_lyrics_switched_off_does_nothing(tmp_path, opus_template):

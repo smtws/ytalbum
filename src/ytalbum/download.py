@@ -20,7 +20,7 @@ from mutagen import MutagenError
 from yt_dlp.utils import DownloadError
 
 from .cover import square_if_padded
-from .lyrics import LyricsAPI, read_sidecar, rename_sidecar, update_track
+from .lyrics import LyricsAPI, reconcile, rename_sidecar, update_track
 from .models import AlbumPlan, PlanTrack
 from .plan import refresh_derived, wanted_filename, wanted_folder
 from .tag import audio_length, image_mime, signature, tag_file
@@ -141,15 +141,20 @@ def run(
             measured = cut or track.file_length is None  # measured once, then only when it changes
             if measured:
                 track.file_length = audio_length(final)
+            # whose words are beside this track, and does the plan still agree with the disk?
+            # Asked before the lookup, so an edited sidecar is known to be the user's by the
+            # time anything would overwrite it (a trim clears the status and asks again).
+            text, reconciled = reconcile(album_dir, track, final)
             looked_up = lyrics is not None and track.lyrics is None
-            text = update_track(lyrics, plan, track, album_dir, final) if looked_up else read_sidecar(album_dir, track)
+            if looked_up:
+                text = update_track(lyrics, plan, track, album_dir, final)
             try:
                 if track.tagged != signature(plan, track, cover, text):
                     track.tagged = tag_file(final, plan, track, cover, text)
                     save_plan(plan, album_dir)
                     on_track(track, f"lyrics ({track.lyrics})" if looked_up and text else "retagged")
-                elif looked_up or measured or failed_trim:
-                    save_plan(plan, album_dir)  # the lookup, the length, or why the trim did not happen
+                elif looked_up or measured or failed_trim or reconciled:
+                    save_plan(plan, album_dir)  # the lookup, the length, the owner, or why the trim did not happen
             except (MutagenError, OSError) as e:
                 # this file is not what its name says, so nothing can be written to it. One bad
                 # file fails its own track; the rest of the album still runs.

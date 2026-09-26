@@ -13,6 +13,7 @@ or a live version is exactly what a title-only match would attach.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ from typing import Any, Protocol
 import httpx
 
 from .models import AlbumPlan, PlanTrack, Provenance
-from .tag import audio_length
+from .tag import audio_length, tagged_lyrics
 from .titles import key as text_key
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ MISS_TTL = 7 * 24 * 3600
 TOLERANCE = 3.0  # seconds a candidate's length may differ from ours (YouTube pads, we trim)
 MAX_EXACT = 3600.0  # lrclib's /api/get answers "duration: must be between 1 and 3600"
 SUFFIX = ".lrc"
+TIMESTAMPED = re.compile(r"^\s*\[\d{1,3}:\d{2}", re.M)
 # a title that says the recording has no singing: its words are the sung version's, not its
 NO_VOCALS = re.compile(r"\b(instrumentals?|karaoke|backing track)\b", re.I)
 
@@ -72,6 +74,7 @@ class Lyrics:
 
 class LyricsAPI(Protocol):
     def get(self, artist: str, title: str, album: str | None, length: float | None) -> Lyrics | None: ...
+    def by_id(self, lrclib_id: int) -> Lyrics | None: ...
 
 
 def default_cache_path() -> Path:
@@ -141,6 +144,28 @@ class Lrclib:
         # is, is worth knowing: it is the second opinion on a file that carries an intro
         near = min(same, key=lambda row: abs(row["duration"] - length), default=None)
         return Lyrics(length=near["duration"]) if near else None
+
+    def by_id(self, lrclib_id: int) -> Lyrics | None:
+        """One known entry, for deciding whether a sidecar is still the one we wrote.
+
+        Cached search bodies already carry whole rows, so a track looked up recently costs
+        nothing; only an older one reaches the network.
+        """
+        if row := self._cached_row(lrclib_id):
+            return _lyrics(row)
+        found = self._request(f"get/{lrclib_id}", {})
+        return _lyrics(found) if isinstance(found, dict) else None
+
+    def _cached_row(self, lrclib_id: int) -> dict[str, Any] | None:
+        if self._db is None:
+            return None
+        for (body,) in self._db.execute("SELECT body FROM cache WHERE key LIKE 'search%'"):
+            rows = json.loads(body)
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict) and row.get("id") == lrclib_id:
+                        return row
+        return None
 
     # -- transport -----------------------------------------------------------------------
 
@@ -245,9 +270,24 @@ def read_sidecar(album_dir: Path, track: PlanTrack) -> str | None:
         return None
 
 
+def sidecar_sha(album_dir: Path, track: PlanTrack) -> str | None:
+    """The fingerprint of the sidecar on disk, or None when there is none."""
+    try:
+        return hashlib.sha1(sidecar_path(album_dir, track.filename).read_bytes()).hexdigest()[:16]
+    except OSError:
+        return None
+
+
+def sidecar_lost(album_dir: Path, track: PlanTrack) -> bool:
+    """The status claims words, but the file beside the track is gone — a pass must catch up."""
+    return track.lyrics in (SYNCED, PLAIN) and not sidecar_path(album_dir, track.filename).exists()
+
+
 def write_sidecar(album_dir: Path, track: PlanTrack, text: str) -> Path:
+    """Write the words and remember the bytes: anything else there later is the user's."""
     path = sidecar_path(album_dir, track.filename)
     path.write_text(text.rstrip("\n") + "\n", encoding="utf-8")
+    track.lyrics_sha = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
     return path
 
 
@@ -262,7 +302,61 @@ def rename_sidecar(album_dir: Path, old: str, new: str) -> None:
         was.rename(now)
 
 
+# -- who wrote the sidecar ----------------------------------------------------------------
+
+
+def reconcile(album_dir: Path, track: PlanTrack, audio: Path) -> tuple[str | None, bool]:
+    """Bring the plan in line with the sidecar on disk. Returns (text for the tag, changed).
+
+    The record of what we wrote (`lyrics_sha`, the twin of `cover_fetched.sha1`) decides
+    ownership. Sidecars from before that record are judged by the tag we last wrote from them:
+    a sidecar that differs from the tag was edited since the last pass and is the user's. That
+    catches recent edits only — an older edit was already written into the tag by a later pass —
+    so the case a `--refetch` would destroy is caught in `update_track` instead, by asking
+    lrclib what the entry we stored actually says (DESIGN.md §9.21).
+    """
+    text = read_sidecar(album_dir, track)
+    if text is None:
+        if track.lyrics in (SYNCED, PLAIN):  # the words are not on the disk any more
+            track.lyrics, track.lyrics_sha = NONE, None
+            return None, True
+        return None, False
+    if track.provenance.get("lyrics") == Provenance.USER:
+        return text, False
+    if track.lyrics_sha is None:  # written before we kept a record
+        if not track.lyrics_id:  # we never write a sidecar without noting where it came from
+            track.provenance["lyrics"] = Provenance.USER
+            log.info("%s: the lyrics beside this track are not ours — keeping them", track.title)
+            return text, True
+        tagged = tagged_lyrics(audio)
+        if tagged is not None and tagged.strip() != text:
+            track.provenance["lyrics"] = Provenance.USER
+            log.info("%s: the lyrics beside this track were edited — they are yours now", track.title)
+            return text, True
+        # Equal to the tag proves nothing: every pass writes the tag *from* the sidecar, so an
+        # edit made before the last pass reads back as agreement. Left undecided on purpose —
+        # `update_track` asks lrclib about the stored entry if it ever wants to replace the file.
+        return text, False
+    if sidecar_sha(album_dir, track) != track.lyrics_sha:
+        track.provenance["lyrics"] = Provenance.USER
+        log.info("%s: the lyrics beside this track were edited — they are yours now", track.title)
+        return text, True
+    return text, False
+
+
 # -- one track ---------------------------------------------------------------------------
+
+
+def _status_of(text: str) -> str:
+    return SYNCED if TIMESTAMPED.search(text) else PLAIN
+
+
+def _ask_by_id(api: LyricsAPI, lrclib_id: int) -> Lyrics | None:
+    try:
+        return api.by_id(lrclib_id)
+    except LyricsError as e:
+        log.debug("lrclib entry %s could not be read: %s", lrclib_id, e)
+        return None
 
 
 def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: Path, audio: Path) -> str | None:
@@ -272,7 +366,25 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     (same rule as the cover: it must not stop an album).
     """
     if track.provenance.get("lyrics") == Provenance.USER:
-        return read_sidecar(album_dir, track)
+        text = read_sidecar(album_dir, track)
+        if text and track.lyrics is None:  # a trim cleared the status; the words are still yours
+            track.lyrics = _status_of(text)
+        return text
+    if (existing := read_sidecar(album_dir, track)) and track.lyrics_sha is None and track.lyrics_id:
+        # about to replace a sidecar we have no record of. Ask lrclib what the entry we stored
+        # holds: the same words mean it is ours, different words mean the user edited it, and
+        # no answer at all means we keep it and ask again another day.
+        stored = _ask_by_id(api, track.lyrics_id)
+        if stored is None:
+            track.lyrics = _status_of(existing)  # whoever wrote them, these words are here
+            log.info("%s: cannot check whose lyrics these are — keeping them", track.title)
+            return existing
+        if (stored.text or "").strip() != existing:
+            track.provenance["lyrics"] = Provenance.USER
+            track.lyrics = _status_of(existing)  # the status describes the words on disk, now yours
+            log.info("%s: the lyrics beside this track differ from the entry we saved — they are yours", track.title)
+            return existing
+        track.lyrics_sha = sidecar_sha(album_dir, track)  # ours after all; record it and carry on
     try:
         found = api.get(track.artist, track.title, plan.album, audio_length(audio))
     except LyricsError as e:
@@ -287,6 +399,7 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     track.lyrics_length = found.length if found else None
     if not found or not found.text:
         remove_sidecar(album_dir, track.filename)
+        track.lyrics_sha = None
         return None
     # no shifting: the match was gated on *this* file's length, so the timestamps of the
     # recording that matched are the timestamps of the file in front of us. A trim changes
@@ -296,4 +409,4 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
     return text
 
 
-__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "read_sidecar", "update_track"]
+__all__ = ["Lrclib", "Lyrics", "LyricsAPI", "LyricsError", "read_sidecar", "reconcile", "sidecar_lost", "update_track"]

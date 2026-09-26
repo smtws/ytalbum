@@ -298,7 +298,9 @@ while searches and previews run alongside.
   where the gaps are. A lyric is only accepted when its length is within three seconds of
   your file's, because a title-only match is how a cover version's words end up on the
   original. The `.lrc` beside the file is the original: delete it and the tag goes with it on
-  the next pass, and lyrics you write yourself are never touched.
+  the next pass, and a lyric you edited or wrote yourself is recognised as yours — by its
+  bytes, not by a flag you have to set — and kept through every later pass, including
+  `--refetch`. To get the lrclib version back, delete your file and run `--refetch`.
 - **The bot check** can stop any run. ytalbum then changes nothing and asks you to try
   later; a browser login makes it rare.
 - **It only knows its own library.** Music you already own elsewhere is invisible to it, so

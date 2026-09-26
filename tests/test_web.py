@@ -328,6 +328,11 @@ class FakeLyrics:
         self.asked.append(title)
         return Lyrics(synced=self.LRC, lrclib_id=11)
 
+    def by_id(self, lrclib_id):
+        from ytalbum.lyrics import Lyrics
+
+        return Lyrics(synced=self.LRC, lrclib_id=lrclib_id)
+
 
 @pytest.fixture
 def lyrics_server(library, opus_template):

@@ -19,7 +19,7 @@ from typing import Any
 from .config import Config
 from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, relocate, run, save_plan
 from .enrich import enrich
-from .lyrics import Lrclib, LyricsAPI, remove_sidecar
+from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost
 from .lyrics import default_cache_path as lyrics_cache_path
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
@@ -366,11 +366,12 @@ class Service:
             if refetch:
                 for t in plan.tracks:
                     if t.provenance.get("lyrics") != Provenance.USER:
-                        t.lyrics, t.lyrics_id = None, None
-            todo = [t for t in plan.tracks if t.state == "done" and t.lyrics is None]
+                        t.lyrics = None  # lyrics_id stays: it is how a sidecar is recognised as ours
+            # a deleted sidecar is work too: the pass has to drop the tag and the status with it
+            todo = [t for t in plan.tracks if t.state == "done" and (t.lyrics is None or sidecar_lost(album_dir, t))]
             if not todo:
                 continue
-            self.log(f"=== [{i}/{len(albums)}] {plan.albumartist} — {plan.album}: {len(todo)} track(s) to look up")
+            self.log(f"=== [{i}/{len(albums)}] {plan.albumartist} — {plan.album}: {len(todo)} track(s) to look at")
             outcomes.append(self._guarded(lambda: self._lyrics_pass(plan, album_dir, api)))
         counts = Counter(t.lyrics or "not looked up" for _, plan in albums for t in plan.tracks if t.state == "done")
         self.log("lyrics: " + (", ".join(f"{n} {what}" for what, n in counts.most_common()) or "no tracks"))

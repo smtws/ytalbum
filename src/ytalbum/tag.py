@@ -35,6 +35,16 @@ def audio_length(path: Path) -> float | None:
         return None
 
 
+def tagged_lyrics(path: Path) -> str | None:
+    """The words currently in the file's tags — what we last wrote there, if anyone."""
+    try:
+        if path.suffix.lower() in (".m4a", ".mp4"):
+            return ((MP4(path).tags or {}).get("\xa9lyr") or [None])[0]
+        return ((OggOpus(path).tags or {}).get("lyrics") or [None])[0]
+    except Exception:
+        return None
+
+
 def build_tags(plan: AlbumPlan, track: PlanTrack, lyrics: str | None = None) -> dict[str, str]:
     tags = {
         "title": track.title,

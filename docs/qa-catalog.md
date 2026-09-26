@@ -231,13 +231,23 @@ is working on the same library — nothing locks them against each other (G5).
   - invariant: a user provenance on lyrics outranks everything, `--refetch` included
   - evidence: `sha1sum` before/after
   - **result 2026-09-26:** pass — a hand-written sidecar marked `user` came through `--refetch` byte-identical, and the tag carries those words
+  - **re-run after P2:** pass — still byte-identical (`e2bda878`), status `synced`, provenance `user`
 
-- [ ] **C6 · D★** — a hand-written `.lrc` **without** the provenance mark
+- [x] **C6 · D★** — a hand-written `.lrc` **without** the provenance mark
   - do: write a `.lrc` by hand, leave the provenance alone, then `ytalbum lyrics --library "$QA" --refetch`
   - expect (honest): it is overwritten. Decide whether an unmarked sidecar should be protected
   - invariant: whatever is decided, the plan and the sidecar must not disagree afterwards
   - evidence: the sidecar diff
   - **result 2026-09-26:** **confirmed as written** — the unmarked sidecar was overwritten by `--refetch` (`f6ed83…` → `b20f39…`). Behaviour is as predicted; whether it should be is the product decision
+  - **decided and changed in P2** (DESIGN.md §9.21): a sidecar is recognised by its bytes, so the
+    mark no longer has to be set by hand. Three re-runs, all pass:
+    - **C6a** (edit since the last pass, tag still disagrees): kept, marked `user`, status `synced`,
+      tag rewritten from the kept file, no lrclib request needed
+    - **C6b** (older edit: the tag was already rewritten from it, so it *agrees* — the common case):
+      lrclib was asked what entry `5073938` holds, the answer differed, file kept, marked `user`,
+      status `synced`
+    - **C6c** (a sidecar we wrote ourselves): replaced by `--refetch` and **not** mistaken for the
+      user's — `lyrics_sha` recorded (`ecb495c0…`), provenance untouched
 
 - [x] **C7 · M** — the file is the source of truth
   - do: delete a `.lrc`, then `ytalbum download "$QA/<album>"`
@@ -245,6 +255,9 @@ is working on the same library — nothing locks them against each other (G5).
   - invariant: the tag never outlives the file it was copied from
   - evidence: `mutagen` tag absent
   - **result 2026-09-26:** pass — deleting the `.lrc` removed the words from the tag on the next run. Note: `plan.lyrics` still reads `synced`, so the status outlives the words it describes
+  - **re-run after P2:** pass, and the note is closed — the status went `synced` → `none`, the tag is
+    gone and `lyrics_sha` was cleared. `ytalbum lyrics` also stopped skipping albums with nothing to
+    look up, which was the path on which a deleted sidecar went unnoticed
 
 - [x] **C8 · M★** — an instrumental never borrows the singer's words
   - do: run the lyrics pass over S2 (*Viva Vendetta (Instrumental)*, 230 s — the same length as
@@ -670,7 +683,7 @@ original. B8 ran into this while otherwise passing.
   re-attempted its trim on *every* pass over that library — each `lyrics` or `download` run
   logged the same ffmpeg refusal. Nothing records the failure, so nothing ever gives up on it.
 - **A status can outlive the words it describes.** After the sidecar was deleted (C7) the tag
-  lost the lyrics, as designed, but `plan.lyrics` still read `synced`.
+  lost the lyrics, as designed, but `plan.lyrics` still read `synced`. *Fixed in P2.*
 
 ### From phase 4
 

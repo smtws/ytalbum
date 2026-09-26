@@ -536,6 +536,29 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    sit there matching a signature that describes a file that no longer exists, and are never
    applied again.
 
+21. ✅ Lyrics beside a track belong to whoever wrote them (2026-09-26, from the QA run).
+   "Lyrics you write yourself are never touched" held only if you had also set the flag that
+   said so: editing a `.lrc` by hand and re-running `ytalbum lyrics --refetch` overwrote it, and
+   deleting one left the plan claiming `synced` while no file was there. Both because the plan
+   knew the *status* of a lyric but nothing about the file. It now records the bytes it wrote
+   (`lyrics_sha`, the twin of the cover's `sha1`), and every pass reconciles the plan with the
+   disk before anything is looked up: a sidecar whose hash has changed is yours from then on,
+   a sidecar that is gone sets the status to `none` and drops the tag, and a sidecar with no
+   lrclib id behind it was never ours to begin with. The interesting case is the library that
+   predates the record. The obvious test — does the file still say what the tag says? — sounds
+   decisive and is not: every pass writes the tag **from** the sidecar, so an edit made before
+   the last pass reads back as perfect agreement, and that is the *common* case, not the rare
+   one. So a difference to the tag is taken as proof of an edit, agreement proves nothing, and
+   the question is left open until something actually wants to overwrite the file — at which
+   point lrclib is asked what the entry we saved holds today. Equal means ours (the hash is
+   recorded and it is never asked again), different means yours, and no answer at all means the
+   file is kept and the question stays open. The check costs nothing for a track looked up
+   recently, because the cached search bodies already carry whole rows. Two smaller holes went
+   with it: `--refetch` used to clear the `lyrics_id` it needs to ask that question, and
+   `ytalbum lyrics` skipped albums with nothing to look up — so on that path a deleted sidecar
+   was never noticed. A trim, finally, clears the status to force a re-match; for a lyric of
+   yours it now restores the status from the words on disk instead of leaving the track blank.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a
