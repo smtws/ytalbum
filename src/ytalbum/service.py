@@ -19,7 +19,7 @@ from typing import Any
 from .config import Config
 from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, relocate, run, save_plan
 from .enrich import enrich
-from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost, status_of, user_owns, write_sidecar
+from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost, status_of, update_track, user_owns, write_sidecar
 from .lyrics import default_cache_path as lyrics_cache_path
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
@@ -502,6 +502,45 @@ class Service:
         # retag through the ordinary pass, with no lyrics client: it rewrites the LYRICS tag from
         # the sidecar as every pass does, and downloads nothing
         run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False)
+        save_plan(plan, album_dir)
+        return Outcome("ok", plan, album_dir)
+
+    def lookup_track(self, source_id: str, video_id: str, reject: bool = False) -> Outcome:
+        """Ask lrclib about one track — or reject what it gave and ask again (DESIGN.md §9.27).
+
+        `reject` remembers the entry on the track, so no later lookup can pick it again: not this
+        one, not a `--refetch`, not a fresh pass. Rejecting is about *that entry* being the wrong
+        recording, which stays true however often it is asked for.
+        """
+        api = self.lrclib
+        if api is None:
+            return Outcome("failed", message="lyrics are switched off — turn them on with: ytalbum config --lyrics on")
+        found = self.find_album(source_id)
+        if not found:
+            return Outcome("failed", message=f"unknown album {source_id}")
+        album_dir, plan = found
+        track = next((t for t in plan.tracks if t.video_id == video_id), None)
+        if not track:
+            return Outcome("failed", message="no such track in this album")
+        if track.state != "done":
+            return Outcome("failed", message=f"{track.title}: there is no file yet to match lyrics against")
+        if track.provenance.get("lyrics") == Provenance.USER:
+            # their words are not lrclib's to replace; deleting them in the editor is the way back
+            return Outcome("failed", message=f"{track.title}: these lyrics are yours — delete them first")
+        if reject:
+            if not track.lyrics_id:
+                return Outcome("failed", message=f"{track.title}: there is no lrclib match to reject")
+            if track.lyrics_id not in track.lyrics_rejected:
+                track.lyrics_rejected.append(track.lyrics_id)
+            self.log(f"lrclib #{track.lyrics_id} is not “{track.title}” — it will not be offered again")
+            remove_sidecar(album_dir, track.filename)
+            track.lyrics_sha = None
+        track.lyrics = None  # not looked up: update_track does the asking
+        text = update_track(api, plan, track, album_dir, album_dir / track.filename)
+        self.log(f"{track.title}: " + (f"{track.lyrics} lyrics" + (f" (lrclib #{track.lyrics_id})" if track.lyrics_id else "")
+                                       if text else "nothing lrclib has fits this recording"))
+        save_plan(plan, album_dir)
+        run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False)  # the tag follows the file
         save_plan(plan, album_dir)
         return Outcome("ok", plan, album_dir)
 

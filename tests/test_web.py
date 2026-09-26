@@ -390,18 +390,25 @@ def test_nonsense_disc_values_are_ignored(value):
 
 
 class FakeLyrics:
-    """One lrclib answer for every track."""
+    """One lrclib answer for every track, or a list of candidates to be picked through."""
 
     LRC = "[00:01.00] one\n[00:04.00] two"
+    SECOND = "[00:02.00] the other entry's words"
 
     def __init__(self) -> None:
         self.asked: list[str] = []
+        self.skipped: list[list[int]] = []
+        self.candidates = [(11, self.LRC)]  # tests that need a second match extend this
 
-    def get(self, artist, title, album=None, length=None):
+    def get(self, artist, title, album=None, length=None, skip=()):
         from ytalbum.lyrics import Lyrics
 
         self.asked.append(title)
-        return Lyrics(synced=self.LRC, lrclib_id=11)
+        self.skipped.append(list(skip))
+        for entry_id, text in self.candidates:
+            if entry_id not in skip:
+                return Lyrics(synced=text, lrclib_id=entry_id)
+        return None  # every candidate was rejected for this track
 
     def by_id(self, lrclib_id):
         from ytalbum.lyrics import Lyrics
@@ -659,3 +666,134 @@ def test_a_sidecar_the_editor_wrote_is_recognised_on_disk_without_a_special_case
     assert fresh.provenance["lyrics"] == "user"
     assert "added on disk" in (tagged_of(app, album_id, fresh) or "")
     assert album_dir == app.album(album_id)[0]  # nothing moved
+
+
+# -- per-track lyrics actions (P9, DESIGN.md §9.27) ---------------------------------------
+
+
+def track_action(c, album_id, video_id, reject=False):
+    body = {"id": album_id, "video_id": video_id, "reject": reject}
+    r = c.post("/api/lyrics_track", json=body, headers=HDR)
+    if r.status_code >= 400:
+        return r
+    return wait(c, r.json()["job"]["id"])
+
+
+def test_looking_one_track_up_again_asks_only_for_that_track(lyrics_server):
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    asked_before = len(api.asked)
+    track = app.album(album_id)[1].tracks[0]
+
+    assert track_action(c, album_id, track.video_id)["state"] == "done"
+    assert len(api.asked) == asked_before + 1  # one track, one question
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert (fresh.lyrics, fresh.lyrics_id) == ("synced", 11)
+    assert sidecar_of(app, album_id, fresh).read_text().strip() == FakeLyrics.LRC
+
+
+def test_looking_up_a_track_that_had_none_finds_words(lyrics_server):
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[2]
+    assert track.lyrics is None and not sidecar_of(app, album_id, track).exists()
+
+    track_action(c, album_id, track.video_id)
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert fresh.lyrics == "synced"
+    assert tagged_of(app, album_id, fresh) == FakeLyrics.LRC
+    assert all(t.lyrics is None for t in app.album(album_id)[1].tracks if t.video_id != track.video_id)
+
+
+def test_rejecting_an_entry_takes_the_next_candidate(lyrics_server):
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    api.candidates = [(11, FakeLyrics.LRC), (12, FakeLyrics.SECOND)]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    track = app.album(album_id)[1].tracks[0]
+    assert track.lyrics_id == 11
+
+    assert track_action(c, album_id, track.video_id, reject=True)["state"] == "done"
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert fresh.lyrics_rejected == [11]
+    assert fresh.lyrics_id == 12  # the next best, and never #11 again
+    assert sidecar_of(app, album_id, fresh).read_text().strip() == FakeLyrics.SECOND
+    assert tagged_of(app, album_id, fresh) == FakeLyrics.SECOND
+    assert api.skipped[-1] == [11]
+
+
+def test_rejecting_the_only_candidate_leaves_no_words(lyrics_server):
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    track = app.album(album_id)[1].tracks[0]
+
+    track_action(c, album_id, track.video_id, reject=True)
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert (fresh.lyrics, fresh.lyrics_id, fresh.lyrics_rejected) == ("none", None, [11])
+    assert not sidecar_of(app, album_id, fresh).exists()
+    assert tagged_of(app, album_id, fresh) is None
+
+
+def test_a_rejected_entry_stays_rejected_through_a_refetch(lyrics_server):
+    """The entry is the wrong recording; that does not become untrue on the next pass."""
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    track = app.album(album_id)[1].tracks[0]
+    track_action(c, album_id, track.video_id, reject=True)
+
+    wait(c, c.post("/api/lyrics", json={"id": album_id, "refetch": True}, headers=HDR).json()["job"]["id"])
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert fresh.lyrics_rejected == [11]
+    assert fresh.lyrics == "none" and not sidecar_of(app, album_id, fresh).exists()
+    assert [11] in api.skipped  # the pass was told to leave it out
+
+    api.candidates = [(11, FakeLyrics.LRC), (12, FakeLyrics.SECOND)]  # a better entry appears later
+    wait(c, c.post("/api/lyrics", json={"id": album_id, "refetch": True}, headers=HDR).json()["job"]["id"])
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert (fresh.lyrics_id, fresh.lyrics) == (12, "synced")  # taken, while #11 stays out
+
+
+def test_the_actions_are_refused_for_words_of_the_users(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    saved(c, album_id, track.video_id, MINE)
+
+    for reject in (False, True):
+        r = track_action(c, album_id, track.video_id, reject=reject)
+        assert r.status_code == 400 and "yours" in r.text
+    assert sidecar_of(app, album_id, track).read_text() == MINE + "\n"
+
+
+def test_rejecting_needs_something_to_reject(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    r = track_action(c, album_id, track.video_id, reject=True)
+    assert r.status_code == 400 and "no lrclib match" in r.text
+
+
+def test_the_per_track_actions_wait_for_a_job_on_the_album(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+    held = app.jobs.submit("lyrics", "a long pass", lambda s: time.sleep(2), target=album_id)
+
+    r = track_action(c, album_id, track.video_id)
+    assert r.status_code == 400 and "a long pass" in r.text
+    wait(c, held.id)
+    assert track_action(c, album_id, track.video_id)["state"] == "done"
+
+
+def test_a_track_with_no_file_cannot_be_matched(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    album_dir, plan = app.album(album_id)
+    plan.tracks[1].state = "pending"
+    save_plan(plan, album_dir)
+
+    r = track_action(c, album_id, plan.tracks[1].video_id)
+    assert r.status_code == 400 and "no file yet" in r.text

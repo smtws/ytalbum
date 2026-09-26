@@ -531,6 +531,26 @@ class App:
                 what = "Clear the lyrics of" if not text.strip() else "Save your lyrics for"
                 return self.jobs.submit("lyrics", f"{what} {track.title}",
                                         lambda s: s.save_lyrics(source_id, video_id, text), target=source_id)
+            case "lyrics_track":
+                source_id, video_id = str(body.get("id", "")), str(body.get("video_id", ""))
+                found = self.album(source_id)
+                if not found or not video_id:
+                    raise ValueError("unknown album or track")
+                track = next((t for t in found[1].tracks if t.video_id == video_id), None)
+                if not track:
+                    raise ValueError("no such track in this album")
+                if track.state != "done":
+                    raise ValueError(f"{track.title}: there is no file yet to match lyrics against")
+                if track.provenance.get("lyrics") == "user":
+                    raise ValueError(f"{track.title}: these lyrics are yours — delete them first")
+                reject = bool(body.get("reject"))
+                if reject and not track.lyrics_id:
+                    raise ValueError(f"{track.title}: there is no lrclib match to reject")
+                if running := self.jobs.working_on(source_id):
+                    raise ValueError(f"“{running.label}” is working on this album — wait for it, then try again")
+                what = "Reject the lyrics of" if reject else "Look up the lyrics of"
+                return self.jobs.submit("lyrics", f"{what} {track.title}",
+                                        lambda s: s.lookup_track(source_id, video_id, reject=reject), target=source_id)
             case "edit":
                 source_id = str(body.get("id", ""))
                 if not self.album(source_id):

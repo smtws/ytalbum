@@ -126,6 +126,7 @@ class PlanTrack:
     lyrics_id: int | None = None  # the lrclib entry the text came from
     lyrics_length: float | None = None  # seconds of the recording lrclib matched (or refused on)
     lyrics_sha: str | None = None  # of the sidecar bytes *we* wrote; anything else is the user's
+    lyrics_rejected: list[int] = field(default_factory=list)  # lrclib entries the user said are not this song
     file_length: float | None = None  # seconds of audio actually on disk, after any trim
 
 

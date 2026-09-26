@@ -731,6 +731,50 @@ and the plan were read on disk after each step.
     row. Open panels are now remembered and restored after any render, which also stops a poll
     closing lyrics you are reading while a download runs
 
+### K8–K11, the per-track actions (P9, DESIGN §9.27)
+
+Run 2026-09-26 against a scratch library seeded fresh inside the session scratchpad (S3 only),
+server on 8799, through the real page.
+
+- [x] **K8 · M** — reject a match, and prove it stays rejected
+  - do: on S3 track 4 (*Sex is Muss*, LRCLIB #30840489), press "Not these words"; then press
+    "Look up again" on the same track
+  - expect: the words go; the rejected entry is never taken again, even by an explicit new lookup
+  - invariant: rejecting says "that entry is not this recording", which stays true; deleting the
+    file only said "not now"
+  - evidence: `lyrics_rejected` in the plan; the second job's log line; the panel
+  - **result:** pass — after the reject: `lyrics=none`, `lyrics_id=None`, `lyrics_rejected=[30840489]`,
+    sidecar and tag gone, the row's ♪ faint, and "Not these words" no longer offered (nothing left to
+    reject). The following "Look up again" logged *"Sex is Muss: nothing lrclib has fits this
+    recording"* — the only entry LRCLIB has for it stayed out. `lyrics_length` (218 s) is kept, so
+    the ⏱ reference survives the rejection
+
+- [x] **K9 · M** — look one track up again
+  - do: on track 7 (*Moralisch*, LRCLIB #28467509), press "Look up again"
+  - expect: that track alone is asked about, and the sidecar and tag are rewritten from the answer
+  - invariant: no other track of the album is looked up
+  - evidence: the panel header before and after; the job log
+  - **result:** pass — header unchanged at `· lrclib #28467509` with the words rewritten, job labelled
+    "Look up the lyrics of Moralisch (höchst verwerflich)". The offline tests cover the case where a
+    track that had none gains words, since every track of this album had already been looked up
+
+- [x] **K10 · M** — neither action touches words of the user's
+  - do: write lyrics for track 1 in the editor, then POST both actions for it
+  - expect: refused, and the panel offers only Edit
+  - invariant: a user's words are not LRCLIB's to replace — the editor's Delete is the way back
+  - evidence: two 400s; the panel's buttons; the file
+  - **result:** pass — both answered `400 Ketzerei: these lyrics are yours — delete them first`, the
+    file kept its `[00:05.00] mine, not lrclib's`, and the panel showed **yours** with Edit as the
+    only action
+
+- [x] **K11 · R** — the refusals
+  - do: a per-track action while a pass holds the album; on a track that is not `done`; rejecting
+    when there is no match to reject
+  - expect: refused with a message naming the reason
+  - evidence: the status codes and messages
+  - **result:** covered offline in `test_web.py` (the job name in the message, "no file yet",
+    "no lrclib match"); the live album has every track downloaded and no long pass to race
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -738,6 +782,7 @@ and the plan were read on disk after each step.
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the K8–K11 cases (per-track lyrics actions) | 4 | 0 | Driven through the real page on a scratch library inside the session scratchpad. The rejected entry stayed rejected across an explicit new lookup. |
 | 2026-09-26 | the K cases (the lyrics editor) | 7 | 1 defect found in the package under test (K7), 1 blemish (K3) | Both fixed before the commit. Driven through the real page against a freshly seeded scratch library. |
 | 2026-09-26 | re-runs after the fixes, `1e3da95..456d83e` | B6, B7, B8, I4, E5, E6, C5, C6, C7, E7, J5, J8, J9 + the split/merge round trip | all pass | Nine commits: trim integrity and its two mirrors, the lyrics ownership contract and its follow-up, order and prune, artist unification, repair's one-pass decision, the consensus length reference. 458 tests at the end, from 379. |
 

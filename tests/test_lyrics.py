@@ -128,7 +128,7 @@ def test_a_live_marker_reaches_lrclib_and_attaches_no_words():
 
 def test_the_kept_length_lands_in_the_plan(tmp_path, yt):
     class Refuses:
-        def get(self, *a):
+        def get(self, *a, **kw):
             return Lyrics(length=210.0)
 
     plan, album_dir = album(tmp_path, yt, Refuses())
@@ -277,6 +277,7 @@ class FakeLyrics:
         self.stored, self.by_id_error = stored, by_id_error  # what the entry we saved holds now
         self.asked: list[tuple[str, str, float | None]] = []
         self.by_id_asked: list[int] = []
+        self.skipped: list[list[int]] = []
 
     def by_id(self, lrclib_id):
         self.by_id_asked.append(lrclib_id)
@@ -284,8 +285,9 @@ class FakeLyrics:
             raise LyricsError("lrclib is busy")
         return Lyrics(synced=self.stored, lrclib_id=lrclib_id) if self.stored else None
 
-    def get(self, artist, title, album, length):
+    def get(self, artist, title, album, length, skip=()):
         self.asked.append((artist, title, length))
+        self.skipped.append(list(skip))
         if title in self.without:
             return None
         return Lyrics(synced=SYNCED_LRC if self.synced else None, plain="one\ntwo", lrclib_id=7)
@@ -680,7 +682,7 @@ def test_lyrics_switched_off_does_nothing(tmp_path, opus_template):
 
 def test_update_track_survives_lrclib_being_down(tmp_path, yt):
     class Broken:
-        def get(self, *a):
+        def get(self, *a, **kw):
             raise LyricsError("HTTP 503 after 4 tries")
 
     plan, album_dir = album(tmp_path, yt, None)
@@ -711,7 +713,7 @@ def test_a_track_that_says_it_has_no_words_is_not_recorded_as_a_blank(tmp_path, 
     """"none" means lrclib has nothing; for an instrumental we know why, and can say so."""
 
     class Refuses:
-        def get(self, artist, title, album=None, length=None):
+        def get(self, artist, title, album=None, length=None, skip=()):
             return Lyrics(length=236.0)  # a near miss: the length is worth keeping
 
     plan, album_dir = album(tmp_path, yt, None)

@@ -694,6 +694,25 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    Nothing about the contract needed a special case for the editor: a sidecar it wrote, then edited
    again on disk, is still the user's, and deleted on disk it follows §9.21 like any other.
 
+27. ✅ One track can be looked up again, and a wrong entry can be rejected for good (2026-09-26,
+   backlog item 3). The lyrics button was all-or-nothing: shift-click re-asked LRCLIB for a whole
+   album, and the only way to refuse a bad match was to delete the file on disk — which the next
+   `--refetch` undid by matching the same wrong entry again. The panel now offers, for words that
+   are not the user's, **Look up again** (this track only, with its title, artist and file length as
+   they are now) and **Not these words**.
+   Rejecting is not "delete": the entry's id goes onto `PlanTrack.lyrics_rejected`, and `Lrclib.get`
+   drops rejected ids before anything is judged. So no later lookup can pick it — not a per-track
+   one, not a pass, not a `--refetch`. That is the difference that makes the action worth having:
+   an entry being the wrong recording stays true however often it is asked for, while a deleted file
+   only says "not now". Rejecting immediately takes the **next** best candidate under the unchanged
+   rules, or leaves the track at `none` when nothing else fits, so one click ends in an answer
+   rather than in an empty panel.
+   Rejected ids are dropped from the length consensus too (§9.24), not only from the words: an entry
+   that is not this song is no evidence about how long this song is either.
+   Neither action is offered for lyrics marked as the user's — those are not LRCLIB's to replace, and
+   the editor's Delete is the way to let it answer again (§9.26). Both are write jobs with the album
+   in `Job.target`, so they are refused while a pass holds it, and a track with no file is refused.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

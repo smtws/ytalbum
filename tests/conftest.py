@@ -9,7 +9,7 @@ import ytalbum.service
 class NoLyrics:
     """What a Service gets instead of a real lrclib client: nothing is found, nothing is asked."""
 
-    def get(self, artist, title, album=None, length=None):
+    def get(self, artist, title, album=None, length=None, skip=()):
         return None
 
     def by_id(self, lrclib_id):

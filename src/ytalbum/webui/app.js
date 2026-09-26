@@ -577,7 +577,24 @@ function lyricsPanel(p, t, d, editing) {
       : "No .lrc beside this track. Write the words here, or let a lyrics run look them up."),
     h("div", { class: "lyrics-actions" },
       h("button", { class: "quiet small", type: "button", onclick: (e) => editLyrics(e.currentTarget, p, t, true) },
-        d.text ? "Edit" : "Write lyrics")));
+        d.text ? "Edit" : "Write lyrics"),
+      // not offered for words of the user's: those are not lrclib's to replace, and the editor's
+      // Delete is the way to let it answer again
+      d.owner === "user" ? null : h("button", { class: "quiet small", type: "button",
+        title: "Ask LRCLIB about this one track again, with its title, artist and the length of the file as they are now",
+        onclick: (e) => lyricsTrack(e.currentTarget, p, t, false) }, "Look up again"),
+      d.owner === "user" || !d.lrclib_id ? null : h("button", { class: "quiet small", type: "button",
+        title: `Wrong song: LRCLIB #${d.lrclib_id} is not this recording. It is never offered for this track again, and the next best match is taken if one fits.`,
+        onclick: (e) => lyricsTrack(e.currentTarget, p, t, true) }, "Not these words")));
+}
+
+async function lyricsTrack(button, p, t, reject) {
+  const id = await submit("lyrics_track", { id: p.source_id, video_id: t.video_id, reject }, button);
+  if (id == null) return;
+  const job = await jobSettled(id);
+  if (!job || job.state !== "done") return;
+  openLyrics.add(t.video_id);
+  await refreshAlbumPanel(); // the panel comes back with whatever lrclib answered this time
 }
 
 function lyricsEditor(p, t, d) {

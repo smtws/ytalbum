@@ -33,7 +33,7 @@ the hint has nowhere to click.
 
 Wanted: a repair action (with the same one-line-per-rename log) and a preview for a fetch.
 
-## 3. Refetching lyrics is all or nothing
+## 3. Refetching lyrics is all or nothing — DONE (P9, DESIGN §9.27)
 
 Shift-click on "Fetch lyrics" refetches the whole album. After fixing one track's title the
 natural wish is "look this one up again", and the only way to reject a bad match is deleting
@@ -41,6 +41,12 @@ the file on disk.
 
 Wanted: per-track "look up again" and "not these words", the latter behaving like deleting the
 sidecar.
+
+**Done, and the second action is stronger than "like deleting the sidecar":** rejecting remembers
+the entry's id on the track (`lyrics_rejected`), so no later lookup can choose it again — a pass and
+a `--refetch` included, which deleting the file never achieved. The next best candidate is taken
+straight away if one fits. Neither action is offered for words marked as yours; the editor's Delete
+is that path.
 
 ## 4. Reordering by typing numbers
 

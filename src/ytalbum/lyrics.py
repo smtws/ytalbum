@@ -22,6 +22,7 @@ import sqlite3
 import threading
 import time
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
@@ -107,7 +108,8 @@ class Lyrics:
 
 
 class LyricsAPI(Protocol):
-    def get(self, artist: str, title: str, album: str | None, length: float | None) -> Lyrics | None: ...
+    def get(self, artist: str, title: str, album: str | None, length: float | None,
+            skip: Collection[int] = ()) -> Lyrics | None: ...
     def by_id(self, lrclib_id: int) -> Lyrics | None: ...
 
 
@@ -141,11 +143,14 @@ class Lrclib:
 
     # -- public API ----------------------------------------------------------------------
 
-    def get(self, artist: str, title: str, album: str | None = None, length: float | None = None) -> Lyrics | None:
+    def get(self, artist: str, title: str, album: str | None = None, length: float | None = None,
+            skip: Collection[int] = ()) -> Lyrics | None:
         """The lyrics of this recording, or None when nothing matches it closely enough.
 
         Without a length nothing is accepted: the length is the only thing that tells a
-        recording apart from its covers.
+        recording apart from its covers. `skip` holds entries the user has rejected for this
+        track: they are dropped before anything is judged, words and length alike, because an
+        entry that is not this song is no evidence about how long this song is either (§9.27).
         """
         if length is None:
             return None
@@ -156,7 +161,7 @@ class Lrclib:
             # the exact endpoint wants lrclib's own album name and ±2s (measured 2026-09-25),
             # so it answers for real albums and never for our compilation names
             params = {"artist_name": artist, "track_name": asked, "duration": str(round(length))}
-            if found := self._request("get", {**params, "album_name": album}):
+            if (found := self._request("get", {**params, "album_name": album})) and found.get("id") not in skip:
                 exact = _pick([found], length, silent)
                 if exact and exact.text:
                     return exact
@@ -168,7 +173,9 @@ class Lrclib:
         same = [
             row
             for row in rows
-            if isinstance(row.get("duration"), int | float) and _same_artist(artist, row.get("artistName") or "")
+            if isinstance(row.get("duration"), int | float)
+            and row.get("id") not in skip
+            and _same_artist(artist, row.get("artistName") or "")
         ]
         fits = [row for row in same if abs(row["duration"] - length) <= TOLERANCE]
         if picked := _pick(fits, length, silent):
@@ -435,7 +442,7 @@ def update_track(api: LyricsAPI, plan: AlbumPlan, track: PlanTrack, album_dir: P
             return existing
         track.lyrics_sha = sidecar_sha(album_dir, track)  # ours after all; record it and carry on
     try:
-        found = api.get(track.artist, track.title, plan.album, audio_length(audio))
+        found = api.get(track.artist, track.title, plan.album, audio_length(audio), skip=track.lyrics_rejected)
     except LyricsError as e:
         log.debug("no lyrics for %s - %s: %s", track.artist, track.title, e)
         return read_sidecar(album_dir, track)  # ask again next time
