@@ -251,5 +251,10 @@ textarea.lyrics-edit {
 button.badge.reset { cursor: pointer; border: 1px solid currentColor; font: inherit; font-size: .75rem; padding: 0 .35rem; }
 button.badge.reset:hover, button.badge.reset:focus-visible { filter: brightness(1.25); }
 .order-mark { display: flex; gap: .4rem; align-items: center; margin: -.25rem 0 .5rem; }
+.p-target { font-size: .8rem; white-space: nowrap; }
+.p-target.warn { color: var(--warn); }
+.p-target.bad { color: var(--bad); }
+.p-target.good { color: var(--ok, var(--muted)); }
+.p-source { font-size: .75rem; }
 .lyr.empty { opacity: .45; }
 .lyr.empty:hover, .lyr.empty:focus-visible { opacity: 1; }

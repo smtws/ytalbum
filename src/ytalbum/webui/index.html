@@ -56,7 +56,7 @@
 
   <footer id="player" class="player" hidden>
     <img id="p-cover" class="p-cover" alt="">
-    <div class="p-info"><div id="p-title" class="p-title"></div><div id="p-artist" class="muted p-artist"></div></div>
+    <div class="p-info"><div id="p-title" class="p-title"></div><div id="p-artist" class="muted p-artist"></div><div id="p-source" class="muted p-source" hidden></div></div>
     <div class="p-controls">
       <button id="p-prev" class="quiet icon" type="button" title="Previous" aria-label="Previous">⏮</button>
       <button id="p-play" class="icon big" type="button" title="Play/pause" aria-label="Play/pause">⏸</button>
@@ -75,6 +75,8 @@
       <span id="p-trim-actions" class="p-trim-actions" hidden>
         <button id="p-set-start" class="quiet small" type="button" title="Cut everything before the current position">start here</button>
         <button id="p-set-end" class="quiet small" type="button" title="Stop at the current position">end here</button>
+        <button id="p-from-start" class="quiet small" type="button" title="Listen from the start mark: does the song begin there?">▶ from start</button>
+        <span id="p-target" class="muted p-target"></span>
         <button id="p-trim-clear" class="quiet small" type="button" title="Remove the trim">reset</button>
         <button id="p-trim-save" class="small" type="button" title="Save the trim for this track">save trim</button>
       </span>

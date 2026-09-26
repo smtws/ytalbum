@@ -11,6 +11,7 @@ from ytalbum.plan import (
     is_stub,
     length_gap,
     reference_length,
+    trimmed_gap,
 )
 
 
@@ -118,3 +119,47 @@ def test_renaming_a_track_gives_up_the_length_that_came_with_its_recording():
 
     assert (plan.tracks[0].mbid, plan.tracks[0].mb_length) == (None, None)
     assert (plan.tracks[1].mbid, plan.tracks[1].mb_length) == ("rec-2", 229.8)  # untouched
+
+
+# -- what a pending trim would leave (slice 21: the chip becomes an action) ----------------
+
+
+def one(duration=300.0, mb=None, lrclib=None, file_length=None):
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:1]
+    t = plan.tracks[0]
+    t.duration, t.mb_length, t.lyrics_length, t.file_length = duration, mb, lrclib, file_length
+    return t
+
+
+@pytest.mark.parametrize(("start", "end", "kept", "gap"), [
+    (None, None, 300.0, 60.0),  # nothing cut yet: a minute too long
+    (60.0, None, 240.0, 0.0),  # a minute off the front lands exactly on the reference
+    (None, 240.0, 240.0, 0.0),  # the same from the back
+    (30.0, 270.0, 240.0, 0.0),  # or half from each end
+    (10.0, 100.0, 90.0, -150.0),  # cut to a snippet: far short of the song
+    (0.0, 300.0, 300.0, 60.0),  # the marks at the very ends are no cut at all
+])
+def test_the_gap_a_pending_trim_would_leave(start, end, kept, gap):
+    assert trimmed_gap(one(mb=240.0), start, end) == (kept, gap)
+
+
+def test_an_end_mark_past_the_video_counts_as_the_end():
+    assert trimmed_gap(one(duration=300.0, mb=240.0), None, 999.0) == (300.0, 60.0)
+
+
+def test_the_reference_is_the_one_the_chip_uses():
+    """MusicBrainz first, lrclib when it has nothing — the same order as `reference_length`."""
+    assert trimmed_gap(one(mb=240.0, lrclib=200.0), 60.0, None)[1] == 0.0
+    assert trimmed_gap(one(lrclib=200.0), 60.0, None)[1] == 40.0
+    assert trimmed_gap(one(), 60.0, None) == (240.0, None)  # nobody knows: a length, no verdict
+
+
+def test_a_track_of_unknown_duration_gives_no_target():
+    assert trimmed_gap(one(duration=None, mb=240.0), 10.0, 20.0) == (None, None)
+
+
+def test_the_target_counts_from_the_video_not_from_a_file_already_cut():
+    """Trim points count from the start of the video, and a cut file is played from its original."""
+    t = one(duration=300.0, mb=240.0, file_length=120.0)  # the file on disk is already short
+    assert trimmed_gap(t, 60.0, None) == (240.0, 0.0)  # the marks still mean the video's timeline

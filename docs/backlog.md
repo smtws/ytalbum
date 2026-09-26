@@ -99,13 +99,19 @@ durable and rewrites the tag. When plan and files agree nothing is written and n
 grid is deliberately not reconciled (246 albums per render); its counts catch up when an album is
 opened. Measured cost on a 56-track album: about 2 ms added to the open.
 
-## 7. The ⏱ chip is a diagnosis, not an action
+## 7. The ⏱ chip is a diagnosis, not an action — DONE (P14, DESIGN §9.31)
 
 The chip says a track is too long against its reference, never where to cut (a data limit,
 DESIGN §9.8). The trim inputs are bare seconds fields.
 
 Wanted: "play from here / set start / set end" next to the player, so the chip leads to a trim
 instead of to arithmetic.
+
+**Done:** marking from playback existed already; what was missing was the arithmetic. The trim bar
+now shows what the pending marks would leave against the length MusicBrainz or LRCLIB knows, in the
+chip's own colours, updating as the marks move — so the gap can be watched closing before saving.
+Plus *▶ from start* to hear the start mark, a line saying when the untouched original is playing, and
+marks rounded to a tenth of a second.
 
 ## 8. Documentation cleanup — LAST BUT ONE
 

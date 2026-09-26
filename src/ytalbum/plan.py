@@ -476,6 +476,22 @@ def length_gap(track: PlanTrack) -> float | None:
     return None if ours is None or not theirs else ours - theirs
 
 
+def trimmed_gap(track: PlanTrack, start: float | None, end: float | None) -> tuple[float | None, float | None]:
+    """What the file would be, and how far from the reference, if it were cut to these marks.
+
+    The length to cut from is the **video's** duration, because trim points count from the start of
+    the video and a file already cut is played from its kept original (§9.17). Returns
+    (kept seconds, kept minus the reference); the second is None when nobody knows the song's
+    length. `webui/app.js` mirrors this in `trimTarget` — change one and change the other.
+    """
+    total = track.duration
+    if not total:
+        return None, None
+    kept = (total if end is None else min(end, total)) - (start or 0)
+    ref = reference_length(track)
+    return kept, (kept - ref if ref else None)
+
+
 def is_stub(track: PlanTrack) -> bool:
     """A file far shorter than the song: a snippet, a teaser, or a match that is plain wrong."""
     ours, theirs = effective_length(track), reference_length(track)

@@ -772,6 +772,29 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    for 56 tracks; the whole open, measured in the browser, is 22 ms. It is bounded by the album, not
    by the library, which is why the grid is left out of it.
 
+31. ✅ The ⏱ mark leads to a cut (2026-09-26, backlog item 7). The chip said a track was the wrong
+   length and left the user with arithmetic: the trim fields are bare seconds, and the only way to
+   know whether a cut fixed the length was to save it and look at the chip again. Marking from
+   playback already existed (*start here*, *end here*, draggable handles, arrow keys for tenths), so
+   this slice is the two things that were missing.
+   **A target while trimming.** The trim bar now says what the pending marks would leave, what the
+   song is said to be, and the difference — "now 4:45 · keeping 3:38 · MusicBrainz 3:37.6 · +0.4s" —
+   recoloured on the chip's own bands as the marks move, so the user watches the gap close instead of
+   guessing. The arithmetic lives in `plan.trimmed_gap` and is mirrored in `app.js`'s `trimTarget`;
+   the reference is the chip's own (`reference_length`), so there is no second opinion to keep in
+   step. It counts from the **video's** duration, never from a file already cut, because that is what
+   trim points mean (§9.17) — the test for that case is the one that would catch a future refactor.
+   **Which file you are hearing.** A cut track is played from its kept original, or the head would be
+   skipped twice (§9.17); the player now says so, and *▶ from start* plays from the start mark, which
+   is the question a start mark actually raises ("does the song begin here?").
+   Marks are rounded to a tenth. `audio.currentTime` carries a dozen decimals of mouse precision that
+   mean nothing musically and end up in the plan and on ffmpeg's command line.
+   Deliberately not here: automatic cut detection and a waveform. §9.8 measured detection and dropped
+   it, and a chip that leads to a cut does not need to guess the cut.
+   The JS half has no unit tests, because this repo has no JavaScript test harness and P14 is not the
+   place to introduce one; `plan.trimmed_gap` carries the arithmetic under test, and the browser
+   checks in the catalog (section P) are the evidence for the rest.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

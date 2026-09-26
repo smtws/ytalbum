@@ -1163,7 +1163,8 @@ async function playAlbum(albumId, start = 0) {
   }
   queue = plan.tracks.filter((t) => t.state === "done").map((t) => ({
     album: albumId, video_id: t.video_id, title: t.title, artist: t.artist, albumName: plan.album,
-    start: t.trim_start, end: t.trim_end, duration: t.duration, mb_length: t.mb_length, trimmed: t.trimmed,
+    start: t.trim_start, end: t.trim_end, duration: t.duration, trimmed: t.trimmed,
+    mb_length: t.mb_length, lyrics_length: t.lyrics_length, file_length: t.file_length,
     savedStart: t.trim_start, savedEnd: t.trim_end,  // what is on disk, to tell editing from listening
   }));
   if (!queue.length) return toast("Nothing downloaded yet in this album", "blocked");
@@ -1185,6 +1186,11 @@ function playIndex(i) {
   $("#p-cover").src = `/api/cover?id=${encodeURIComponent(t.album)}`;
   $("#p-title").textContent = t.title;
   $("#p-artist").textContent = `${t.artist} · ${t.albumName}`;
+  // which file you are hearing, because the marks only make sense against the original
+  const source = $("#p-source");
+  source.hidden = !t.trimmed;
+  source.textContent = t.trimmed ? `playing the untouched original · the file on disk is cut to ${t.trimmed}` : "";
+  source.title = t.trimmed ? "Trim points count from the start of the video, so a cut track is played from the original kept in .originals/ — the marks and what you hear are on one clock." : "";
   document.querySelectorAll("#album tbody tr").forEach((tr) => tr.classList.toggle("playing", isPlaying(currentAlbum?.source_id, tr.dataset.id)));
   renderTrim();
   if ("mediaSession" in navigator) {
@@ -1314,7 +1320,37 @@ function renderTrim() {
   $("#p-h-end").style.left = `${(end / total) * 100}%`;
   $("#p-h-start").title = `Song starts at ${fmt(start)}`;
   $("#p-h-end").title = `Song ends at ${fmt(end)}`;
+  renderTarget(t, total);
   syncTrimInputs(t);
+}
+
+// The chip says a track is the wrong length; this says whether the cut you are making fixes it.
+// Mirrors plan.trimmed_gap — change one and change the other.
+function trimTarget(t, total, start, end) {
+  if (!total) return { kept: null, gap: null };
+  const kept = (end == null ? total : Math.min(end, total)) - (start || 0);
+  const ref = refLength(t);
+  return { kept, gap: ref ? kept - ref : null, ref };
+}
+
+function renderTarget(t, total) {
+  const box = $("#p-target");
+  const { kept, gap, ref } = trimTarget(t, total, t.start, t.end);
+  if (kept == null) return void (box.textContent = "");
+  const source = t.mb_length ? "MusicBrainz" : "LRCLIB";
+  const now = t.file_length ? `now ${asTime(t.file_length)} · ` : "";
+  if (gap == null) {
+    box.className = "muted p-target";
+    box.textContent = `${now}keeping ${asTime(kept)} — nobody knows how long this song is`;
+    box.title = "No MusicBrainz or LRCLIB length for this track, so there is nothing to aim at.";
+    return;
+  }
+  const off = Math.abs(gap);
+  box.className = "p-target " + (kept < ref * LENGTH.stub ? "bad" : off > LENGTH.big ? "warn" : off > LENGTH.slack ? "" : "good");
+  box.textContent = `${now}keeping ${asTime(kept)} · ${source} ${asTime(ref)} · ${gap > 0 ? "+" : "−"}${off.toFixed(1)}s`;
+  box.title = off > LENGTH.slack
+    ? `Still ${off.toFixed(1)} s ${gap > 0 ? "longer" : "shorter"} than ${source} says the song is. Save when you are happy; the ⏱ mark follows the file, not the marks.`
+    : `Within ${LENGTH.slack} s of ${source}'s length — the ⏱ mark goes quiet at this length.`;
 }
 
 // the text fields in the album view are the same value: keep them in step
@@ -1330,7 +1366,7 @@ function setTrim(which, seconds) {
   const t = queue[qi];
   if (!t) return;
   const total = trimLimit();
-  const value = Math.min(Math.max(seconds, 0), total);
+  const value = Math.round(Math.min(Math.max(seconds, 0), total) * 10) / 10;
   if (which === "start") t.start = value >= (t.end ?? total) ? t.start : value || null;
   else t.end = value <= (t.start || 0) ? t.end : value >= total ? null : value;
   renderTrim();
@@ -1367,6 +1403,14 @@ $("#p-set-start").addEventListener("click", () => setTrim("start", audio.current
 $("#p-set-end").addEventListener("click", () => {
   setTrim("end", audio.currentTime);
   audio.pause();  // this is where the song ends: stay here, do not play past the mark
+});
+$("#p-from-start").addEventListener("click", () => {
+  const t = queue[qi];
+  if (!t) return;
+  // the marks count in the video's timeline, and a cut track is played from its kept original,
+  // so the mark is the position to seek to either way
+  audio.currentTime = t.start || 0;
+  audio.play().catch(() => {});
 });
 $("#p-trim-clear").addEventListener("click", () => {
   const t = queue[qi];

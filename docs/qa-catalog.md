@@ -946,6 +946,54 @@ through the UI — that is the case this package is about.
     reconcile costs about 2 ms for 56 tracks; 22 ms for the whole open measured in the page. The
     real library's largest albums are this size, so the same figure applies there
 
+## P. The ⏱ mark leads to a cut (P14, DESIGN §9.31)
+
+Added 2026-09-26. Scratch library with S3 inside the session scratchpad, server on 8799, through the
+real page. The specimen is D2's: *Sex is Muss*, a 4:44.7 file against a 3:37.6 song, +1:07.
+
+- [x] **P1 · R** — the target appears with the chip's own numbers
+  - do: play track 4 and read the trim bar
+  - expect: what the file is now, what the marks would keep, the reference, and the difference
+  - invariant: one reference for both — the chip and the target must never disagree
+  - evidence: the chip's tooltip against the readout
+  - **result:** pass — chip `+1:07` ("MusicBrainz 3:37.6 · LRCLIB 4:45 · this file 4:44.7 — an intro
+    or outro to cut?"), readout **"now 4:44.7 · keeping 4:45 · MusicBrainz 3:37.6 · +67.4s"** in the
+    same amber band
+
+- [x] **P2 · M** — mark the end while listening and watch the gap close
+  - do: seek to where the song ends, press "end here"
+  - expect: the readout follows the marks, in the chip's colours, before anything is saved
+  - invariant: nothing is written until the trim is saved
+  - evidence: the readout; the row's input; the plan
+  - **result:** pass — **"keeping 3:37.9 · MusicBrainz 3:37.6 · +0.3s"**, green (inside the 5 s band),
+    the row's end field showing `3:37.9`, the mark rounded to a tenth (217.9 from a
+    `currentTime` of 217.64…), and the player paused at the mark. The plan was untouched at this point
+
+- [x] **P3 · M** — save, and the chip goes quiet
+  - do: press "save trim"
+  - expect: the file is cut, the chip turns muted, the original is kept
+  - evidence: the plan; `audio_length` of both files
+  - **result:** pass — `trimmed = 0.00-217.90`, chip now `0:00` and muted ("MusicBrainz 3:37.6 ·
+    LRCLIB 3:38 · this file 3:37.9"), the file on disk 217.91 s and
+    `.originals/A9Z3Qkr-F9g.opus` still 284.66 s
+
+- [x] **P4 · R** — which file you are hearing, and ▶ from start
+  - do: play the now-cut track, press "▶ from start"
+  - expect: the original is playing, the player says so, and the seek lands on the start mark
+  - invariant: marks are in the video's timeline, so a cut track must be heard as the original
+    (§9.17), or a mark would mean two different places
+  - evidence: the audio URL; the player's line; `currentTime`
+  - **result:** pass — URL carries `o=1`, the player reads *"playing the untouched original · the file
+    on disk is cut to 0.00-217.90"*, and ▶ from start seeked to the mark
+
+- [x] **P5 · R** — the arithmetic
+  - do: the pending-gap function over marks, references and an unknown duration
+  - evidence: `tests/test_length.py`
+  - **result:** 10 cases in Python (`plan.trimmed_gap`), including that the target counts from the
+    *video's* duration and not from a file already cut, and that MusicBrainz outranks LRCLIB as it
+    does for the chip. The JS mirror has no unit test: this repo has no JavaScript harness, and P14
+    was not the place to add one — P1 to P4 are the evidence for it
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -953,6 +1001,7 @@ through the UI — that is the case this package is about.
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the P cases (the ⏱ mark leads to a cut) | 5 | 0 | D2's specimen taken from +1:07 to +0.3s by ear and by target, in one pass through the page. |
 | 2026-09-26 | the O cases (opening an album asks the disk) | 4 | 0 | Sidecars changed with a shell, on a 56-track album; the open costs about 2 ms more than before. |
 | 2026-09-26 | the N cases (a way back from an edit) | 5 | 0 | Both field resets and the order flag driven through the page; the following update put the source's order back. |
 | 2026-09-26 | the M cases (the fetch preview) | 5 | 1 blemish (M4, the absolute path), fixed | Run over an empty scratch library so "writes nothing" was observable. The preview already existed; the work was making it the outcome. |
