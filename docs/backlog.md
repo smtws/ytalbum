@@ -79,7 +79,7 @@ resets too, lifting the flag without renumbering anything now. Lyrics are not in
 editor's Delete is their way back. In this library 59 of 246 albums and 83 tracks would show the
 affordance.
 
-## 6. Two silent-lag spots
+## 6. Two silent-lag spots — DONE (P13, DESIGN §9.30)
 
 Ownership of an edited sidecar and the status of a deleted one update only when a pass walks
 the album (documented in DESIGN §9.21). Between passes the UI can show a ♪ for lyrics that are
@@ -93,6 +93,12 @@ row and the panel itself. The panel also reads the file on every open, so openin
 current words even when the row's ♪ is stale — which shrinks this item to the marker and the badge
 counts rather than the words themselves.
 
+**Done in P13:** opening an album reconciles its lyrics against the disk before the view is drawn,
+so a sidecar edited or deleted outside ytalbum is recognised at once; a write job then makes it
+durable and rewrites the tag. When plan and files agree nothing is written and no job exists. The
+grid is deliberately not reconciled (246 albums per render); its counts catch up when an album is
+opened. Measured cost on a 56-track album: about 2 ms added to the open.
+
 ## 7. The ⏱ chip is a diagnosis, not an action
 
 The chip says a track is too long against its reference, never where to cut (a data limit,
@@ -100,3 +106,20 @@ DESIGN §9.8). The trim inputs are bare seconds fields.
 
 Wanted: "play from here / set start / set end" next to the player, so the chip leads to a trim
 instead of to arithmetic.
+
+## 8. Documentation cleanup — LAST BUT ONE
+
+Added 2026-09-26 by the owner, to run after every code item above is done. README, DESIGN and the
+catalog grew by nine slices and four catalog sections in one day, each written as the change
+landed. Read them once as a newcomer would: remove what describes states that no longer exist,
+merge sentences that say the same thing twice, make the README's feature list and command table
+match the UI as it is now (editor, per-track lyrics actions, repair button, preview, reset
+badges), check every count, every "§9.x" pointer and every "fixed in Px" note, and keep DESIGN's
+slice log as the history it is rather than rewriting it.
+
+## 9. Retake the screenshots — LAST
+
+Added 2026-09-26 by the owner. `docs/screenshots/` and the README's images show the UI before the
+lyrics editor, the reset badges, the repair button and the preview states existed. Retake them at
+the same sizes on the final code. Rule, unchanged: every screenshot shows **My Dark Lullabies**
+only — the repo does not display full artist discographies.
