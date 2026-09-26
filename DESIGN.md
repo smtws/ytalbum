@@ -795,6 +795,36 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    place to introduce one; `plan.trimmed_gap` carries the arithmetic under test, and the browser
    checks in the catalog (section P) are the evidence for the rest.
 
+32. ✅ Rows are dragged, and a typed number counts in the disc you put the track on (2026-09-26,
+   backlog item 4, the last of them). Typed positions have landed correctly since §9.22, but typing
+   numbers into 56 rows is a poor way to reorder an album. A row now has a grip (`⋮⋮`) in the position
+   cell and is dragged with **pointer** events rather than HTML5 drag-and-drop, which does not exist
+   on touch; the row moves through the table as the pointer passes other rows, so what is on screen
+   is the arrangement that will be saved, and the position column is renumbered per disc on every
+   move so it never shows two 3s mid-edit. Escape puts every row back. Alt+↑ / Alt+↓ on a focused row
+   does the same move without a mouse. Nothing is saved until the album's save, exactly as a typed
+   position is not.
+   The grip is deliberate: making the whole row draggable would fight the text selection in the title
+   and artist fields, which are the other thing a user does in that table.
+   **What this changed on the server, and it is the interesting half.** The client posts every row
+   with its number and disc, as the browser already did, so there is no second ordering path — but a
+   cross-disc drop did not land where it was dropped. `placed()` grouped every track under the disc
+   it *came from*, so a row dragged from disc 2 into the middle of disc 1 ended up after disc 1's
+   rows rather than between them (measured: dropped at 1-02, landed at 1-03). A number the user
+   **typed** now counts in the disc the track is being put on; a number left alone still counts where
+   the track was, which is what keeps §9.22's collapse from interleaving the two discs. One line, one
+   function, and the drag lands.
+   One case only the browser could show: a row dragged into another disc often keeps its *per-disc*
+   number by coincidence — 2-02 dropped at 1-02 is still "2" — so a changed number cannot always
+   say that the user moved it, and without that knowledge it was read as a row that stayed put and
+   filed after its new disc's rows. The payload now carries `moved` for rows the user has actually
+   put somewhere since the last save, which is the UI stating an intent instead of the server
+   inferring one. A collapse sends no `moved`, so §9.22's case is untouched.
+   That also changed a case reviewed in P3: typing "1" while collapsing two discs into one used to put
+   the track first of its *former* disc-2 block (seventh), and now puts it first of the album. Under
+   one disc, "1" means first; the old reading was defensible only while numbers were read under the
+   old discs for every purpose. The test carries the reasoning.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

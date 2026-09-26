@@ -994,6 +994,51 @@ real page. The specimen is D2's: *Sex is Muss*, a 4:44.7 file against a 3:37.6 s
     does for the chip. The JS mirror has no unit test: this repo has no JavaScript harness, and P14
     was not the place to add one — P1 to P4 are the evidence for it
 
+## Q. Reordering by dragging (P15, DESIGN §9.32)
+
+Added 2026-09-26. Scratch library with S3 split into two discs (3 + 4) inside the session scratchpad,
+server on 8799, through the real page. Playwright's `dragTo` for the mouse case, dispatched pointer
+events for the rest.
+
+- [x] **Q1 · M** — drag a row across a disc boundary
+  - do: drag the last row of disc 2 (*Moralisch*, 2-4) onto the second row of disc 1
+  - expect: it lands at 1-2, both discs renumber live, and the save writes exactly that
+  - invariant: what is on screen before the save is what the save writes
+  - evidence: the inputs after the drop; the plan after the save
+  - **result:** pass — on screen `1-1 … 1-2 Moralisch … 2-1 …` with disc 1 counting 1–4 and disc 2
+    1–3, and the saved plan identical to it, `provenance.order = user`
+
+- [x] **Q2 · M** — the case a changed number cannot describe
+  - do: drag a disc-2 row into disc 1 at a position where it keeps its per-disc number
+  - expect: it still lands where it was dropped
+  - **result:** **found as a defect and fixed in this package.** *Sex is Muss* (2-01) dropped at 1-2
+    keeps the number… 2 for the row below it, and the dragged row's own number was unchanged, so the
+    server read it as a row that had stayed put and filed it after disc 1's rows. The payload now
+    carries `moved` for rows the user has put somewhere; re-run, the drop lands at 1-2 and the save
+    agrees. Two offline tests pin both halves (with the flag it moves, without it does not)
+
+- [x] **Q3 · R** — the keyboard
+  - do: focus a row, Alt+↓, then Alt+↑
+  - expect: one position each way, nothing written
+  - **result:** pass — down then up returned the album to its arrangement, and the plan on disk was
+    untouched throughout
+
+- [x] **Q4 · R** — Escape during a drag
+  - do: start a drag, move over another row, press Escape before releasing
+  - expect: every row back where it was, including the disc
+  - **result:** pass — mid-drag the row showed at 1-4, after Escape the arrangement was identical to
+    before, with a "move cancelled" toast
+
+- [x] **Q5 · M** — a drag and a typed number in one save
+  - do: drag a row, then type a position into another row, then save
+  - expect: both intents honoured
+  - **result:** pass — the dragged row kept its dropped position while the typed row went to the
+    front; the saved plan shows both
+
+*Note:* a synthetic `pointerdown` made `setPointerCapture` throw inside the handler — harmless in
+practice (the drag still ran, because the moves arrive on `document` anyway) but it was an exception
+escaping an event handler, so the call is now guarded.
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -1001,6 +1046,7 @@ real page. The specimen is D2's: *Sex is Muss*, a 4:44.7 file against a 3:37.6 s
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the Q cases (reordering by dragging) | 5 | 1 defect found in the package under test (Q2), fixed | Two-disc split; drags driven with real and synthetic pointer events. |
 | 2026-09-26 | the P cases (the ⏱ mark leads to a cut) | 5 | 0 | D2's specimen taken from +1:07 to +0.3s by ear and by target, in one pass through the page. |
 | 2026-09-26 | the O cases (opening an album asks the disk) | 4 | 0 | Sidecars changed with a shell, on a 56-track album; the open costs about 2 ms more than before. |
 | 2026-09-26 | the N cases (a way back from an edit) | 5 | 0 | Both field resets and the order flag driven through the page; the following update put the source's order back. |

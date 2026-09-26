@@ -364,19 +364,82 @@ def test_collapsing_a_split_keeps_the_arrangement_the_user_set():
 
 
 def test_a_merge_and_a_renumber_in_one_save_put_the_track_where_it_was_asked():
-    """The number is read where it was typed: inside the disc the track was on."""
+    """A number the user *typed* counts in the disc they are putting the track on (§9.32).
+
+    Changed in P15: it used to count inside the disc the track came from, so this track landed
+    seventh — first of its former disc-2 block — after a save that collapsed both discs into one.
+    Under one disc, "1" means first, and the same rule is what makes a row dragged into another
+    disc land where it was dropped. A number left *alone* still counts where the track was, which
+    is what keeps a plain collapse from interleaving the two discs (§9.22).
+    """
     plan = build_plan(vol1())
     apply_user_edits(plan, {"tracks": [{"video_id": t.video_id, "disc": "2"} for t in plan.tracks[6:]]})
     was = [t.video_id for t in plan.tracks]
-    moved = plan.tracks[9].video_id  # 2-04, asked to lead its disc while the discs collapse
+    moved = plan.tracks[9].video_id  # 2-04, asked to lead the album while the discs collapse
     edits = as_shown(plan, disc=1)
     for te in edits["tracks"]:
         if te["video_id"] == moved:
             te["number"] = "1"
     apply_user_edits(plan, edits)
-    assert [t.video_id for t in plan.tracks] == was[:6] + [moved] + [v for v in was[6:] if v != moved]
+    assert [t.video_id for t in plan.tracks] == [moved] + [v for v in was if v != moved]
     assert [t.number for t in plan.tracks] == list(range(1, 14))
     assert plan.provenance["order"] == Provenance.USER
+
+
+def test_a_dropped_row_that_keeps_its_number_is_still_a_move():
+    """2-02 dropped at 1-02 keeps the number 2, so only `moved` can say the user put it there."""
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:4]
+    apply_user_edits(plan, {"tracks": [{"video_id": t.video_id, "disc": "2" if i >= 2 else "1"}
+                                       for i, t in enumerate(plan.tracks)]})
+    ids = [t.video_id for t in plan.tracks]
+    dropped = ids[3]  # 2-02, dragged between 1-01 and 1-02 — where it is also number 2
+
+    rows = [{"video_id": ids[0], "number": "1", "disc": "1"},
+            {"video_id": dropped, "number": "2", "disc": "1", "moved": True},
+            {"video_id": ids[1], "number": "3", "disc": "1"},
+            {"video_id": ids[2], "number": "1", "disc": "2"}]
+    apply_user_edits(plan, {"tracks": rows})
+    assert [t.video_id for t in plan.tracks] == [ids[0], dropped, ids[1], ids[2]]
+    assert [(t.disc, t.number) for t in plan.tracks] == [(1, 1), (1, 2), (1, 3), (2, 1)]
+
+
+def test_without_the_moved_flag_a_coincidental_number_is_no_move():
+    """The flag is what makes it a move; the same payload without it leaves the row where it was."""
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:4]
+    apply_user_edits(plan, {"tracks": [{"video_id": t.video_id, "disc": "2" if i >= 2 else "1"}
+                                       for i, t in enumerate(plan.tracks)]})
+    ids = [t.video_id for t in plan.tracks]
+    rows = [{"video_id": ids[0], "number": "1", "disc": "1"},
+            {"video_id": ids[3], "number": "2", "disc": "1"},
+            {"video_id": ids[1], "number": "3", "disc": "1"},
+            {"video_id": ids[2], "number": "1", "disc": "2"}]
+    apply_user_edits(plan, {"tracks": rows})
+    assert [t.video_id for t in plan.tracks][1] != ids[3]  # it went with its old disc's block
+
+
+def test_a_row_dropped_into_another_disc_lands_where_it_was_dropped():
+    """What the browser posts after a cross-disc drag: every row, in its new order and disc."""
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:4]
+    apply_user_edits(plan, {"tracks": [{"video_id": t.video_id, "disc": "2" if i >= 2 else "1"}
+                                       for i, t in enumerate(plan.tracks)]})
+    ids = [t.video_id for t in plan.tracks]
+    dropped = ids[2]  # 2-01, dragged between 1-01 and 1-02
+
+    arrangement = [ids[0], dropped, ids[1], ids[3]]
+    discs = {v: (2 if v == ids[3] else 1) for v in arrangement}
+    counts: dict[int, int] = {}
+    rows = []
+    for v in arrangement:
+        counts[discs[v]] = counts.get(discs[v], 0) + 1
+        rows.append({"video_id": v, "number": str(counts[discs[v]]), "disc": str(discs[v]),
+                     "moved": v == dropped})
+    apply_user_edits(plan, {"tracks": rows})
+
+    assert [t.video_id for t in plan.tracks] == arrangement
+    assert [(t.disc, t.number) for t in plan.tracks] == [(1, 1), (1, 2), (1, 3), (2, 1)]
 
 
 @pytest.mark.parametrize("value", ["", "0", "-3", "abc", None])

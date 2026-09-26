@@ -818,7 +818,11 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
             t.trim_start, t.trim_end = start, end
         if str(te.get("number", "")).strip().isdigit():
             wanted = max(1, int(te["number"]))
-            if wanted != t.number:
+            # `moved` is the UI saying "the user put this row here", which a changed number cannot
+            # always show: a row dragged into another disc often keeps its per-disc number by
+            # coincidence (2-02 dropped at 1-02), and without the flag it would be read as a row
+            # that stayed put and end up after that disc's rows instead of among them (§9.32).
+            if wanted != t.number or te.get("moved"):
                 typed[t.video_id] = wanted
                 order_changed = True
             t.number = wanted
@@ -883,7 +887,7 @@ def spelling_rank(name: str, sources: set[str | None]) -> tuple[bool, bool, bool
 
 
 def placed(tracks: list[PlanTrack], was_on: dict[str, int], typed: dict[str, int]) -> list[PlanTrack]:
-    """Put every track the user typed a number for on that position, inside the disc it was on.
+    """Put every track the user typed a number for on that position, inside the disc it belongs to.
 
     A typed number is a position, in both directions and including the last one. Sorting by the
     numbers cannot do that: a track moved *down* still sorts ahead of the track that holds the
@@ -891,10 +895,16 @@ def placed(tracks: list[PlanTrack], was_on: dict[str, int], typed: dict[str, int
     number could ever move a track to the end (DESIGN.md §9.22). So the typed tracks are taken
     out of the arrangement and put back at the index they asked for, lowest number first, while
     the untouched ones keep their relative order.
+
+    Which disc a number counts in depends on whether it was typed at all (§9.32). A number the
+    user gave counts in the disc they are putting the track on — that is what dragging a row into
+    another disc means, and what typing a position after collapsing a split means. A number left
+    alone counts where the track *was*, because after a disc change those numbers are the old
+    per-disc ones and reading them under the new discs would interleave the two (§9.22's collapse).
     """
     groups: dict[int, list[PlanTrack]] = {}
     for t in tracks:
-        groups.setdefault(was_on.get(t.video_id, t.disc), []).append(t)
+        groups.setdefault(t.disc if t.video_id in typed else was_on.get(t.video_id, t.disc), []).append(t)
     for disc, group in groups.items():
         rest = [t for t in group if t.video_id not in typed]
         for t in sorted((x for x in group if x.video_id in typed), key=lambda x: typed[x.video_id]):

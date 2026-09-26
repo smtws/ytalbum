@@ -57,13 +57,19 @@ a `--refetch` included, which deleting the file never achieved. The next best ca
 straight away if one fits. Neither action is offered for words marked as yours; the editor's Delete
 is that path.
 
-## 4. Reordering by typing numbers
+## 4. Reordering by typing numbers — DONE (P15, DESIGN §9.32)
 
 Typed positions land correctly since P3, but typing numbers into 56 rows is a poor way to
 reorder an album. No drag and drop; the other rows renumber only after save, so mid-edit the
 column shows contradictions.
 
 Wanted: drag to reorder, rows renumbering live.
+
+**Done:** a grip in the position cell, dragged with pointer events so touch works too; the row moves
+as the pointer passes others and every disc renumbers live, so the column never contradicts itself
+mid-edit; Escape cancels; Alt+↑ / Alt+↓ is the keyboard equivalent. Nothing is saved until the
+album's save. A cross-disc drop needed one correction on the server: a number the user typed now
+counts in the disc the track is being put on.
 
 ## 5. No way back from an edit — DONE (P12, DESIGN §9.29)
 

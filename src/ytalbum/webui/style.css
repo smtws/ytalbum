@@ -251,6 +251,14 @@ textarea.lyrics-edit {
 button.badge.reset { cursor: pointer; border: 1px solid currentColor; font: inherit; font-size: .75rem; padding: 0 .35rem; }
 button.badge.reset:hover, button.badge.reset:focus-visible { filter: brightness(1.25); }
 .order-mark { display: flex; gap: .4rem; align-items: center; margin: -.25rem 0 .5rem; }
+.grip {
+  cursor: grab; touch-action: none; user-select: none; color: var(--muted);
+  padding: 0 .15rem; font-size: .9em; letter-spacing: -.12em;
+}
+.grip:hover { color: inherit; }
+tr.dragging { opacity: .55; }
+tr.dragging .grip { cursor: grabbing; }
+tr.dragging td { background: var(--panel); }
 .p-target { font-size: .8rem; white-space: nowrap; }
 .p-target.warn { color: var(--warn); }
 .p-target.bad { color: var(--bad); }

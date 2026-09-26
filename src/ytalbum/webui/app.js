@@ -708,6 +708,8 @@ function renderAlbum() {
         t.state === "done" ? h("button", { class: "row-play", type: "button", title: "Play from here", "aria-label": `Play ${t.title}`,
           onclick: () => playAlbum(p.source_id, p.tracks.filter((x) => x.state === "done").findIndex((x) => x.video_id === t.video_id)) }, "▶") : null),
       h("td", { class: "num" },
+        h("span", { class: "grip", title: "Drag to move this track — or focus it and press Alt+↑ / Alt+↓", "aria-hidden": "true",
+          onpointerdown: startRowDrag }, "⋮⋮"),
         h("input", { type: "number", name: "number", class: "num", min: "1", step: "1", value: t.number,
           "aria-label": `position of ${t.title}`, title: "Position — change it and the album keeps your order" })),
       h("td", {}, h("input", { type: "text", name: "artist", value: t.artist, "aria-label": "artist" })),
@@ -771,6 +773,92 @@ function renderAlbum() {
   markAlbumFields();
   reopenLyrics();
 }
+
+// -- reordering by dragging -------------------------------------------------------------
+//
+// Pointer events, not HTML5 drag-and-drop, because the latter does not exist on touch. The row
+// is moved in the table as the pointer passes other rows, so what you see is the arrangement
+// you will get; the position column is renumbered on every move, per disc, and a row dropped
+// among another disc's rows takes that disc (DESIGN.md §9.32). Nothing is saved until the
+// album's save, exactly as a typed position is not.
+let rowDrag = null;  // NB the trim handles have their own `dragging`
+const movedRows = new Set();  // rows the user has put somewhere since the last save
+
+function rowsOf(tbody) {
+  return [...tbody.querySelectorAll("tr")].filter((tr) => tr.dataset.id);
+}
+
+// each disc counts from 1 again, so the column never shows two 3s mid-edit
+function renumberRows(tbody) {
+  const counts = new Map();
+  for (const tr of rowsOf(tbody)) {
+    const disc = Number(tr.querySelector("[name=disc]").value) || 1;
+    counts.set(disc, (counts.get(disc) || 0) + 1);
+    tr.querySelector("[name=number]").value = counts.get(disc);
+  }
+}
+
+function startRowDrag(event) {
+  if (event.button != null && event.button !== 0) return;
+  const row = event.currentTarget.closest("tr");
+  const tbody = row.parentElement;
+  rowDrag = { row, tbody, order: rowsOf(tbody), disc: row.querySelector("[name=disc]").value };
+  row.classList.add("dragging");
+  // keeps the moves coming when the pointer leaves the row; not every pointer can be captured
+  // (a synthetic event, a released touch), and failing to capture must not abort the drag
+  try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* moves still arrive on document */ }
+  event.preventDefault();  // no text selection, no page scroll on touch
+}
+
+function moveRowTo(row, over) {
+  if (!over || over === row) return;
+  const rows = rowsOf(row.parentElement);
+  const goingDown = rows.indexOf(over) > rows.indexOf(row);
+  over.insertAdjacentElement(goingDown ? "afterend" : "beforebegin", row);
+  // dropped among another disc's rows: that is the disc it is on now
+  const neighbour = (row.previousElementSibling?.dataset.id ? row.previousElementSibling : row.nextElementSibling);
+  const disc = neighbour?.querySelector("[name=disc]")?.value;
+  if (disc) row.querySelector("[name=disc]").value = disc;
+  movedRows.add(row.dataset.id);  // a moved row keeps its per-disc number often enough to matter
+  renumberRows(row.parentElement);
+}
+
+document.addEventListener("pointermove", (e) => {
+  if (!rowDrag) return;
+  const under = document.elementFromPoint(e.clientX, e.clientY)?.closest("tr");
+  if (under?.dataset.id && under.parentElement === rowDrag.tbody) moveRowTo(rowDrag.row, under);
+});
+
+function endRowDrag(restore) {
+  if (!rowDrag) return;
+  const { row, tbody, order, disc } = rowDrag;
+  rowDrag = null;
+  row.classList.remove("dragging");
+  if (restore) {
+    for (const tr of order) tbody.append(tr);  // put every row back where it was
+    row.querySelector("[name=disc]").value = disc;
+    renumberRows(tbody);
+    toast("move cancelled", "blocked");
+  }
+}
+
+document.addEventListener("pointerup", () => endRowDrag(false));
+document.addEventListener("pointercancel", () => endRowDrag(true));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && rowDrag) endRowDrag(true);
+});
+
+// the same move without a mouse: Alt+↑ / Alt+↓ on a focused row
+document.addEventListener("keydown", (e) => {
+  if (!e.altKey || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
+  const row = e.target.closest?.("#album tbody tr[data-id]");
+  if (!row) return;
+  const sibling = e.key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling;
+  if (!sibling?.dataset.id) return;
+  e.preventDefault();
+  moveRowTo(row, sibling);
+  (e.target.closest("td")?.querySelector(".grip") ? e.target : row.querySelector("[name=number]"))?.focus?.();
+});
 
 // The value of an input cannot be highlighted character by character — the whole field is
 // tinted instead, so an album opened from a filtered library shows which fields matched.
@@ -890,6 +978,7 @@ function saveAlbum(ev) {
     album: form.album.value, albumartist: form.albumartist.value, year: form.year.value,
     tracks: [...form.querySelectorAll("tbody tr")].map((tr) => ({
       video_id: tr.dataset.id,
+      moved: movedRows.has(tr.dataset.id),
       number: tr.querySelector("[name=number]").value,
       artist: tr.querySelector("[name=artist]").value,
       title: tr.querySelector("[name=title]").value,
@@ -898,6 +987,7 @@ function saveAlbum(ev) {
       disc: tr.querySelector("[name=disc]").value,
     })),
   };
+  movedRows.clear();  // the arrangement being saved is the arrangement from now on
   submit("edit", { id: currentAlbum.source_id, edits }, ev.submitter);
 }
 
