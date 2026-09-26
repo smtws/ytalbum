@@ -119,6 +119,10 @@ class Jobs:
         """Something is queued or running (by default in any lane)."""
         return any(j.state in ("queued", "running") and lane in (None, j.lane) for j in self._jobs.values())
 
+    def writing(self) -> Job | None:
+        """The queued or running job that changes the library, if there is one."""
+        return next((j for j in self._jobs.values() if j.lane == "write" and j.state in ("queued", "running")), None)
+
     def working_on(self, target: str) -> Job | None:
         """The queued or running write job that has this album in its hands, if there is one.
 
@@ -475,6 +479,11 @@ class App:
                 artist = str(body.get("artist") or "").strip() or None
                 label = f"Update {artist}" if artist else "Update the library"
                 return self.jobs.submit("update", label + (" (full)" if deep else ""), lambda s: s.update_all(deep=deep, artist=artist))
+            case "repair":
+                if running := self.jobs.writing():
+                    # it renames folders all over the library, so it must not run beside a writer
+                    raise ValueError(f"“{running.label}” is running — wait for it, then repair")
+                return self.jobs.submit("repair", "Repair the library", lambda s: s.repair())
             case "prune":
                 source_id = str(body.get("id", ""))
                 found = self.album(source_id)

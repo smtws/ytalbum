@@ -775,6 +775,41 @@ server on 8799, through the real page.
   - **result:** covered offline in `test_web.py` (the job name in the message, "no file yet",
     "no lrclib match"); the live album has every track downloaded and no long pass to race
 
+## L. Repair from the web UI (P10)
+
+Added 2026-09-26. A scratch library inside the session scratchpad, seeded with one album fetched
+for real and a second copy of it under a shouted spelling of the same artist (`FEUERSCHWANZ` /
+`Feuerschwanz`), so repair had something to do. Server on 8799, driven through the real page.
+
+- [x] **L1 · M** — the button, its confirm and its log
+  - do: press "Repair library" in the header, read the dialog, accept
+  - expect: a write-lane job whose log carries repair's own lines and its summary
+  - invariant: nothing is downloaded and nothing is deleted; the dialog says so before it runs
+  - evidence: the dialog text; the job's lane, label and log; the folders on disk
+  - **result:** pass — the confirm showed README's paragraph (what it changes, that folders and
+    files are renamed, that nothing is downloaded or deleted, that edited values are kept). The job
+    came back `lane=write`, `kind=repair`, label "Repair the library", and its log ended with
+    `=== Feuerschwanz — Sex Is Muss (Shouted)`, four rename/retag lines and
+    **`1 album(s) tidied up`**. On disk the `FEUERSCHWANZ/` folder is gone and both albums sit under
+    `Feuerschwanz/`, both now `provenance.albumartist = mb`
+
+- [x] **L2 · R** — refused while the library is being changed
+  - do: start a lyrics `--refetch`, then press Repair
+  - expect: refused, naming the job in the way
+  - invariant: repair renames folders across the library, so it must not run beside a writer
+  - evidence: the status code and message
+  - **result:** pass — `HTTP 400: “Look up all lyrics of Sex Is Muss” is running — wait for it,
+    then repair`
+
+- [x] **L3 · R** — the hint a user can now follow
+  - do: read the fetch-time spelling hint
+  - expect: it names both the command and the button
+  - invariant: one message serves the CLI user and the UI user; neither is sent somewhere they
+    cannot go
+  - evidence: the log line
+  - **result:** pass — "… 'ytalbum repair' (or “Repair library” in the web UI) unifies them on the
+    better spelling", asserted in `test_web.py` as well so the two cannot drift apart
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -782,6 +817,7 @@ server on 8799, through the real page.
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the L cases (repair from the web UI) | 3 | 0 | Scratch library with two spellings of one artist; the shouted folder was gone afterwards. Nothing measured on the real library: repair is a no-op there today (I-014, I-015). |
 | 2026-09-26 | the K8–K11 cases (per-track lyrics actions) | 4 | 0 | Driven through the real page on a scratch library inside the session scratchpad. The rejected entry stayed rejected across an explicit new lookup. |
 | 2026-09-26 | the K cases (the lyrics editor) | 7 | 1 defect found in the package under test (K7), 1 blemish (K3) | Both fixed before the commit. Driven through the real page against a freshly seeded scratch library. |
 | 2026-09-26 | re-runs after the fixes, `1e3da95..456d83e` | B6, B7, B8, I4, E5, E6, C5, C6, C7, E7, J5, J8, J9 + the split/merge round trip | all pass | Nine commits: trim integrity and its two mirrors, the lyrics ownership contract and its follow-up, order and prune, artist unification, repair's one-pass decision, the consensus length reference. 458 tests at the end, from 379. |

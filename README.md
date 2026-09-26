@@ -105,9 +105,9 @@ idle minutes.
 | | |
 |---|---|
 | ![Album view](docs/screenshots/album.jpg) | ![Channel listing](docs/screenshots/search.jpg) |
-| **Album view:** cover, editable fields, where each value came from, position, disc and trim points, per-track delete. The trim column says how far the file is from the length MusicBrainz and LRCLIB know — amber for a wide gap, red when it is far too short to be that song at all. ♪ marks a track whose lyrics are here — click it to read them (from the `.lrc` beside the file), and click a line to play from there — while the song plays, the line being sung is marked, so a file that carries an intro shows itself by drifting. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
+| **Album view:** cover, editable fields, where each value came from, position, disc and trim points, per-track delete. The trim column says how far the file is from the length MusicBrainz and LRCLIB know — amber for a wide gap, red when it is far too short to be that song at all. ♪ marks a track whose lyrics are here — click it to read them (from the `.lrc` beside the file), and click a line to play from there — while the song plays, the line being sung is marked, so a file that carries an intro shows itself by drifting. The same panel writes: edit or write the words yourself (they are then yours and no lookup replaces them), ask LRCLIB about that one track again, or reject a wrong match so it is never offered for that track again. A compilation keeps one artist per track; playing a track adds a position bar with trim handles. | **A URL or an artist name:** here a curator's channel — every playlist it publishes, track counts filled in afterwards, "in library" markers, tick what you want. |
 | ![Settings](docs/screenshots/settings.jpg) | ![Library](docs/screenshots/library.jpg) |
-| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. | **Library:** one artist's albums, narrowed further by the filter with the matches highlighted, ▶ plays all of them, and "check for new albums" asks YouTube for that artist alone. ♪ counts the tracks whose lyrics are here; ⏱ marks an album that is not the length it should be. |
+| **Settings:** library folder, YouTube login, MusicBrainz, token helper, parallel requests — and what it found: config file, JS runtime, token generator. "Repair library" in the header runs the offline tidy-up (below) and asks first. | **Library:** one artist's albums, narrowed further by the filter with the matches highlighted, ▶ plays all of them, and "check for new albums" asks YouTube for that artist alone. ♪ counts the tracks whose lyrics are here; ⏱ marks an album that is not the length it should be. |
 
 The compilations throughout these screenshots are
 [**My Dark Lullabies**](https://www.youtube.com/@MyDarkLullabies) — *"a curated collection
@@ -246,6 +246,7 @@ network.
 | `/api/open` | `{q}` | A URL or an artist name: preview, channel listing or search (read-only lane). |
 | `/api/fetch` | `{urls: […]}` | Plan and download those sources. |
 | `/api/update` | `{artist?, deep?}` | Re-check the library, or one artist's albums. |
+| `/api/repair` | `{}` | Run `ytalbum repair` over the library: renames and retags only, nothing downloaded. Refused while another job is changing the library. |
 | `/api/edit` | `{id, edits}` | Album and track fields, trim points, audio choice; renames and retags. |
 | `/api/trim_channel` | `{channel, start, end}` | The same trim for every track from one uploader. |
 | `/api/prune` | `{id}` | Delete tracks that left the playlist. |

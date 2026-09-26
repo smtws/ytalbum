@@ -241,7 +241,8 @@ class Service:
         if spelling_rank(plan.albumartist, ours) < spelling_rank(theirs, seen[theirs]):
             self.log(
                 f"this album spells the artist '{plan.albumartist}', the library '{theirs}' — keeping "
-                f"'{theirs}' so there is one folder; 'ytalbum repair' unifies them on the better spelling"
+                f"'{theirs}' so there is one folder; 'ytalbum repair' (or “Repair library” in the web UI) "
+                f"unifies them on the better spelling"
             )
         else:
             self.log(f"artist spelled '{theirs}' elsewhere in the library — using that")

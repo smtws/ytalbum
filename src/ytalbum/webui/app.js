@@ -1371,6 +1371,19 @@ $("#open").addEventListener("submit", async (ev) => {
 });
 // plain click: cheap check (one request per album); with shift: read every album fully
 $("#update").addEventListener("click", (e) => submit("update", { deep: e.shiftKey }, e.currentTarget));
+$("#repair").addEventListener("click", (e) => {
+  // repair renames folders and files across the whole library, so it asks first. The wording is
+  // README's paragraph about it, because a user pressing this deserves to know it is offline and
+  // that nothing is downloaded.
+  const message = "Repair the library?\n\n"
+    + "Once through every album, offline: performer-only artist names, guest credits moved into "
+    + "the title, the album's own name removed from its track titles, one spelling per artist, "
+    + "duplicate tracks removed.\n\n"
+    + "Folders and files are renamed and tags rewritten. Nothing is downloaded, nothing is deleted, "
+    + "and values you edited yourself are kept.\n\n"
+    + "The log names every album it changes.";
+  if (confirm(message)) submit("repair", {}, e.currentTarget);
+});
 
 if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
 poll();

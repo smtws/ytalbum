@@ -25,13 +25,20 @@ and refuses a track that is not `done`. Saving writes the sidecar, marks it your
 derives `synced`/`plain` from the text and rewrites the tag; an empty save clears. Nothing is looked
 up, so the editor can never replace your words with LRCLIB's.
 
-## 2. The UI sends people to a terminal
+## 2. The UI sends people to a terminal — HALF DONE (P10: repair; the preview is still open)
 
 The fetch log says "`ytalbum repair` unifies them", but `repair` does not exist in the web UI:
 no button, no API route. A dry run exists only on the command line too. A UI user who follows
 the hint has nowhere to click.
 
 Wanted: a repair action (with the same one-line-per-rename log) and a preview for a fetch.
+
+**Done in P10:** a "Repair library" button beside "Update library", running the same `Service.repair`
+as a write job, its one-line-per-change log and "N album(s) tidied up" summary landing in the job
+log. It asks first, with README's paragraph about what repair does, because it renames folders and
+files across the whole library. The fetch-time spelling hint now names the button as well as the
+command, in one sentence that serves both kinds of user. **Still open:** a dry-run preview for a
+fetch, which is the other half of this item.
 
 ## 3. Refetching lyrics is all or nothing — DONE (P9, DESIGN §9.27)
 

@@ -11,7 +11,7 @@ from mutagen.oggopus import OggOpus
 from test_incremental import JPEG, FakeYouTube, opus_template, vol1
 
 from ytalbum.config import Config
-from ytalbum.download import load_plan, run, save_plan
+from ytalbum.download import iter_plans, load_plan, run, save_plan
 from ytalbum.models import Collection, Provenance
 from ytalbum.plan import build_plan, refresh_derived
 from ytalbum.service import Service, apply_user_edits
@@ -818,3 +818,55 @@ def test_lrclib_being_unreachable_is_not_reported_as_no_words(lyrics_server):
     assert "could not be reached" in log and "nothing lrclib has" not in log
     fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
     assert fresh.lyrics is None  # not looked up, so the next pass asks again
+
+
+# -- repair from the web UI (P10) ----------------------------------------------------------
+
+
+def test_the_repair_button_runs_repair_on_the_write_lane(library, opus_template):
+    """The fetch log tells people `ytalbum repair` unifies spellings; now they can click it."""
+    shouting = build_plan(Collection.from_dict(json.loads((FIXTURES / "vol1_collection.json").read_text())))
+    # a second volume of the same curator, shouted: two spellings of one artist key, which is
+    # what repair unifies. (Not an "album": repair would then name it after its track artists.)
+    shouting.source_id, shouting.album = "PL-shout", "Vol. 2 - Shouted"
+    shouting.albumartist, shouting.provenance["albumartist"] = "MY DARK LULLABIES", Provenance.YT_TITLE
+    refresh_derived(shouting)
+    run(shouting, library / shouting.folder, FakeYouTube(opus_template))
+    save_plan(shouting, library / shouting.folder)
+
+    app = App(Config(musicbrainz=False), library, port=0)
+    srv = app.make_server()
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{srv.server_address[1]}", timeout=10) as c:
+            job = c.post("/api/repair", json={}, headers=HDR).json()["job"]
+            assert job["lane"] == "write" and job["kind"] == "repair"
+            done = wait(c, job["id"])
+            assert done["state"] == "done"
+            log = "\n".join(c.get(f"/api/job?id={job['id']}").json()["log"])
+            assert "album(s) tidied up" in log  # repair's own summary reaches the job log
+            assert "MY DARK LULLABIES" in log or "My Dark Lullabies" in log
+    finally:
+        srv.shutdown()
+    assert not (library / "MY DARK LULLABIES").exists()  # the folder was renamed on disk
+    assert {p.albumartist for _, p in iter_plans(library)} == {"My Dark Lullabies"}
+
+
+def test_repair_is_refused_while_another_write_runs(lyrics_server):
+    app, c, _ = lyrics_server
+    held = app.jobs.submit("lyrics", "a long pass", lambda s: time.sleep(2))
+
+    r = c.post("/api/repair", json={}, headers=HDR)
+    assert r.status_code == 400
+    assert "a long pass" in r.text and "wait for it" in r.text
+    wait(c, held.id)
+    assert wait(c, c.post("/api/repair", json={}, headers=HDR).json()["job"]["id"])["state"] == "done"
+
+
+def test_the_spelling_hint_names_both_ways_to_run_repair(tmp_path, opus_template):
+    """One message for both kinds of user: the command and the button."""
+    from test_repair import LOTL, settled
+
+    _, log = settled(tmp_path, opus_template, [("LORD OF THE LOST", Provenance.YT_TITLE)], (LOTL, Provenance.MB))
+    hint = next(line for line in log if "repair" in line)
+    assert "ytalbum repair" in hint and "Repair library" in hint
