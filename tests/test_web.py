@@ -797,3 +797,24 @@ def test_a_track_with_no_file_cannot_be_matched(lyrics_server):
 
     r = track_action(c, album_id, plan.tracks[1].video_id)
     assert r.status_code == 400 and "no file yet" in r.text
+
+
+def test_lrclib_being_unreachable_is_not_reported_as_no_words(lyrics_server):
+    """A site that did not answer must not read as an answer."""
+    app, c, api = lyrics_server
+    album_id = app.albums()[0]["id"]
+    track = app.album(album_id)[1].tracks[0]
+
+    def down(*a, **kw):
+        from ytalbum.lyrics import LyricsError
+
+        raise LyricsError("lrclib: HTTP 503 after 4 tries")
+
+    api.get = down
+    job = wait(c, c.post("/api/lyrics_track", json={"id": album_id, "video_id": track.video_id},
+                         headers=HDR).json()["job"]["id"])
+    assert job["state"] == "done"
+    log = "\n".join(c.get(f"/api/job?id={job['id']}").json()["log"])
+    assert "could not be reached" in log and "nothing lrclib has" not in log
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert fresh.lyrics is None  # not looked up, so the next pass asks again

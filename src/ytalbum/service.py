@@ -537,8 +537,15 @@ class Service:
             track.lyrics_sha = None
         track.lyrics = None  # not looked up: update_track does the asking
         text = update_track(api, plan, track, album_dir, album_dir / track.filename)
-        self.log(f"{track.title}: " + (f"{track.lyrics} lyrics" + (f" (lrclib #{track.lyrics_id})" if track.lyrics_id else "")
-                                       if text else "nothing lrclib has fits this recording"))
+        if track.lyrics is None:
+            # `update_track` swallows a LyricsError and leaves the status unset so the next pass
+            # asks again. Saying "nothing fits" here would report a site that did not answer as
+            # an answer — the one thing this log line must not do.
+            self.log(f"{track.title}: lrclib could not be reached — asked again on the next pass")
+        elif text:
+            self.log(f"{track.title}: {track.lyrics} lyrics" + (f" (lrclib #{track.lyrics_id})" if track.lyrics_id else ""))
+        else:
+            self.log(f"{track.title}: nothing lrclib has fits this recording")
         save_plan(plan, album_dir)
         run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False)  # the tag follows the file
         save_plan(plan, album_dir)
