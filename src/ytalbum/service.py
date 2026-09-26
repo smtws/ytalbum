@@ -154,6 +154,7 @@ class Service:
                 self.log(f"  {dropped} track title(s) lost the repeated album name")
 
         if dry or self.library is None:
+            self._settle_artist(plan)  # read-only: a dry run shows the artist a fetch would write
             self.on_plan(plan)
             return Outcome("dry", plan)
 
@@ -166,13 +167,13 @@ class Service:
             self.log(f"existing album {old_dir.relative_to(self.library)}: {new} new, {gone} no longer in the source")
             if report_only:
                 return Outcome("reported", plan, old_dir)
-            self._harmonize_artist(plan)  # before the folder is chosen, or the album stays put
+            self._settle_artist(plan)  # before the folder is chosen, or the album stays put
             album_dir = relocate(old_dir, plan, self.library)
         else:
             if report_only:
                 self.log(f"not in the library yet: {plan.folder}")
                 return Outcome("reported", plan)
-            self._harmonize_artist(plan)
+            self._settle_artist(plan)
             album_dir = self.library / plan.folder
 
         self.check()  # last point before anything on disk changes
@@ -183,29 +184,106 @@ class Service:
         return self.execute(plan, album_dir)
 
     def _harmonize_artist(self, plan: AlbumPlan) -> None:
-        """One spelling per artist in the library: 'SCHANDMAUL' and 'Schandmaul' are one folder."""
+        """One spelling per artist in the library: 'SCHANDMAUL' and 'Schandmaul' are one folder.
+
+        This is `repair`'s side of it and weighs the album's own spelling against every other,
+        so a library converges on the best evidence it holds. A *fetch* may not do that — it
+        would rename albums it was never asked about — so it uses `_settle_artist` instead.
+        """
         if plan.provenance.get("albumartist") == Provenance.USER or not self.library or not self.library.exists():
             return
-        seen: dict[str, set[str | None]] = {}  # spelling -> where each one came from
-        for _, other in iter_plans(self.library):
-            seen.setdefault(other.albumartist, set()).add(other.provenance.get("albumartist"))
+        seen = self._spellings(plan)
         seen.setdefault(plan.albumartist, set()).add(plan.provenance.get("albumartist"))
-        same = [name for name in seen if text_key(name) == text_key(plan.albumartist)]
-        best = min(
-            same,
-            key=lambda n: (
-                Provenance.USER not in seen[n],  # a spelling someone chose themselves
-                Provenance.MB not in seen[n],  # then one MusicBrainz confirmed
-                n.isupper(),  # then mixed case over a shouting channel name
-                n.islower(),
-                len(n),
-                n,
-            ),
-        )
+        best = min(seen, key=lambda n: spelling_rank(n, seen[n]))
         if best != plan.albumartist:
             self.log(f"artist spelled '{best}' elsewhere in the library — using that")
-            plan.albumartist = plan.auto["albumartist"] = best
-            refresh_derived(plan)  # or a new album keeps the folder of the spelling just dropped
+            self._adopt(plan, best, seen[best])
+
+    def _settle_artist(self, plan: AlbumPlan) -> None:
+        """The artist this fetch writes: the album's own tracks first, then the library's spelling.
+
+        A fetch renames only the album it is fetching. So when the library already holds a
+        spelling for this artist key, the incoming album adopts it — even when it arrives with
+        better evidence, because upgrading the other albums is `ytalbum repair`'s job, not a
+        side effect of fetching something. When the newcomer *is* the better evidence, one line
+        says so and names both spellings. The cost, accepted: an older spelling can stand until
+        repair runs. What it buys is one folder per artist (DESIGN.md §9.23).
+        """
+        self._adopt_track_spelling(plan)
+        if plan.provenance.get("albumartist") == Provenance.USER or not self.library or not self.library.exists():
+            return  # a spelling chosen for *this* album wins for this album, second folder or not
+        seen = self._spellings(plan)
+        if not seen:
+            return  # the library knows this artist under no other spelling
+        theirs = min(seen, key=lambda n: spelling_rank(n, seen[n]))
+        if theirs == plan.albumartist:
+            return
+        ours = {plan.provenance.get("albumartist")}
+        if spelling_rank(plan.albumartist, ours) < spelling_rank(theirs, seen[theirs]):
+            self.log(
+                f"this album spells the artist '{plan.albumartist}', the library '{theirs}' — keeping "
+                f"'{theirs}' so there is one folder; 'ytalbum repair' unifies them on the better spelling"
+            )
+        else:
+            self.log(f"artist spelled '{theirs}' elsewhere in the library — using that")
+        self._adopt(plan, theirs, seen[theirs])
+
+    def _adopt(self, plan: AlbumPlan, name: str, sources: set[str | None]) -> None:
+        """Take a spelling from elsewhere in the library, with the evidence it really has.
+
+        Not the evidence *this* album had: a spelling adopted while the album's own came from
+        MusicBrainz used to keep the `mb` marker, so a shouted name inherited a confirmation
+        MusicBrainz never gave — and `repair` then converged on the shouting (§9.23). And never
+        `user`, which means "the user chose this for *this* album" and would freeze it.
+        """
+        plan.albumartist = plan.auto["albumartist"] = name
+        for source in (Provenance.MB, Provenance.YT_MUSIC, Provenance.PLAYLIST):
+            if source in sources:
+                plan.provenance["albumartist"] = source
+                break
+        else:
+            plan.provenance["albumartist"] = Provenance.YT_TITLE
+        refresh_derived(plan)
+
+    def _spellings(self, plan: AlbumPlan) -> dict[str, set[str | None]]:
+        """Every spelling the *rest* of the library has for this artist key, and where each came from."""
+        key = text_key(plan.albumartist)
+        seen: dict[str, set[str | None]] = {}
+        for _, other in iter_plans(self.library) if self.library else []:
+            if other.source_id != plan.source_id and text_key(other.albumartist) == key:
+                seen.setdefault(other.albumartist, set()).add(other.provenance.get("albumartist"))
+        return seen
+
+    def _adopt_track_spelling(self, plan: AlbumPlan) -> None:
+        """An album spelled unlike its own tracks: MusicBrainz credited the tracks, believe them.
+
+        The release credit and the track credits are separate fields in MusicBrainz and do
+        disagree ("LORD OF THE LOST" on the release, "Lord of the Lost" on every track). The
+        album is made consistent with itself before the library is consulted, so what the
+        library then weighs — and what `repair` later sees — is the better spelling.
+        """
+        if plan.provenance.get("albumartist") == Provenance.USER or not plan.tracks:
+            return
+        names = [t.artist for t in plan.tracks]
+        common = max(set(names), key=names.count)
+        if text_key(common) != text_key(plan.albumartist):
+            return  # a genuinely different credit, not a spelling: never touched
+        if not any(t.artist == common and t.provenance.get("artist") == Provenance.MB for t in plan.tracks):
+            return
+        if common == plan.albumartist:
+            # already spelled as the tracks are — but possibly without saying where that came
+            # from. `repair`'s own "use the most common track artist" rule renames without a
+            # marker, and an unmarked spelling loses a tie to any other mixed-case spelling in
+            # the library, alphabetically, which is a coin flip.
+            plan.provenance["albumartist"] = Provenance.MB
+            return
+        self.log(f"the tracks are credited '{common}', the album '{plan.albumartist}' — using the tracks' spelling")
+        plan.albumartist = plan.auto["albumartist"] = common
+        # and it carries the tracks' evidence: MusicBrainz credited them, which is the whole
+        # reason to believe them. Left at the album's old marker, this spelling loses a tie to
+        # any other mixed-case spelling in the library — alphabetically, which is a coin flip.
+        plan.provenance["albumartist"] = Provenance.MB
+        refresh_derived(plan)  # or a new album keeps the folder of the spelling just dropped
 
     def execute(self, plan: AlbumPlan, album_dir: Path) -> Outcome:
         todo = sum(t.state != "done" and t.in_source for t in plan.tracks)
@@ -423,6 +501,7 @@ class Service:
                 names = [t.artist for t in plan.tracks]
                 if names:
                     plan.albumartist = plan.auto["albumartist"] = max(set(names), key=names.count)
+            self._adopt_track_spelling(plan)  # an album that disagrees with its own tracks
             self._harmonize_artist(plan)
             # a plan can be right while the folder is not: the album artist was unified
             # earlier without moving anything (fixed 2026-09-24, but the folders remain)
@@ -593,6 +672,18 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
     if order_changed:
         plan.provenance["order"] = Provenance.USER  # the source may not renumber this album
     return refresh_derived(plan)
+
+
+def spelling_rank(name: str, sources: set[str | None]) -> tuple[bool, bool, bool, bool, int, str]:
+    """How good a spelling is: what someone chose, then MusicBrainz, then case, then length."""
+    return (
+        Provenance.USER not in sources,  # a spelling someone chose themselves
+        Provenance.MB not in sources,  # then one MusicBrainz confirmed
+        name.isupper(),  # then mixed case over a shouting channel name
+        name.islower(),
+        len(name),
+        name,
+    )
 
 
 def placed(tracks: list[PlanTrack], was_on: dict[str, int], typed: dict[str, int]) -> list[PlanTrack]:

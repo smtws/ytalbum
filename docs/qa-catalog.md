@@ -375,13 +375,22 @@ is working on the same library — nothing locks them against each other (G5).
     split, and collapsing it back to one disc returned exactly the same order, numbered 1…n, with
     the file names following and no `1-01` prefix left behind
 
-- [ ] **E7 · M★** — a spelling that differs from the library's
+- [x] **E7 · M★** — a spelling that differs from the library's
   - do: in the scratch library, edit S1's album artist to `LORD OF THE LOST` (which marks it
     yours), then fetch S2
   - expect: S2 lands in that same folder under your spelling — one artist folder, not two
   - invariant: a spelling you chose outranks MusicBrainz' when the library is harmonised
   - evidence: `ls "$QA"`; both plans' `albumartist`
   - **result 2026-09-26:** **fails as written** — a fetch does not unify the spellings: seeding produced `LORD OF THE LOST/` and `Lord Of The Lost/` side by side, and only `repair` merged them (finally onto the MusicBrainz spelling). See the phase-1 finding
+  - **re-run after P4 (DESIGN.md §9.23): pass in both directions.** Shouting into a library that
+    spells it properly: the fetched album adopted `Lord of the Lost`, logged one line, and the
+    `LORD OF THE LOST/` folder was gone — one folder. Into a spelling the user chose for *another*
+    album: the fetched album adopted `LORD OF THE LOST`, leaving `Lord of the Lost/` only for the
+    album the user had not touched. Better evidence arriving: the library's spelling was kept, one
+    hint named both spellings and pointed at `ytalbum repair`, and no other album was renamed.
+    Following the hint's advice does converge, but not always in one pass: repair decides album by
+    album against the library as stored, so of three scratch albums pass 1 moved two onto the
+    MusicBrainz spelling and pass 2 the third (pass 3 a no-op)
 
 ---
 
@@ -587,6 +596,9 @@ the metadata, and the lyrics matcher can be asked directly.
   - invariant: the label belongs to the uploader, never to the album
   - evidence: the printed plan
   - **result 2026-09-26:** pass — album *Viva Vendetta*, kind single. Note: a dry run prints the artist **before** harmonisation (*LORD OF THE LOST*), so the preview is not the outcome
+  - **re-run after P4: the note is closed** — harmonisation now runs in the `--dry-run` path too
+    (read-only, and guarded for a dry run with no library), so the preview prints the artist and
+    folder the fetch would write
 
 - [x] **J6 · M★** — a rejected recording leaves no length behind
   - do: `ytalbum plan <S3> --library "$QA"`, look at *Ketzerei (Summer Breeze 2016)*
@@ -660,10 +672,15 @@ these forms:
   again in the other direction when a MusicBrainz-spelled plan arrived after a repair had
   settled on the YouTube spelling. Each `repair` converged correctly (finally on
   *Lord of the Lost*), so the fault is that a fetch alone does not.
+  *Fixed in P4 (DESIGN.md §9.23): the fetched album adopts the library's spelling either way, and
+  when it is itself the better evidence one line says so and leaves the upgrade to `repair`.*
 - **An album artist can disagree with its own track artists.** After the first repair,
   *Viva Vendetta* read `albumartist='Lord Of The Lost'` (`yt_title`, borrowed from the other
   album) while its only track read `'Lord of the Lost'` (`mb`). The evidence order weighs
-  provenance on the album field, and the MusicBrainz evidence sat on the track. It resolved
+  provenance on the album field, and the MusicBrainz evidence sat on the track. *Fixed in P4: an
+  album is made consistent with its own tracks — most common track artist, key-equal, spelled
+  differently, MB behind it — before the library is consulted, and `repair` does the same step, or
+  the fetch-time hint could not keep its promise.* It resolved
   once an MB-spelled album joined the library, but the intermediate state was wrong.
 - **A single's album name keeps what a track title drops.** Fetching the DOMINUM video gave
   the album `The Dead Don't Die (feat. @xxFEUERSCHWANZxx)` — the raw `@handle` and the feat.
@@ -728,5 +745,6 @@ original. B8 ran into this while otherwise passing.
   matters to health checks and proxies.
 - A dry run prints the album artist *before* library harmonisation, so the preview can differ
   from what a real fetch writes (J5: `LORD OF THE LOST` previewed, `Lord of the Lost` written).
+  *Fixed in P4: harmonisation runs in the dry-run path too.*
 - A title carrying a bracket marker can zero out the lrclib search, so an instrumental track
   may end up with no length reference at all (J8).

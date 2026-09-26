@@ -583,6 +583,30 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    for, lowest number first, while the untouched ones keep their relative order (`placed`). Two
    typed positions in one save, one up and one down, both land where they were asked to.
 
+23. ✅ A fetch renames only the album it is fetching (2026-09-26, from the QA run). Unifying the
+   spelling of an artist looked done — `SCHANDMAUL` and `Schandmaul` are one folder — but only
+   when the newcomer was the worse-spelled one. Arriving with a *better* spelling, it simply kept
+   it: the library's other albums stayed as they were and the artist had two folders (E7). The
+   obvious fix is the wrong one. A fetch of one single must not rename twenty other albums as a
+   side effect; that is `ytalbum repair`'s job, run deliberately. So the incoming album adopts the
+   spelling the library already holds, even when its own evidence is better, and when it *is* the
+   better evidence one line names both spellings and says `repair` unifies them. A spelling the
+   user chose for the album being fetched still wins for that album — the one case that leaves a
+   second folder, and it is theirs to make. The trade-off, accepted: an older spelling can stand
+   until repair runs.
+   Two pieces make that promise keepable. First, an album is made consistent with *itself* before
+   the library is consulted: MusicBrainz credits the release and the tracks in separate fields and
+   they disagree (`LORD OF THE LOST` on the release, `Lord of the Lost` on every track), so when
+   the most common track artist is key-equal to the album artist, spelled differently, and carries
+   MB provenance, the album adopts the tracks' spelling. Second, `repair` does the same step — and
+   it has to, or the hint would be a lie: the library adoption overwrites the album-level spelling,
+   so after the fetch the better evidence exists **only** in the track credits, where repair's
+   album-level comparison would never have seen it. Measured read-only over the 246-album library
+   before shipping: 0 albums would be renamed by that step today, and the 3 whose tracks disagree
+   with their album artist are all albums the user spelled themselves, which the first guard
+   protects. A dry run runs the whole harmonisation too, so the preview is the outcome — it used
+   to print the pre-harmonisation spelling and differ from what the fetch then wrote.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a

@@ -4,7 +4,7 @@ import pytest
 from test_incremental import FakeYouTube, opus_template, vol1
 
 from ytalbum.config import Config
-from ytalbum.download import load_plan, run, save_plan
+from ytalbum.download import iter_plans, load_plan, run, save_plan
 from ytalbum.models import Provenance
 from ytalbum.plan import build_plan, refresh_derived
 from ytalbum.service import Service
@@ -113,6 +113,39 @@ def test_a_harmonised_artist_lands_in_the_right_folder_at_once(tmp_path, opus_te
     assert not (tmp_path / "SALTATIO MORTIS").exists()
 
 
+def shouting_second_playlist():
+    shouting = vol1()
+    shouting.source_id = shouting.source_url = "PL-second"
+    for e in shouting.entries:
+        e.video_id = "x" + e.video_id[1:]
+        e.music.artist = "SALTATIO MORTIS"
+    return shouting
+
+
+def test_a_dry_run_shows_the_artist_the_fetch_would_write(tmp_path, opus_template):
+    """D8: the preview used to print the spelling before harmonisation, so it could differ."""
+    first = build_plan(vol1())
+    first.albumartist, first.provenance["albumartist"] = "Saltatio Mortis", Provenance.MB
+    refresh_derived(first)
+    run(first, tmp_path / first.folder, FakeYouTube(opus_template))
+    save_plan(first, tmp_path / first.folder)
+
+    svc = Service(Config(library_root=tmp_path, musicbrainz=False), tmp_path, yt=NoNetwork(opus_template))
+    svc.yt.fetch = lambda url: shouting_second_playlist()
+    outcome = svc.fetch("https://www.youtube.com/playlist?list=PL-second", dry=True)
+    assert outcome.status == "dry"
+    assert outcome.plan.albumartist == "Saltatio Mortis"  # what a real fetch would write
+    assert outcome.plan.folder.startswith("Saltatio Mortis/")
+    assert not (tmp_path / "SALTATIO MORTIS").exists()  # and a dry run still writes nothing
+
+
+def test_a_dry_run_without_a_library_still_works(tmp_path, opus_template):
+    svc = Service(Config(musicbrainz=False), None, yt=NoNetwork(opus_template))
+    svc.yt.fetch = lambda url: shouting_second_playlist()
+    outcome = svc.fetch("https://www.youtube.com/playlist?list=PL-second", dry=True)
+    assert outcome.status == "dry" and outcome.plan.albumartist == "SALTATIO MORTIS"
+
+
 def test_repair_moves_an_album_whose_folder_no_longer_matches(tmp_path, opus_template):
     """The name was unified earlier without moving the album; repair has to finish the job."""
     plan = build_plan(vol1())
@@ -141,6 +174,166 @@ def harmonised(tmp_path, opus_template, library_names, own=("LORD OF THE LOST", 
     plan.albumartist, plan.provenance["albumartist"] = own
     service(tmp_path, opus_template)._harmonize_artist(plan)
     return plan.albumartist
+
+
+def settled(tmp_path, opus_template, library_names, own, tracks=None):
+    """The settled spelling and the log; `settle` gives the whole plan."""
+    plan, log = settle(tmp_path, opus_template, library_names, own, tracks)
+    return plan.albumartist, log
+
+
+def settle(tmp_path, opus_template, library_names, own, tracks=None):
+    """Put albums into a library, then settle `own` the way a fetch does. Returns (plan, log)."""
+    for i, (name, prov) in enumerate(library_names):
+        p = build_plan(vol1())
+        p.source_id, p.album = f"PL{i}", f"Album {i}"
+        p.albumartist, p.provenance["albumartist"] = name, prov
+        refresh_derived(p)
+        run(p, tmp_path / p.folder, FakeYouTube(opus_template))
+        save_plan(p, tmp_path / p.folder)
+    plan = build_plan(vol1())
+    plan.source_id = "PL-own"
+    plan.albumartist, plan.provenance["albumartist"] = own
+    for t in plan.tracks:
+        t.artist, t.provenance["artist"] = tracks if tracks else (t.artist, t.provenance.get("artist"))
+    log: list[str] = []
+    svc = Service(Config(musicbrainz=False), tmp_path, yt=NoNetwork(opus_template), log=log.append)
+    svc._settle_artist(plan)
+    return plan, log
+
+
+LOTL = "Lord of the Lost"
+
+
+def test_a_fetch_adopts_the_librarys_spelling_rather_than_imposing_its_own(tmp_path, opus_template):
+    name, log = settled(tmp_path, opus_template, [(LOTL, Provenance.MB)], ("LORD OF THE LOST", Provenance.YT_TITLE))
+    assert name == LOTL
+    assert log == [f"artist spelled '{LOTL}' elsewhere in the library — using that"]
+
+
+def test_a_fetch_keeps_a_spelling_the_user_chose_for_another_album(tmp_path, opus_template):
+    name, _ = settled(tmp_path, opus_template, [("LORD of the LOST", Provenance.USER)], (LOTL, Provenance.MB))
+    assert name == "LORD of the LOST"
+
+
+def test_better_evidence_is_named_once_and_left_to_repair(tmp_path, opus_template):
+    """A fetch may rename only the album it is fetching, so the library's spelling still wins."""
+    name, log = settled(tmp_path, opus_template, [("LORD OF THE LOST", Provenance.YT_TITLE)], (LOTL, Provenance.MB))
+    assert name == "LORD OF THE LOST"  # unchanged here; the other album is not this fetch's business
+    hints = [line for line in log if "repair" in line]
+    assert len(hints) == 1
+    assert LOTL in hints[0] and "LORD OF THE LOST" in hints[0]
+
+
+def test_a_user_spelling_for_this_album_wins_and_keeps_its_own_folder(tmp_path, opus_template):
+    name, log = settled(tmp_path, opus_template, [(LOTL, Provenance.MB)], ("LORD of the LOST", Provenance.USER))
+    assert name == "LORD of the LOST"  # the only case that leaves two folders for one artist
+    assert log == []
+
+
+def test_an_album_takes_the_spelling_its_own_tracks_carry(tmp_path, opus_template):
+    """MusicBrainz credits the release and the tracks separately, and they disagree."""
+    plan, log = settle(tmp_path, opus_template, [], ("LORD OF THE LOST", Provenance.MB),
+                       tracks=(LOTL, Provenance.MB))
+    name = plan.albumartist
+    assert name == LOTL
+    assert plan.provenance["albumartist"] == Provenance.MB  # the tracks' evidence comes with it
+    assert log == [f"the tracks are credited '{LOTL}', the album 'LORD OF THE LOST' — using the tracks' spelling"]
+
+
+def test_a_track_spelling_without_musicbrainz_behind_it_is_not_adopted(tmp_path, opus_template):
+    name, log = settled(tmp_path, opus_template, [], ("LORD OF THE LOST", Provenance.MB),
+                        tracks=(LOTL, Provenance.YT_TITLE))
+    assert (name, log) == ("LORD OF THE LOST", [])
+
+
+def test_the_tracks_spelling_is_what_the_library_then_weighs(tmp_path, opus_template):
+    """Outcome 3 runs first so the fetch arrives with the better evidence, hint and all."""
+    name, log = settled(tmp_path, opus_template, [("LORD OF THE LOST", Provenance.YT_TITLE)],
+                        ("LORD OF THE LOST", Provenance.MB), tracks=(LOTL, Provenance.MB))
+    assert name == "LORD OF THE LOST"
+    assert len([line for line in log if "repair" in line]) == 1
+
+
+def test_repair_prefers_a_track_spelling_over_another_albums_guess(tmp_path, opus_template):
+    """Two mixed-case spellings would otherwise be separated alphabetically — a coin flip."""
+    def guess(plan):
+        plan.kind = "album"
+        plan.source_id, plan.album = "PL-guess", "Album guess"
+        plan.albumartist, plan.provenance["albumartist"] = "Lord Of The Lost", Provenance.YT_TITLE
+        for t in plan.tracks:
+            t.artist, t.provenance["artist"] = "Lord Of The Lost", Provenance.YT_TITLE
+
+    tmp_path, _ = library_with(tmp_path, opus_template, guess)
+    second = build_plan(vol1())
+    second.kind, second.source_id, second.album = "album", "PL-mb", "Album mb"
+    second.albumartist, second.provenance["albumartist"] = "LORD OF THE LOST", Provenance.MB
+    for t in second.tracks:
+        t.artist, t.provenance["artist"] = LOTL, Provenance.MB
+    refresh_derived(second)
+    run(second, tmp_path / second.folder, FakeYouTube(opus_template))
+    save_plan(second, tmp_path / second.folder)
+
+    service(tmp_path, opus_template).repair()
+    assert {p.albumartist for _, p in iter_plans(tmp_path)} == {LOTL}
+
+
+def test_repair_converges_on_the_spelling_the_tracks_carry(tmp_path, opus_template):
+    """What the fetch-time hint promises: repair finds the better spelling in the tracks."""
+    def shout(plan):
+        plan.kind = "album"
+        plan.albumartist, plan.provenance["albumartist"] = "LORD OF THE LOST", Provenance.MB
+        for t in plan.tracks:
+            t.artist, t.provenance["artist"] = LOTL, Provenance.MB
+
+    tmp_path, plan = library_with(tmp_path, opus_template, shout)
+    assert (tmp_path / "LORD OF THE LOST").exists()
+
+    service(tmp_path, opus_template).repair()
+    saved = load_plan(tmp_path / LOTL / plan.album)
+    assert saved.albumartist == LOTL
+    assert not (tmp_path / "LORD OF THE LOST").exists()  # folder and file names follow
+
+
+def test_repair_leaves_a_genuinely_different_credit_alone(tmp_path, opus_template):
+    """Only case and punctuation: a compilation's tracks are other artists entirely."""
+    tmp_path, plan = library_with(tmp_path, opus_template, lambda p: None)
+    service(tmp_path, opus_template).repair()
+    assert load_plan(tmp_path / plan.folder).albumartist == "My Dark Lullabies"
+
+
+def test_an_adopted_spelling_does_not_inherit_this_albums_evidence(tmp_path, opus_template):
+    """A shouted name marked `mb` is a confirmation MusicBrainz never gave — and repair believes it."""
+    plan, _ = settle(tmp_path, opus_template, [("LORD OF THE LOST", Provenance.YT_TITLE)], (LOTL, Provenance.MB))
+    assert plan.albumartist == "LORD OF THE LOST"
+    assert plan.provenance["albumartist"] == Provenance.YT_TITLE  # the evidence that spelling has
+
+
+def test_an_adopted_spelling_is_never_marked_as_the_users(tmp_path, opus_template):
+    """`user` means the user chose it for *this* album; inheriting it would freeze the album."""
+    plan, _ = settle(tmp_path, opus_template, [("LORD of the LOST", Provenance.USER)], (LOTL, Provenance.MB))
+    assert plan.albumartist == "LORD of the LOST"
+    assert plan.provenance["albumartist"] != Provenance.USER
+
+
+def test_repair_reaches_the_track_spelling_through_an_adopted_one(tmp_path, opus_template):
+    """The whole chain: a fetch adopts the shouting, repair then finds the tracks' spelling."""
+    def shout(plan):
+        plan.kind = "album"
+        plan.source_id, plan.album = "PL-shout", "Album shout"
+        plan.albumartist, plan.provenance["albumartist"] = "LORD OF THE LOST", Provenance.YT_TITLE
+        for t in plan.tracks:
+            t.artist, t.provenance["artist"] = LOTL, Provenance.MB
+
+    tmp_path, _ = library_with(tmp_path, opus_template, shout)
+    plan, _ = settle(tmp_path, opus_template, [], (LOTL, Provenance.MB), tracks=(LOTL, Provenance.MB))
+    assert (plan.albumartist, plan.provenance["albumartist"]) == ("LORD OF THE LOST", Provenance.YT_TITLE)
+    save_plan(plan, tmp_path / plan.folder)
+    run(plan, tmp_path / plan.folder, FakeYouTube(opus_template))
+
+    service(tmp_path, opus_template).repair()
+    assert all(p.albumartist == LOTL for _, p in iter_plans(tmp_path))
+    assert not (tmp_path / "LORD OF THE LOST").exists()
 
 
 def test_a_spelling_musicbrainz_confirmed_beats_one_from_a_video_title(tmp_path, opus_template):
