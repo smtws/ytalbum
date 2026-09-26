@@ -35,7 +35,7 @@ import httpx
 from . import config as config_mod
 from .config import Config
 from .download import COVER_STEM, PLAN_FILE, iter_plans
-from .lyrics import read_sidecar
+from .lyrics import read_sidecar, reconcile
 from .models import AlbumPlan
 from .plan import album_length_flag
 from .service import Outcome, Service, _inside, channel_base_url
@@ -308,6 +308,24 @@ class App:
 
     def album(self, source_id: str) -> tuple[Path, AlbumPlan] | None:
         return next(((d, p) for d, p in iter_plans(self.library) if p.source_id == source_id), None) if self.library.exists() else None
+
+    def album_view(self, source_id: str) -> AlbumPlan | None:
+        """The album as the view opens it: checked against the `.lrc` files on disk first.
+
+        A sidecar edited or deleted outside the UI used to go unnoticed until some pass walked the
+        album — the row could show ♪ for words that were gone (DESIGN.md §9.30). Opening the album
+        now applies the same `reconcile` rules the passes apply, so the view tells the truth at
+        once; when they found something, a write job makes it durable and brings the tags along.
+        """
+        found = self.album(source_id)
+        if not found:
+            return None
+        album_dir, plan = found
+        changed = [t for t in plan.tracks if t.state == "done" and reconcile(album_dir, t, album_dir / t.filename)[1]]
+        if changed and not self.jobs.working_on(source_id):
+            self.jobs.submit("lyrics", f"Check the lyrics of {plan.album}",
+                             lambda s: s.sync_lyrics(source_id), target=source_id)
+        return plan
 
     def cover(self, source_id: str) -> tuple[bytes, str] | None:
         found = self.album(source_id)
@@ -662,8 +680,8 @@ class _Handler(BaseHTTPRequestHandler):
             case "/api/tracks":
                 return self._json(self.app.track_index())
             case "/api/album":
-                found = self.app.album(q.get("id", ""))
-                return self._json(found[1].to_dict()) if found else self._error(HTTPStatus.NOT_FOUND, "no such album")
+                plan = self.app.album_view(q.get("id", ""))
+                return self._json(plan.to_dict()) if plan else self._error(HTTPStatus.NOT_FOUND, "no such album")
             case "/api/cover":
                 cover = self.app.cover(q.get("id", ""))
                 return self._send(HTTPStatus.OK, cover[0], cover[1]) if cover else self._error(HTTPStatus.NOT_FOUND, "no cover")

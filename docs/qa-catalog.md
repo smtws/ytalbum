@@ -907,6 +907,45 @@ through the real page.
   - expect: the plain badge in the first case; in the second, a badge that says why
   - evidence: covered offline in `test_web.py` (the reset is a no-op and the value stays the user's)
 
+## O. Opening an album asks the disk (P13, DESIGN §9.30)
+
+Added 2026-09-26. Scratch library holding S6 (*Judas (Deluxe Digital Edition)*, 56 tracks, 30 with
+lyrics) inside the session scratchpad, server on 8799. The sidecars were changed with a shell, not
+through the UI — that is the case this package is about.
+
+- [x] **O1 · M** — a sidecar edited on disk
+  - do: `sed` a line into one track's `.lrc`, then open the album in the UI
+  - expect: the words are recognised as the user's at once, and the tag catches up
+  - invariant: the same `reconcile` rules as a pass (§9.21) — the UI gets no special ones
+  - evidence: the panel badge; the plan; the tag
+  - **result:** pass — the row's panel read *Priest · with timestamps* with the **yours** badge, the
+    hand-added line first, and only "Edit" offered (the per-track lookups withdraw for a user's
+    words). One job, "Check the lyrics of Judas (Deluxe Digital Edition)", then carried the line
+    into the `LYRICS` tag
+
+- [x] **O2 · M** — a sidecar deleted on disk
+  - do: `rm` another track's `.lrc`, open the album again
+  - expect: the ♪ goes faint, the status becomes `none`, the grid count follows
+  - evidence: the row's button class; the plan; `/api/state`
+  - **result:** pass — `synced` → `none`, `lyrics_sha` cleared, the ♪ button gained the `empty`
+    class, and the album's grid count went 30 → 29 once the job had saved the plan
+
+- [x] **O3 · R** — an album that agrees with its files
+  - do: open an unchanged album three times
+  - expect: no job, and not a byte written
+  - invariant: the check must be free when there is nothing to fix, or it would rewrite tags for a
+    living
+  - evidence: job count; every file's mtime
+  - **result:** covered offline in `test_web.py` — three opens, no new job, every mtime unchanged
+
+- [x] **O4 · R** — the cost
+  - do: time `/api/album` for the 56-track album, against `/api/state` as a baseline
+  - expect: bounded by the album, not the library
+  - evidence: `curl -w %{time_total}`; the browser's own measure
+  - **result:** **4–5 ms** for `/api/album` (five runs) against 2–3 ms for `/api/state`, so the
+    reconcile costs about 2 ms for 56 tracks; 22 ms for the whole open measured in the page. The
+    real library's largest albums are this size, so the same figure applies there
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -914,6 +953,7 @@ through the real page.
 | 2026-09-26 | the 22 R cases | 17 | 0 in the software; 2 cases mis-specified (J8, J9) | E1, G3 and G4 deferred to the M pass. No file in the real library changed. |
 | 2026-09-26 | the M cases (A–E, H, J) | 28 | 3 real faults, 1 case impossible as written | The faults: a trim re-cut from the previous format's original and corrupted the file (B6/B7); a failed trim was recorded nowhere (I4); prune left the kept original behind (E5). E7 failed as written — a fetch did not unify the spelling. Scratch library only. |
 | 2026-09-26 | the D cases (D3, E6, F1–F3, C6) | 6 | 0 | All in the scratch library, after the plan-file backup described above. E6 was observe-only on instruction and is now run to a conclusion; C6 confirmed the unmarked-sidecar overwrite it predicted, which P2 then changed. |
+| 2026-09-26 | the O cases (opening an album asks the disk) | 4 | 0 | Sidecars changed with a shell, on a 56-track album; the open costs about 2 ms more than before. |
 | 2026-09-26 | the N cases (a way back from an edit) | 5 | 0 | Both field resets and the order flag driven through the page; the following update put the source's order back. |
 | 2026-09-26 | the M cases (the fetch preview) | 5 | 1 blemish (M4, the absolute path), fixed | Run over an empty scratch library so "writes nothing" was observable. The preview already existed; the work was making it the outcome. |
 | 2026-09-26 | the L cases (repair from the web UI) | 3 | 0 | Scratch library with two spellings of one artist; the shouted folder was gone afterwards. Nothing measured on the real library: repair is a no-op there today (I-014, I-015). |

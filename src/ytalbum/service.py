@@ -19,7 +19,17 @@ from typing import Any
 from .config import Config
 from .download import PARTS_DIR, PLAN_FILE, find_plan, iter_plans, load_plan, relocate, run, save_plan
 from .enrich import enrich
-from .lyrics import Lrclib, LyricsAPI, remove_sidecar, sidecar_lost, status_of, update_track, user_owns, write_sidecar
+from .lyrics import (
+    Lrclib,
+    LyricsAPI,
+    reconcile,
+    remove_sidecar,
+    sidecar_lost,
+    status_of,
+    update_track,
+    user_owns,
+    write_sidecar,
+)
 from .lyrics import default_cache_path as lyrics_cache_path
 from .mb import MusicBrainz, default_cache_path
 from .models import AlbumPlan, Kind, PlanTrack, Provenance, SourceRef
@@ -515,6 +525,30 @@ class Service:
         save_plan(plan, album_dir)
         # retag through the ordinary pass, with no lyrics client: it rewrites the LYRICS tag from
         # the sidecar as every pass does, and downloads nothing
+        run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False)
+        save_plan(plan, album_dir)
+        return Outcome("ok", plan, album_dir)
+
+    def sync_lyrics(self, source_id: str) -> Outcome:
+        """Make the plan agree with the `.lrc` files beside the tracks, and the tags with the plan.
+
+        The same `reconcile` the passes run (§9.21), called for its own sake: the web UI asks for
+        this when an album is opened and the two had drifted apart — a sidecar edited or deleted
+        outside ytalbum. Nothing is looked up and nothing is downloaded.
+        """
+        found = self.find_album(source_id)
+        if not found:
+            return Outcome("failed", message=f"unknown album {source_id}")
+        album_dir, plan = found
+        changed = [t for t in plan.tracks
+                   if t.state == "done" and reconcile(album_dir, t, album_dir / t.filename)[1]]
+        if not changed:
+            self.log("the lyrics beside these tracks are what the plan says they are")
+            return Outcome("ok", plan, album_dir)
+        for t in changed:
+            mine = " — yours from now on" if t.provenance.get("lyrics") == Provenance.USER else ""
+            self.log(f"{t.title}: {t.lyrics}{mine}")
+        save_plan(plan, album_dir)
         run(plan, album_dir, self.yt, on_track=self.on_track, check=self.check, download=False)
         save_plan(plan, album_dir)
         return Outcome("ok", plan, album_dir)

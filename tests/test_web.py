@@ -1075,3 +1075,89 @@ def test_repair_unifies_an_album_artist_that_was_reset(tmp_path, opus_template):
     save_plan(plan, tmp_path / second.folder)
     repair_service(tmp_path, opus_template).repair()
     assert {p.albumartist for _, p in iter_plans(tmp_path)} == {"My Dark Lullabies"}
+
+
+# -- opening an album tells the truth about its lyrics (P13, DESIGN.md §9.30) --------------
+
+
+def opened(app, c, album_id):
+    """Open the album the way the view does, and wait for whatever it set going."""
+    got = c.get(f"/api/album?id={album_id}").json()
+    for job in app.jobs.recent(5):
+        if job.kind == "lyrics" and job.state in ("queued", "running"):
+            wait(c, job.id)
+    return got
+
+
+def test_a_sidecar_edited_on_disk_becomes_yours_when_the_album_is_opened(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    track = app.album(album_id)[1].tracks[0]
+    sidecar_of(app, album_id, track).write_text(MINE + "\n")
+    jobs_before = len(app.jobs.recent(50))
+
+    view = opened(app, c, album_id)
+    shown = next(t for t in view["tracks"] if t["video_id"] == track.video_id)
+    assert shown["provenance"]["lyrics"] == "user"  # the view says so at once
+    assert len(app.jobs.recent(50)) == jobs_before + 1  # and one job makes it durable
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert fresh.provenance["lyrics"] == "user"
+    assert tagged_of(app, album_id, fresh) == MINE  # the tag followed the file
+
+
+def test_a_sidecar_deleted_on_disk_stops_being_claimed_when_the_album_is_opened(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    track = app.album(album_id)[1].tracks[0]
+    sidecar_of(app, album_id, track).unlink()
+
+    view = opened(app, c, album_id)
+    shown = next(t for t in view["tracks"] if t["video_id"] == track.video_id)
+    assert shown["lyrics"] == "none"  # no ♪ for words that are gone
+    fresh = next(t for t in app.album(album_id)[1].tracks if t.video_id == track.video_id)
+    assert (fresh.lyrics, fresh.lyrics_sha) == ("none", None)
+    assert tagged_of(app, album_id, fresh) is None
+    assert app.albums()[0]["lyrics"] == len(app.album(album_id)[1].tracks) - 1  # the grid count follows
+
+
+def test_opening_an_album_that_agrees_with_its_files_writes_nothing(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    album_dir = app.album(album_id)[0]
+    before = {p.name: p.stat().st_mtime_ns for p in album_dir.iterdir() if p.is_file()}
+    jobs_before = len(app.jobs.recent(50))
+
+    for _ in range(3):
+        c.get(f"/api/album?id={album_id}")
+    assert len(app.jobs.recent(50)) == jobs_before  # no job, three times over
+    assert {p.name: p.stat().st_mtime_ns for p in album_dir.iterdir() if p.is_file()} == before
+
+
+def test_a_track_without_a_file_is_not_reconciled(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    album_dir, plan = app.album(album_id)
+    plan.tracks[0].state, plan.tracks[0].lyrics = "pending", "synced"  # a claim with no file at all
+    save_plan(plan, album_dir)
+    jobs_before = len(app.jobs.recent(50))
+
+    view = opened(app, c, album_id)
+    assert view["tracks"][0]["lyrics"] == "synced"  # left alone: reconcile only judges done tracks
+    assert len(app.jobs.recent(50)) == jobs_before
+
+
+def test_opening_twice_in_a_row_does_not_queue_two_jobs(lyrics_server):
+    app, c, _ = lyrics_server
+    album_id = app.albums()[0]["id"]
+    wait(c, c.post("/api/lyrics", json={"id": album_id}, headers=HDR).json()["job"]["id"])
+    track = app.album(album_id)[1].tracks[0]
+    sidecar_of(app, album_id, track).write_text(MINE + "\n")
+
+    held = app.jobs.submit("lyrics", "a long pass", lambda s: time.sleep(1.5), target=album_id)
+    jobs_before = len(app.jobs.recent(50))
+    c.get(f"/api/album?id={album_id}")
+    assert len(app.jobs.recent(50)) == jobs_before  # that album is already in hand
+    wait(c, held.id)

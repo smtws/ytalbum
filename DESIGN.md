@@ -754,6 +754,24 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    field — 38 album artists, 20 years, 15 user orders, 3 album names — and 83 tracks (73 artists,
    17 titles). Every one of them has an `auto` value behind it, so every one is resettable.
 
+30. ✅ Opening an album asks the disk (2026-09-26, backlog item 6). Ownership of an edited `.lrc`
+   and the status of a deleted one were only noticed when some pass walked the album, so between
+   passes a row could show ♪ for words that were no longer there — safe, because `reconcile` runs
+   before anything overwrites a file (§9.21), but a user would call it a bug. `/api/album` now runs
+   the same `reconcile` for every done track before it answers, so the view is the truth as soon as
+   it is drawn; when it found something, one write job saves the plan and brings the tags along,
+   with the album in `Job.target` so it queues behind anything already working on it. When plan and
+   files agree — the normal case — nothing is written and no job exists, which is the property worth
+   testing: three opens of an unchanged album leave every file's mtime untouched.
+   The grid is deliberately *not* reconciled: 246 albums would be stat-ed on every render of a page
+   that polls. Its counts come from the plans, so they catch up when an album is opened, which is
+   the moment a user is looking at that album anyway.
+   Cost, measured on the 56-track album (30 of them with lyrics): one `stat` per done track, plus
+   reading the sidecar where there is one and the audio's tag where a sidecar has no recorded hash.
+   `/api/album` answers in **4–5 ms** against 2–3 ms for `/api/state`, so the check costs about 2 ms
+   for 56 tracks; the whole open, measured in the browser, is 22 ms. It is bounded by the album, not
+   by the library, which is why the grid is left out of it.
+
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 
 - **Fix wrong data where it enters,** not where it shows up. If a number is wrong on a
