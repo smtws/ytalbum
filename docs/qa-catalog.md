@@ -1073,6 +1073,64 @@ themselves are the harness's own evidence.
     imports `./logic.mjs?v=d65eda03de`; touching the module took it to `05175a0217` **and** `app.js`
     from `fbce9445f5` to `a3cd1aeba3`, then both restored
 
+## S. Four layout defects in the track rows (P20)
+
+Reported by the user from real use on v0.3.0, with an annotated screenshot — four red circles, left
+to right. Checked after the fix in all three row states (plain, selected, playing), at 1184 and 1280,
+and on a two-disc album.
+
+- [x] **S1 · R** — the grip broke the line
+  - was: `⋮⋮` sat *above* the position field, so the cell was two lines tall and the whole row grew
+  - cause: the grip and an `input.num` at `width: 100%` in the same cell — the input took the line
+  - now: both in a `.cell-row` flex box; the grip's centre and the number's centre are the same pixel
+    (369 in the check), the cell is one line of 38 px inside a 49 px row
+  - **result:** pass
+
+- [x] **S2 · R** — the trim cell sat higher than the rest
+  - was: the two time fields, the gap figure and the ⇉ button floated above the row's other content
+  - cause: **`td.trim { display: flex }`** — a `display: flex` on a `<td>` stops it being a table
+    cell, so it no longer shares the row's height or its vertical alignment
+  - now: the cell is a table cell again and the flex row is inside it; the trim field's centre and
+    the title field's centre are the same pixel
+  - **result:** pass
+
+- [x] **S3 · R** — the highlight had a gap
+  - was: on the playing row the band broke off under the trim cell, so the row read as two pieces
+  - cause: the same `display: flex` — the cell's box was its content's height, not the row's, so the
+    row background did not reach across it
+  - now: all eight cells report the same `y`, the same height (49) and the same background
+  - **result:** pass, and S2 and S3 were one defect with two faces
+
+- [x] **S4 · R** — the ✓ ♪ ✕ cluster was cramped
+  - was: ~18 px targets, touching, with room going spare to the right
+  - now: 28 × 28 each with .35 rem between them (measured: ♪ at x=1117, ✕ at x=1150, both 28 × 28)
+  - **result:** pass
+
+- [x] **S5 · R** — on a highlighted row the controls lost their edges
+  - was: the ♪, the ⇉ and the ✕ kept only their glyphs on the playing row; their borders vanished
+    into the highlight
+  - cause: `--line` is chosen against the panel, and the band sits on top of it. **Measured, with the
+    translucent band composited over what is behind it:** in dark the band is `48,44,68` and a
+    control's border `46,43,54` → **1.03**; in light the band is `234,230,250` and the border
+    `226,223,232` → **1.08**; the delete button's border is transparent by design → **1.00**. No
+    boundary at all, in either theme — worse than reported, which had it as a dark-mode fault
+  - now: on a highlighted row the borders follow the foreground — **4.66** in dark and **4.51** in
+    light, past the 3:1 that WCAG 1.4.11 asks of a control's boundary
+  - **result:** pass. And the reviewer's assumption about the lyrics panel is **wrong in a useful
+    way**: the panel row does not inherit the band (measured backgrounds `31,29,37` dark and
+    `255,255,255` light, i.e. the plain panel), so opening it from a highlighted row changes nothing.
+    What the same measurement *did* show is reported below rather than fixed here
+  - *my own measurement lied first:* the first pass parsed `color(srgb 0.6 0.52 1 / 0.14)` as if the
+    floats were 0–255 and reported 1.51 and 15.92 — plausible numbers, both wrong. A contrast figure
+    is worthless unless the parser handles the colour space and composites the alpha
+
+- [x] **S6 · R** — what the fix itself broke, found while looking
+  - the position field was 2.6 rem with .6 rem side padding: its own value overflowed its box
+    (`scrollWidth` 43 vs `clientWidth` 40) and a two-digit number would have been clipped — a 56-track
+    album has those. Now 3 rem with tighter side padding; `7`, `12` and `56` all fit exactly
+  - **result:** pass. Caught by measuring rather than by looking, which is the complement to the
+    entry below
+
 ## Results
 
 | Date | Cases run | Passed | Failed | Notes |
@@ -1094,9 +1152,16 @@ themselves are the harness's own evidence.
 
 ### Evidence methods that lied
 
-Six of my own checks produced a false result, or none at all, before the software did anything
+Seven of my own checks produced a false result, or none at all, before the software did anything
 wrong. Use these forms:
 
+- **A layout check needs a picture *and* a measurement, and neither finds the other's faults.**
+  P15 added the grip and P17 photographed the rows; both passed. The grip was sitting above the
+  position field in the very image that was approved (docs/screenshots/album.jpg, P17), and nobody
+  saw it — a row one line taller looks like a row. It took a user working in the UI to notice.
+  Measuring found the opposite kind: the position field's value overflowing its box by three pixels,
+  invisible at 7 tracks and a clipped digit at 56. Photograph it to see what is ugly, measure it to
+  see what is wrong.
 - **A DOM assertion proves an element exists, not that anyone can see it.** P12's reset affordance
   was checked by `outerHTML`, `textContent`, class names and the plan after the click — all passing,
   all blind to contrast. `button.badge.reset` inherited the button default's accent *background*

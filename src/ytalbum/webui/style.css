@@ -146,11 +146,15 @@ tr.changed td { animation: flash 2.4s ease-out; }
 .card:hover .card-play, .card:focus-within .card-play, .card-play:focus-visible { opacity: 1; transform: none; }
 @media (hover: none) { .card-play { opacity: 1; transform: none; } }
 td.play { width: 2rem; }  /* its own cell, so showing the button on hover moves nothing */
-td.num { width: 4rem; }
-input.num { width: 100%; }
+td.num { width: 4.6rem; }
 .row-play { visibility: hidden; padding: .15rem .45rem; font-size: .75rem; background: var(--accent); color: var(--accent-ink); }
 tr:hover .row-play, .row-play:focus-visible { visibility: visible; }
 tr.playing td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* `--line` is chosen against the panel, and the highlight band sits on top of it: measured, a
+   control's edge against the band is 1.03 in dark and 1.08 in light — no boundary at all, leaving
+   a floating glyph. On a highlighted row the borders follow the foreground instead, which clears
+   3:1 in both themes (WCAG 1.4.11 asks that of a control's boundary). */
+tr.playing td button, tr.playing td button.danger-text { border-color: var(--muted); }
 tr.playing td.num .n { color: var(--accent); font-weight: 700; }
 .grid-wrap { display: flex; gap: .5rem; align-items: start; }
 .grid-wrap .grid { flex: 1; min-width: 0; }
@@ -212,7 +216,16 @@ dl.info { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1re
 dl.info dt { font-weight: 600; }
 dl.info dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 40rem) { .setting { grid-template-columns: 1fr; } }
-td.trim { width: 11rem; white-space: nowrap; display: flex; gap: .25rem; align-items: center; }
+/* A `display: flex` on a <td> stops it being a table cell: it no longer shares the row's height,
+   so its content floated above the rest of the row and the row's highlight broke off under it.
+   The flex row goes *inside* the cell instead (`.cell-row`), which is also what keeps the grip
+   beside the position field rather than above it. */
+td.trim { width: 12rem; white-space: nowrap; }
+.cell-row { display: flex; gap: .25rem; align-items: center; }
+td.num .cell-row { gap: .15rem; }
+/* room for two digits beside the grip: a 56-track album has them, and the base .6rem side
+   padding plus the number spinner left the value overflowing its own box */
+td.num input.num { width: 3rem; flex: 0 0 auto; padding-left: .4rem; padding-right: .3rem; }
 td.disc { width: 4rem; }
 input.disc { width: 100%; }
 td.trim input { width: 4.6rem; }  /* padding and font stay the base ones, or the row's inputs differ in height */
@@ -224,7 +237,15 @@ td.trim .len.bad { color: var(--bad); font-weight: 600; }
 td.trim input[data-suggested="1"] { border-style: dashed; border-color: var(--accent); }
 
 /* lyrics: the marker in a track row, and the text it opens */
-button.lyr { font-size: 1.05em; line-height: 1; padding: .1rem .35rem; }
+/* ✓ ♪ ✕ at the end of a row are the things a finger goes for; they were 18 px and touching.
+   28 px square with real space between them, in the room the row already has (P15's touch work). */
+td.actions-cell { display: table-cell; }
+td.actions-cell > * { vertical-align: middle; }
+td.actions-cell .badge { margin-right: .35rem; }
+button.lyr, td.actions-cell button.danger-text {
+  min-width: 28px; min-height: 28px; padding: 0 .4rem; margin-left: .35rem;
+  font-size: 1.05em; line-height: 1;
+}
 tr.lyrics > td { padding: .2rem .5rem .6rem; }
 tr.lyrics pre {
   margin: .3rem 0 0; padding: .5rem .6rem; max-height: 16rem; overflow: auto;
