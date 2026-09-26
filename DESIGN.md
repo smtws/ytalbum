@@ -681,7 +681,10 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    file, and it drops the mark with the words, so a later `--refetch` may bring LRCLIB's version
    back exactly as deleting the file by hand does.
    The retag goes through the ordinary pass (`run(..., download=False)`, no lyrics client) rather
-   than a second tagging path, so there is one place that writes tags. The write itself is a job in
+   than a second tagging path, so there is one place that writes tags. The price is that a Save is
+   not strictly local to one track: the pass walks the album, so a trim left pending on another
+   track (one whose `ffmpeg` was missing when it was set, §9.20) is applied then — the same thing
+   any other pass would have done, reached from a new direction. The write itself is a job in
    the write lane like every other library change, and jobs now carry the album they hold
    (`Job.target`), so a save is **refused** while a pass is working on that album instead of racing
    it — a pass would retag from the very file the save is about to write. A `fetch` is named by its
