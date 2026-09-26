@@ -7,7 +7,7 @@ from ytalbum.config import Config
 from ytalbum.download import iter_plans, load_plan, run, save_plan
 from ytalbum.models import Provenance
 from ytalbum.plan import build_plan, refresh_derived
-from ytalbum.service import Service
+from ytalbum.service import Service, track_spelling
 
 
 class NoNetwork(FakeYouTube):
@@ -172,7 +172,7 @@ def harmonised(tmp_path, opus_template, library_names, own=("LORD OF THE LOST", 
         save_plan(p, tmp_path / p.folder)
     plan = build_plan(vol1())
     plan.albumartist, plan.provenance["albumartist"] = own
-    service(tmp_path, opus_template)._harmonize_artist(plan)
+    service(tmp_path, opus_template)._settle_artist(plan)  # the fetch side reads the same ranking
     return plan.albumartist
 
 
@@ -334,6 +334,71 @@ def test_repair_reaches_the_track_spelling_through_an_adopted_one(tmp_path, opus
     service(tmp_path, opus_template).repair()
     assert all(p.albumartist == LOTL for _, p in iter_plans(tmp_path))
     assert not (tmp_path / "LORD OF THE LOST").exists()
+
+
+def test_three_spellings_converge_in_one_pass(tmp_path, opus_template):
+    """Repair used to settle each album against the library as stored, so it needed two passes."""
+    def shout(plan):
+        plan.kind, plan.source_id, plan.album = "album", "PL-shout", "Album shout"
+        plan.albumartist, plan.provenance["albumartist"] = "LORD OF THE LOST", Provenance.YT_TITLE
+        for t in plan.tracks:
+            t.artist, t.provenance["artist"] = "LORD OF THE LOST", Provenance.YT_TITLE
+
+    tmp_path, _ = library_with(tmp_path, opus_template, shout)
+    for source_id, album, name, prov, track, track_prov in (
+        ("PL-title", "Album title", "Lord Of The Lost", Provenance.YT_TITLE, "Lord Of The Lost", Provenance.YT_TITLE),
+        ("PL-mb", "Album mb", "LORD OF THE LOST", Provenance.YT_TITLE, LOTL, Provenance.MB),
+    ):
+        p = build_plan(vol1())
+        p.kind, p.source_id, p.album = "album", source_id, album
+        p.albumartist, p.provenance["albumartist"] = name, prov
+        for t in p.tracks:
+            t.artist, t.provenance["artist"] = track, track_prov
+        refresh_derived(p)
+        run(p, tmp_path / p.folder, FakeYouTube(opus_template))
+        save_plan(p, tmp_path / p.folder)
+
+    service(tmp_path, opus_template).repair()
+    assert {p.albumartist for _, p in iter_plans(tmp_path)} == {LOTL}  # the MB track evidence wins
+    assert sorted(d.name for d in tmp_path.iterdir() if d.is_dir()) == [LOTL]
+
+    second = service(tmp_path, opus_template).repair()  # and the pass after it has nothing to do
+    assert second == []
+
+
+def test_a_user_spelling_is_left_alone_and_does_not_pull_the_others(tmp_path, opus_template):
+    def mine(plan):
+        plan.kind, plan.source_id, plan.album = "album", "PL-mine", "Album mine"
+        plan.albumartist, plan.provenance["albumartist"] = "LORD of the LOST", Provenance.USER
+        for t in plan.tracks:
+            t.artist, t.provenance["artist"] = LOTL, Provenance.MB
+
+    tmp_path, _ = library_with(tmp_path, opus_template, mine)
+    other = build_plan(vol1())
+    other.kind, other.source_id, other.album = "album", "PL-other", "Album other"
+    other.albumartist, other.provenance["albumartist"] = "LORD OF THE LOST", Provenance.YT_TITLE
+    for t in other.tracks:
+        t.artist, t.provenance["artist"] = LOTL, Provenance.MB
+    refresh_derived(other)
+    run(other, tmp_path / other.folder, FakeYouTube(opus_template))
+    save_plan(other, tmp_path / other.folder)
+
+    service(tmp_path, opus_template).repair()
+    saved = {p.source_id: p.albumartist for _, p in iter_plans(tmp_path)}
+    assert saved["PL-mine"] == "LORD of the LOST"  # untouched
+    assert saved["PL-other"] == "LORD of the LOST"  # and their spelling still ranks first
+
+
+def test_two_equally_common_track_spellings_are_settled_by_evidence(tmp_path, opus_template):
+    """Not by set iteration order, which hash randomisation makes differ between runs."""
+    plan = build_plan(vol1())
+    plan.albumartist, plan.provenance["albumartist"] = "LORD OF THE LOST", Provenance.MB
+    for i, t in enumerate(plan.tracks):
+        half = i < len(plan.tracks) // 2
+        t.artist = LOTL if half else "Lord Of The Lost"
+        t.provenance["artist"] = Provenance.MB if half else Provenance.YT_TITLE
+    plan.tracks = plan.tracks[: 2 * (len(plan.tracks) // 2)]  # an even split, no majority
+    assert track_spelling(plan) == LOTL
 
 
 def test_a_spelling_musicbrainz_confirmed_beats_one_from_a_video_title(tmp_path, opus_template):

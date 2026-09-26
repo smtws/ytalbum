@@ -183,21 +183,38 @@ class Service:
             return Outcome("planned", plan, album_dir)
         return self.execute(plan, album_dir)
 
-    def _harmonize_artist(self, plan: AlbumPlan) -> None:
-        """One spelling per artist in the library: 'SCHANDMAUL' and 'Schandmaul' are one folder.
+    def _decide_spellings(self) -> dict[str, tuple[str, set[str | None]]]:
+        """One spelling per artist key for the whole library, decided before anything is renamed.
 
-        This is `repair`'s side of it and weighs the album's own spelling against every other,
-        so a library converges on the best evidence it holds. A *fetch* may not do that — it
-        would rename albums it was never asked about — so it uses `_settle_artist` instead.
+        `repair` used to ask the question once per album, against the library *as stored*, so
+        an album already visited could not benefit from evidence found later: with three albums
+        in three spellings the first pass left two of them and a second pass was needed
+        (§9.23). One scan settles every key instead — and one scan is also all it costs, rather
+        than one per album. The candidates are what the library holds: every album-level
+        spelling with its provenance, plus the spelling an album's own tracks carry where
+        `track_spelling`'s guards hold, which is MusicBrainz evidence.
         """
-        if plan.provenance.get("albumartist") == Provenance.USER or not self.library or not self.library.exists():
+        candidates: dict[str, dict[str, set[str | None]]] = {}
+        for _, plan in iter_plans(self.library) if self.library and self.library.exists() else []:
+            key = text_key(plan.albumartist)
+            for name, source in ((plan.albumartist, plan.provenance.get("albumartist")), (track_spelling(plan), Provenance.MB)):
+                if name:
+                    candidates.setdefault(key, {}).setdefault(name, set()).add(source)
+        decided: dict[str, tuple[str, set[str | None]]] = {}
+        for key, names in candidates.items():
+            best = min(names, key=lambda n: spelling_rank(n, names[n]))
+            decided[key] = (best, names[best])
+        return decided
+
+    def _apply_spelling(self, plan: AlbumPlan, decided: dict[str, tuple[str, set[str | None]]]) -> None:
+        """Give this album the spelling the library decided on for its artist."""
+        if plan.provenance.get("albumartist") == Provenance.USER:
+            return  # theirs, and it still counted as a candidate for everyone else
+        chosen = decided.get(text_key(plan.albumartist))
+        if not chosen or chosen[0] == plan.albumartist:
             return
-        seen = self._spellings(plan)
-        seen.setdefault(plan.albumartist, set()).add(plan.provenance.get("albumartist"))
-        best = min(seen, key=lambda n: spelling_rank(n, seen[n]))
-        if best != plan.albumartist:
-            self.log(f"artist spelled '{best}' elsewhere in the library — using that")
-            self._adopt(plan, best, seen[best])
+        self.log(f"artist spelled '{chosen[0]}' elsewhere in the library — using that")
+        self._adopt(plan, chosen[0], chosen[1])
 
     def _settle_artist(self, plan: AlbumPlan) -> None:
         """The artist this fetch writes: the album's own tracks first, then the library's spelling.
@@ -262,13 +279,8 @@ class Service:
         album is made consistent with itself before the library is consulted, so what the
         library then weighs — and what `repair` later sees — is the better spelling.
         """
-        if plan.provenance.get("albumartist") == Provenance.USER or not plan.tracks:
-            return
-        names = [t.artist for t in plan.tracks]
-        common = max(set(names), key=names.count)
-        if text_key(common) != text_key(plan.albumartist):
-            return  # a genuinely different credit, not a spelling: never touched
-        if not any(t.artist == common and t.provenance.get("artist") == Provenance.MB for t in plan.tracks):
+        common = track_spelling(plan)
+        if not common:
             return
         if common == plan.albumartist:
             # already spelled as the tracks are — but possibly without saying where that came
@@ -468,6 +480,7 @@ class Service:
         Fixes albums downloaded before those rules existed — renames and retags only.
         """
         outcomes = []
+        decided = self._decide_spellings()  # every artist key settled before the first rename
         for album_dir, plan in list(iter_plans(self.library)) if self.library and self.library.exists() else []:
             before = (plan.albumartist, [(t.artist, t.title) for t in plan.tracks], len(plan.tracks))
             seen: set[str] = set()  # the same video listed twice in a playlist is one track
@@ -502,7 +515,7 @@ class Service:
                 if names:
                     plan.albumartist = plan.auto["albumartist"] = max(set(names), key=names.count)
             self._adopt_track_spelling(plan)  # an album that disagrees with its own tracks
-            self._harmonize_artist(plan)
+            self._apply_spelling(plan, decided)
             # a plan can be right while the folder is not: the album artist was unified
             # earlier without moving anything (fixed 2026-09-24, but the folders remain)
             misplaced = album_dir != self.library / wanted_folder(plan)
@@ -672,6 +685,29 @@ def apply_user_edits(plan: AlbumPlan, edits: dict[str, Any]) -> AlbumPlan:
     if order_changed:
         plan.provenance["order"] = Provenance.USER  # the source may not renumber this album
     return refresh_derived(plan)
+
+
+def track_spelling(plan: AlbumPlan) -> str | None:
+    """The spelling this album's own tracks carry, when it may speak for the album.
+
+    The guards are §9.23's: not an album artist the user chose, the same artist key (so case and
+    punctuation only, never a genuinely different credit), the most common track credit, and
+    MusicBrainz behind that credit. A tie between two equally common spellings is settled by the
+    evidence and then by `spelling_rank`, because `max(set(names), key=names.count)` would settle
+    it by set iteration order — which hash randomisation makes differ between runs.
+    """
+    if plan.provenance.get("albumartist") == Provenance.USER or not plan.tracks:
+        return None
+    counts = Counter(t.artist for t in plan.tracks)
+    most = max(counts.values())
+    confirmed = {t.artist for t in plan.tracks if t.provenance.get("artist") == Provenance.MB}
+    common = min(
+        (name for name, n in counts.items() if n == most),
+        key=lambda n: (n not in confirmed, spelling_rank(n, {Provenance.MB} if n in confirmed else set())),
+    )
+    if common not in confirmed or text_key(common) != text_key(plan.albumartist):
+        return None
+    return common
 
 
 def spelling_rank(name: str, sources: set[str | None]) -> tuple[bool, bool, bool, bool, int, str]:
