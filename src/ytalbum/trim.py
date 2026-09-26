@@ -68,16 +68,17 @@ def apply(album_dir: Path, track: PlanTrack, path: Path) -> bool:
         if not track.trimmed:
             original.unlink()  # the file on disk is untouched, so a fresh one can be taken below
     if not original.exists() or not holds(original, track.ext):
-        if not wanted:  # nothing to do and nothing kept
-            track.trimmed = None
-            return False
         if track.trimmed:
-            # the file on disk is already cut, so copying it would not give an untouched
-            # original — it would give a shorter one, and the next trim would cut that again
+            # The file on disk is cut and nothing holds what it was cut from. Copying it would
+            # not give an untouched original but a shorter one, and *clearing* the trim cannot
+            # put back what is no longer kept — so neither direction may claim to have worked.
             raise RuntimeError(
                 f"no untouched {track.ext} original is kept for this track and the file on disk is "
-                f"already cut, so there is nothing to cut from: {RETAKE}"
+                f"already cut, so it can be neither cut again nor put back: {RETAKE}"
             )
+        if not wanted:  # nothing wanted, and nothing was ever cut
+            track.trimmed = None
+            return False
         original.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, original)
         for stale in kept_originals(album_dir, track):  # the previous format's copy is dead weight

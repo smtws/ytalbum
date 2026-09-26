@@ -171,7 +171,9 @@ def run(
                 except MutagenError as e:
                     raise RuntimeError(f"downloaded file cannot be tagged: {e}") from e
                 os.replace(tmp, final)
-                track.state, track.error, track.error_kind = "done", None, None
+                # a fresh download is by definition untouched, whatever the plan said before:
+                # the trim points stay and the next pass applies them to this file
+                track.state, track.error, track.error_kind, track.trimmed = "done", None, None, None
                 break
             except NoAudioStream as e:
                 track.state = "failed"

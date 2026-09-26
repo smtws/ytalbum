@@ -529,6 +529,12 @@ PlanTrack   { video_id, number, disc, artist, title, filename, state: pending|do
    nothing, so with ffmpeg missing the plan advertised a trim that never happened and the web UI
    showed nothing at all — and a file that cannot be tagged now fails **its own track** instead
    of the album's run. Prune also gives up the kept original, as `delete_track` always did.
+   Two mirrors of the same rule came out of the review: **clearing** a trim with nothing to
+   restore from is refused as well, because a plan that calls a cut file untouched is the same
+   lie in the other direction; and a re-downloaded track gives up its `trimmed` signature,
+   since a fresh file is untouched whatever the plan said before — otherwise the trim points
+   sit there matching a signature that describes a file that no longer exists, and are never
+   applied again.
 
 ## 10. Rules for whoever implements this (lessons from the v2 loop)
 

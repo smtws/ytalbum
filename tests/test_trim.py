@@ -173,7 +173,7 @@ def test_an_original_of_another_format_is_never_cut_from(tmp_path, aac, tone):
     track.trimmed = "1.00-"  # the file on disk is already cut: nothing to take a fresh one from
     track.trim_start = 2.0
 
-    with pytest.raises(RuntimeError, match="nothing to cut from"):
+    with pytest.raises(RuntimeError, match="neither cut again nor put back"):
         apply(tmp_path, track, path)
     assert path.read_bytes() == aac.read_bytes(), "the audio must be left alone"
 
@@ -272,3 +272,48 @@ def test_one_unreadable_file_fails_its_own_track_only(tmp_path, opus_template):
     assert "cannot be tagged" in (saved.tracks[1].error or "")
     assert (2, "failed") in events
     assert [t.state for t in saved.tracks] == ["done", "failed", "done"], "the others are untouched"
+
+
+def test_clearing_a_trim_with_nothing_to_restore_from_is_refused(tmp_path, tone):
+    """The mirror of the refusal above: the plan must not call a cut file untouched."""
+    plan = build_plan(vol1())
+    track = plan.tracks[0]
+    path = tmp_path / track.filename
+    shutil.copy(tone, path)
+    track.trim_start = 2.0
+    apply(tmp_path, track, path)
+    cut = path.read_bytes()
+    for kept in (tmp_path / ORIGINALS).glob("*"):
+        kept.unlink()  # the originals folder is gone, the file stays cut
+
+    track.trim_start = None
+    with pytest.raises(RuntimeError, match="neither cut again nor put back"):
+        apply(tmp_path, track, path)
+    assert path.read_bytes() == cut, "the audio is left alone"
+    assert track.trimmed == "2.00-", "and the plan still says what the file really is"
+
+
+def test_a_re_downloaded_track_does_not_inherit_the_old_trim_state(tmp_path, opus_template):
+    """A tagging failure re-downloads the track; the fresh file is untouched, so `trimmed` must be."""
+    plan = build_plan(vol1())
+    plan.tracks = plan.tracks[:1]
+    album_dir = tmp_path / "album"
+    yt = FakeYouTube(opus_template)
+    run(plan, album_dir, yt)
+    plan.tracks[0].trim_start = 0.2
+    run(plan, album_dir, yt)
+    assert load_plan(album_dir).tracks[0].trimmed == "0.20-"
+
+    (album_dir / plan.tracks[0].filename).write_bytes(b"not audio")  # make the tagging fail
+    plan.tracks[0].tagged = None
+    run(plan, album_dir, yt, download=False)
+    assert load_plan(album_dir).tracks[0].state == "failed"
+
+    run(plan, album_dir, yt)  # it is fetched again
+    saved = load_plan(album_dir)
+    assert saved.tracks[0].state == "done"
+    assert saved.tracks[0].trimmed is None, "the fresh file is untouched"
+    assert saved.tracks[0].trim_start == 0.2, "and the request is still there"
+
+    run(plan, album_dir, yt, download=False)  # the following pass applies it
+    assert load_plan(album_dir).tracks[0].trimmed == "0.20-"
