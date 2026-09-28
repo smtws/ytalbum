@@ -1661,7 +1661,7 @@ wheels = [
 
 [[package]]
 name = "ytalbum"
-version = "0.9.0"
+version = "0.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "bgutil-ytdlp-pot-provider" },

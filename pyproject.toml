@@ -1,6 +1,6 @@
 [project]
 name = "ytalbum"
-version = "0.9.0"
+version = "0.9.1"
 description = "Turn YouTube playlists into properly tagged Opus albums"
 authors = [
     { name = "Tordt", email = "info@smt-webservices.de" }
