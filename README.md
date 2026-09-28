@@ -3,6 +3,17 @@
 [![tests](https://github.com/smtws/ytalbum/actions/workflows/tests.yml/badge.svg)](https://github.com/smtws/ytalbum/actions/workflows/tests.yml)
 [![licence: MIT](https://img.shields.io/badge/licence-MIT-6b4fd8)](LICENSE)
 
+> ### ytalbum is now **noaap** — <https://github.com/smtws/noaap>
+>
+> Same program, same history, new name (*Not Officially An Audio Player*). **0.9.1 is the last
+> release under this name** and this repository is archived; everything after it happens there.
+>
+> **Nothing has to be converted.** noaap writes the same `.ytalbum.json` — that file is the
+> format's name, not the program's — so a library moves across untouched, and ytalbum 0.9.0 can
+> still read a library noaap has written to. On this machine it also reads
+> `~/.config/ytalbum/config.toml` and accepts every `YTALBUM_*` variable, each with one line of
+> notice; `noaap migrate` ends the borrowing and removes nothing of ytalbum's unless asked.
+
 Turn YouTube playlists into properly tagged albums: correct artist and title per track,
 album art, MusicBrainz data where it exists, and the audio copied without re-encoding.
 Comes with a command line and a small web app for the library.

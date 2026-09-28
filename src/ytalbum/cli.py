@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import NOTICE
 from . import config as config_mod
 from .config import Config
 from .download import PLAN_FILE
@@ -122,6 +123,11 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--lyrics", choices=("on", "off"), help="look lyrics up at lrclib.net when downloading")
 
     args = p.parse_args(argv)
+    # stderr, so a piped stdout stays byte-identical to 0.9.0 — and suppressed, because the
+    # least important line in the program must not be able to change what a command returns
+    # (`recycle list | head` closes a pipe under us, and this runs before anything guards it).
+    with contextlib.suppress(BrokenPipeError, OSError, ValueError):
+        print(NOTICE, file=sys.stderr)
     sys.stdout.reconfigure(line_buffering=True)  # keep progress in order with stderr when piped
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)

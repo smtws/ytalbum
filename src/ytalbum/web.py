@@ -1043,6 +1043,8 @@ def serve(cfg: Config, library: Path, host: str = "127.0.0.1", port: int = 8765,
         app.host, app.port = sock.getsockname()[:2]
     server = app.make_server(sock)
     shown = "localhost" if app.host in ("127.0.0.1", "::1") else app.host
+    # the notice is not repeated here: every route into `serve` goes through `cli.main`, which
+    # already said it — including the systemd unit, whose ExecStart is the console script
     print(f"ytalbum: http://{shown}:{app.port}/  (library {library})" + (" [socket-activated]" if sock else " — Ctrl+C to stop"), flush=True)
     if app.host in ("0.0.0.0", "::"):
         print("warning: reachable from your network without a login — anyone there can start downloads")

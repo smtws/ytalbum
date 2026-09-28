@@ -30,6 +30,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from . import user_agent
 from .models import AlbumPlan, PlanTrack, Provenance
 from .tag import audio_length, tagged_lyrics
 from .text import key as text_key
@@ -40,7 +41,7 @@ log = logging.getLogger(__name__)
 # is what it exists for — a server that speaks lrclib's documented shapes, so that publishing can be
 # exercised end to end without putting test words into a public database (§9, slice 42).
 BASE = (os.environ.get("YTALBUM_LRCLIB_BASE") or "https://lrclib.net/api").rstrip("/")
-USER_AGENT = "ytalbum/0.1 ( https://github.com/smtws/ytalbum )"
+USER_AGENT = user_agent()
 HIT_TTL = 30 * 24 * 3600
 MISS_TTL = 7 * 24 * 3600
 TOLERANCE = 3.0  # seconds a candidate's length may differ from ours (YouTube pads, we trim)

@@ -17,12 +17,13 @@ from typing import Any, Protocol
 
 import httpx
 
+from . import user_agent
 from .text import key as text_key
 
 log = logging.getLogger(__name__)
 
 BASE = "https://musicbrainz.org/ws/2"
-USER_AGENT = "ytalbum/0.1 ( https://github.com/Tordt/YT-Downloads )"
+USER_AGENT = user_agent()
 HIT_TTL = 30 * 24 * 3600
 MISS_TTL = 3600
 
